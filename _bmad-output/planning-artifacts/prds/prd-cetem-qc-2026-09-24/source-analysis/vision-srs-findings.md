@@ -1,0 +1,39 @@
+# Vision v0.8 / SRS v0.7 source analysis
+
+Scope: full body text of the two documents, read from DOCX XML. No PRD drafted. Source snapshots: `01-vision-et-perimetre-revise-v0.8.txt`, `03-exigences-srs-revise-v0.7.txt` (UTF-8).
+
+User authority already resolves AI summary inclusion in Phase 1 and PoV purpose. Do not re-open it.
+
+## Material decisions / conflicts to compare with other five sources
+
+1. **When does the official report become final, and is a signed copy required?** Vision §9 explicitly leaves open “la nécessité éventuelle de réintégrer une copie numérisée du rapport signé”; SRS VAL-006 repeats “Confirmer si une copie numérisée du rapport signé doit être réintégrée au système.” FR-035 requires “un seul rapport officiel” and “Après l’état Terminé, toute correction exige un nouveau contrôle.” FR-041 requires a printable report for handwritten signature; DEC-018 specifies generated Word printed and signed. Need determine whether generated unsigned Word itself ends the software workflow, or signed scan must precede termination/replace official artifact. Uploaded PDF provenance/content obligations also need reconcile with DR-007 requiring insight provenance retrievable “dans le rapport final” and FR-034 accepting externally produced PDFs.
+
+2. **Approved business baseline is a dependency, not yet detailed here.** Vision §8: “La qualité des calculs dépend de la validation formelle des formules et seuils issus de la fiche CETEM BH.” SRS FR-018 defers exact fields/unit/format/validation to “la spécification métier approuvée”; FR-025 defers to “jeux d’essai métier approuvés”; VAL-004 explicitly requires formulas, units, tolerances, rounding approval. §9 says Word template, mandatory metadata and signature rules must be approved before final acceptance. These two docs do not contain the complete checklist, rule catalogue, deterministic insight catalogue, or Word template. Ask which existing reference/approved values will govern, if not supplied elsewhere; do not invent measurements or thresholds.
+
+3. **Offline insights: timing and actor visibility conflict.** FR-028: “Après soumission, le système doit proposer des constats factuels”; FR-042: “La saisie, les calculs requis et les insights restent disponibles hors ligne.” Vision §6.2 gives Employé calculated values/verdicts pre-submission but no insight management; §7 and FR-029 give Responsable selection after submission. Can employee see deterministic insights while offline before submission, or does FR-042 merely require local computation without visibility? This affects the tablet scope; do not silently drop FR-042.
+
+4. **Offline submission freeze point and conflict resolution remain underspecified.** FR-021 synchronizes “les brouillons et soumissions en attente”; FR-023 success makes state Soumise and Responsable able to consult; FR-024 freezes “Après soumission réussie”; SRS §2.1 says “synchroniser puis soumettre”. Vision §6.2 lists submit, synchronize, then final submit. Need settle whether offline submit immediately locks a pending version or only server acceptance locks it. FR-022 says show information to “choisir l’action autorisée”; DEC-014 says warn before overwrite, but neither specifies permitted resolution choices. Ask concrete policy; do not assume merging, automatic winner, or data discard.
+
+5. **Correction after submission, before finalization.** FR-024: read-only “sauf mécanisme de réouverture approuvé ultérieurement”; FR-031 forbids Responsable editing; FR-038 has no acceptance/rejection step; FR-035 requires new control only expressly after Terminé. If Responsable finds an erroneous measurement during review, remaining route before finalization is not defined. Need confirm whether new control is the only correction path then as well. No reopening/rejection feature should be inferred.
+
+6. **Old approval language survives deleted approval step; tracking event unclear.** Vision §4.1 says “Après validation de l’audit”; §7/DEC-012 and SRS DR-005 retain identity/date of “approbation”. Latest DEC-017/FR-038 explicitly remove validation/rejection of employee work. Ask whether approval trace means summary confirmation, machine decision, or report finalization; latest flow removes audit validation already. State tables omit a distinct Machine decision state while DEC-009 names it; can be clarified with the same lifecycle question without arguing labels.
+
+7. **Offline security/account deactivation interaction unresolved.** FR-005 blocks disabled account login; SEC-006 requires session expiry and immediate invalidation after deactivation; SEC-007 protects local drafts and makes them inaccessible after logout “selon la politique retenue”; FR-020/NFR-001 promise offline operation and persistence. VAL-003 leaves inactivity duration open. Ask allowed duration of offline access and handling of unsynced drafts after expiration/logout/deactivation. Does not require adding remote administration features; it is the existing safety/availability rule boundary.
+
+8. **Acceptance environment/targets explicitly unapproved.** VAL-001 requires approval of NFR-003–005 (web p95 <3s; local draft save <1s; reports 95% <30s), VAL-002 browser/tablet matrix, VAL-003 session/attachments, VAL-005 PDF max size. These are marked Proposed, not automatic commitments. Need distinguish PoV pass/fail targets from later operational targets and identify demo tablet/browser. Can ask grouped question, retain deferred decisions explicitly if user chooses.
+
+9. **Live-task account deactivation boundary.** SRS §2.3 says task assigned to one “Employé actif à un instant donné”; FR-005 permits disabling employee, denies new assignments and keeps old tasks visible, but says nothing about existing active task/offline work. Clarify whether block deactivation with unfinished tasks or define handling. No reassignment feature is specified in these two documents, so do not invent it.
+
+## Lower-priority gaps / avoid overloading first clarification
+
+- AI failure fallback is unspecified: FR-032 asks for AI-generated summary, FR-033 bars report without confirmed summary; no manual-only path if service unavailable. Can retain as later explicit decision unless PoV acceptance needs failure behavior now.
+- FR-031 allows synthesis changes until confirmation; no rule for revising selection/summary after confirmation but before machine decision/report. Do not add unlock/versioning workflow implicitly.
+- FR-019 allows deleting employee draft, while task remains assigned; deletion/reset effect on task is not described.
+- FR-013 logs Responsable access while Vision excludes exhaustive business audit. This is bounded traceability, not necessarily a conflict; distinguish from DR-005 obsolete approval wording.
+
+## Already settled / editorial only
+
+- Onboarding Q-011 is resolved by SRS §2.4, FR-004 and SEC-012: temporary password, mandatory first-use change before tasks. Vision saying integration open is stale; no need to ask mechanism again. Delivery channel not fully specified but SRS §2.3 expects email onboarding.
+- AI generation is confirmed and human-limited by latest Vision/SRS/user; DEC-002 excludes free generative decision-making, not this constrained summary.
+- Source metadata lags (Vision header September 19 vs v0.8 history September 23; SRS refs Vision v0.7); duplicated SEC-011 IDs and stale traceability mappings are document hygiene fixes, not product decisions.
+- Manual upload is PDF only; automatic generated output is Word only; Graphie fixed visible disabled; Scopie unavailable; no self-assignment; historical completed audits immutable. Do not re-open these without actual conflicting source evidence.

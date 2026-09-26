@@ -1,0 +1,209 @@
+1. Obsolete audit approval
+
+Remove the obsolete "validate/reject employee work" action, state, and associated report fields.
+
+The latest workflow should not contain a separate approval of the employee's work after submission.
+
+After submission:
+- the submitted measurements are immutable;
+- the Responsable reviews the audit results;
+- the Responsable selects/adds insights;
+- the Responsable confirms the summary;
+- the Responsable makes the machine conformity decision;
+- the Responsable finalizes/designates the official report.
+
+For DR-005, retain actor/date traceability for:
+- audit submission;
+- summary confirmation;
+- machine conformity decision;
+- official report finalization/designation.
+
+Do not create a separate "audit approval" event.
+
+
+2. Employee accounts and task initiation
+
+For the PoV, implement the account operations necessary to demonstrate the workflow:
+- Responsable creates an employee account;
+- employee receives/uses initial credentials;
+- employee authenticates;
+- Responsable can activate/deactivate the employee.
+
+Do not expand the PoV into complete identity administration beyond what is necessary for the demonstration.
+
+An Employé must NOT initiate an unassigned control in Phase 1.
+Controls originate from tasks assigned by the Responsable.
+
+If an employee is deactivated:
+- no new login or new work is allowed;
+- existing tasks and historical audit data must not be deleted;
+- unfinished assigned tasks remain visible to the Responsable for reassignment/handling.
+
+The exact reassignment behavior can be finalized during detailed workflow design.
+
+
+3. Offline submission and conflicts
+
+For the PoV, treat an audit as being actively edited from one tablet at a time. Full multi-device collaborative synchronization is out of scope.
+
+The employee may complete the audit offline and request submission while offline.
+
+However, offline "submission" should be represented locally as pending synchronization. Server-side submission becomes authoritative only after successful synchronization/server acceptance.
+
+Until server acceptance, the local data must remain preserved.
+
+Once server acceptance succeeds:
+- the audit becomes submitted;
+- measurements become immutable.
+
+If synchronization detects that the server version has changed, do not silently overwrite either version.
+
+For the PoV:
+- preserve the local draft;
+- warn the user about the conflict;
+- require reload/reconciliation before synchronization continues.
+
+Automatic field-level merge is not required for Phase 1.
+
+
+4. Offline access and unsynchronized drafts
+
+This remains partially unresolved.
+
+For the PoV:
+- unsynchronized drafts must be stored securely on the tablet;
+- session expiry/logout must not silently delete unsynchronized audit data;
+- account deactivation must prevent future authorized synchronization/work once the server learns of the deactivation.
+
+The exact permitted offline authentication duration/session expiry remains an unresolved security configuration decision and should be recorded as such in the PRD rather than invented.
+
+Logout behavior for unsynchronized drafts also requires an explicit security/UX decision.
+
+
+5. Correcting submitted measurements
+
+Submitted measurements remain immutable.
+
+If a material measurement error is discovered after server-side submission, the submitted audit must not be edited in place.
+
+A new control/audit must be performed.
+
+The replacement should be LINKED to the original audit/task for traceability, while remaining an independent audit record with its own measurements, timestamps, calculations and outcome.
+
+The original remains preserved as historical evidence.
+
+Treat the PoV D-12 wording "independent" as meaning an independent record, not an untraceable record.
+
+
+6. Insight timing and empty selections
+
+The Employé should see:
+- entered measurements;
+- calculated values;
+- individual tolerance results.
+
+The deterministic insight proposal workflow is for the Responsable after submission.
+
+FR-042 should therefore not be interpreted as requiring the employee to perform insight review offline. Offline functionality applies to the field audit workflow and the calculations/tolerance feedback necessary to perform it.
+
+For an all-normal audit, zero selected/added insights is valid.
+
+The Responsable may confirm a summary with no selected insight. The generated/manual summary may simply describe that the control results are within the applicable tolerances.
+
+Do not require creation of an artificial insight just to enable finalization.
+
+
+7. Approved business rules
+
+Do not invent formulas, thresholds, inclusivity rules, rounding, N.A. behavior, kVmax/K2/linearity rules, or mandatory measurement fields.
+
+These require the approved CETEM BH calculation/control catalogue and reference dataset.
+
+Keep them as unresolved dependencies if the approved source is not currently present in docs/product.
+
+The application may automatically calculate:
+- derived values;
+- individual tolerance verdicts;
+- deterministic observations/insights where the rule is explicitly defined.
+
+Do NOT introduce an automatic overall machine-conformity decision.
+
+Final machine conformity remains a human decision by the Responsable.
+
+
+8. Official report and signature
+
+For the PoV, designating/finalizing the official report completes the software workflow.
+
+The report can follow either documented path:
+- system-generated Word report; or
+- manually produced PDF uploaded by the Responsable.
+
+Handwritten signature happens after the software workflow.
+
+Do not require uploading a signed scan for Phase 1 unless this is later explicitly approved as a requirement.
+
+The exact approved report template, mandatory report fields/provenance fields, and maximum PDF upload size remain unresolved dependencies and must be flagged in the PRD.
+
+The report should nevertheless preserve traceability to the relevant task/audit, Responsable, conformity decision and finalization date.
+
+
+9. AI failure behavior
+
+AI availability must not block completion of the control workflow.
+
+If AI summary generation fails:
+- the Responsable may retry generation;
+- the Responsable must also be able to write the summary manually and continue.
+
+The manually entered summary follows the same confirmation requirement as an AI-generated summary.
+
+AI remains an assistance mechanism, not a decision authority or critical workflow dependency.
+
+
+10. Evidence attachments
+
+Do not include general audit/insight evidence attachments in the Phase 1 PoV unless an existing confirmed requirement explicitly requires them.
+
+Keep this outside the PoV scope for now.
+
+The official report upload is separate and remains in scope.
+
+If evidence attachments are required later, file types, size limits, storage, security and association rules must be specified before implementation.
+
+
+11. Demonstration acceptance
+
+Do not make undocumented or unapproved targets binding simply because they appear in draft material.
+
+Use the 15-minute prepared-data demonstration as the intended PoV demonstration scenario if it is already documented as such.
+
+Keep the currently documented performance values as proposed validation targets until confirmed:
+- web response <3 seconds p95;
+- local save <1 second;
+- report generation <30 seconds.
+
+Tablet OS/browser/device matrix and exact test conditions remain unresolved and should be recorded as validation items.
+
+The business owner/Responsable-side CETEM BH representative should perform business acceptance, but the exact named acceptance authority should remain unresolved unless already documented.
+
+If CR-01 through CR-07 are referenced but their actual content is absent from the available source documents, do not reconstruct or invent them. Flag the missing complete PoV version/source as a document dependency.
+
+Proceed with the PRD using these decisions.
+
+Clearly separate:
+1. confirmed requirements;
+2. derived requirements;
+3. unresolved business/security/configuration decisions;
+4. external/reference-document dependencies.
+
+Preserve existing SRS requirement IDs for traceability wherever applicable.
+
+2026-09-25 ? superseding clarification for decision 7
+CETEM BH designates docs/product/CALCUL_graphie_01.xls as authoritative for explicitly defined Graphie Mobile formulas and calculation relationships. Preserve the workbook logic. Unspecified thresholds, inclusivity/exclusivity, rounding, N.A., mandatory/optional fields, missing kVmax/K2 rules and overall assessment rules remain unresolved. Automatic values and individual tolerance results require an explicit corresponding CETEM BH rule. Never derive automatic overall machine conformity; the Responsable makes the final human decision. See docs/product/approved-calculation-rules.md and the source-analysis formula/cell extracts.
+
+2026-09-25 — documentation correction to decision 7
+The extraction is accepted with the title Graphie Calculation Rules — CETEM BH Source Extraction. CALCUL_graphie_01.xls was supplied by CETEM BH and is the source of the derived specification; do not imply CETEM BH reviewed or approved the Markdown. Explicit formulas authorize automatic numerical calculations only. Individual tolerance/pass-fail results require the applicable formula and an explicitly established CETEM BH acceptance threshold, boundary semantics and comparison rule. Preserve traceability, SHA-256, unresolved rules, source-analysis references and human-only final conformity. Original workbook unchanged. Continue the PRD workflow. This correction supersedes earlier authority/approval wording.
+
+2026-09-25 notification scope decision
+Phase 1 requires in-app task visibility. Real email assignment notifications are deferred beyond the PoV. Keep architecture capable of adding notification channels later, but do not implement or test email delivery for Phase 1. User selected full PRD rubric review.

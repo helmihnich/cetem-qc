@@ -76,3 +76,15 @@ context:
 - false — Blind Hunter: The acceptance criterion itself requires preserving dependency direction. The inspected manifests and imports show no UI-app coupling and no package-to-app dependency.
 - low — Blind Hunter: The page metadata description was English while the document language and page copy are French. Changed the description to French.
 - false — Edge Case Hunter: The API listens on its valid default port when `PORT` is unset. A malformed explicit port fails fast instead of silently starting on a different port; the finding's suggested fallback could hide a configuration error.
+
+### Review Findings (2026-09-27)
+
+**Rejected**
+
+- false — Blind Hunter: TypeScript does not require `baseUrl` for `paths` mappings; the implementation notes also record successful app typechecks.
+- false — Blind Hunter: `@cetem-qc/config/typescript.json` is a valid package subpath that intentionally maps to `tsconfig.base.json`; consumers do not need the physical filename to match the export subpath.
+- false — Blind Hunter: Android/iOS launch scripts are optional conveniences; the required mobile development entry point is `pnpm dev:mobile`, which runs Expo without requiring a simulator.
+- low — Blind Hunter: The API `build` command performs a no-emit TypeScript check. Story 1.1 requires a runnable Express development app, not production JavaScript output; the README command still validates the API source.
+- low — Blind Hunter: An empty explicit `PORT` can select an ephemeral port. The documented default `3001` works when `PORT` is unset, and port override validation is outside this starter story's acceptance criteria.
+- low — Blind Hunter: A clean checkout may need Next.js to generate `.next/types` before invoking `pnpm typecheck`. The story requires the development app to start, and the documented flow places validation after the development-server setup; generated files are intentionally ignored.
+- low — Verification Gap: There is no automated `/health` response test. Story 1.1 does not require a test suite, and the implementation notes record a successful manual health check.

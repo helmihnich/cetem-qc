@@ -1,0 +1,270 @@
+
+Vision et périmètre du projet
+Système numérique de contrôle qualité des équipements radiologiques
+
+Version
+0.8
+Statut
+Brouillon
+Date de version
+19 septembre 2026
+Auteur
+À compléter
+Document lié
+Spécification des exigences logicielles SRS v0.7
+
+Objet du document
+Ce document définit la vision, les objectifs et les limites de la première phase du projet. Il constitue le cadre de référence commun pour la conception fonctionnelle, l’architecture, la planification et la validation de la solution.
+La Phase 1 vise à remplacer le circuit papier et Excel utilisé pour le contrôle qualité des appareils mobiles de radiographie par une solution web et tablette. La solution devra permettre la saisie hors ligne sur le terrain, l’évaluation automatique des tolérances, la préparation et la sélection d’insights, la revue par le Responsable, puis la création du rapport officiel par génération Word ou téléversement d’un document produit manuellement.
+Historique des révisions
+Version
+Date
+Modification
+0.1
+Non renseignée
+Version initiale du document de cadrage.
+0.2
+15 septembre 2026
+Résolution des hypothèses et des questions Q-006 à Q-010 par les décisions DEC-001 à DEC-014.
+0.3
+16 septembre 2026
+Ajout de DEC-015 relatif à la gestion de l’équipe par le Responsable et alignement avec la SRS v0.1.
+0.4
+19 septembre 2026
+Réécriture éditoriale, clarification du périmètre, harmonisation des termes et résolution des incohérences de présentation.
+0.5
+19 septembre 2026
+Sélection des insights avant soumission et choix entre rapport généré ou téléversé.
+0.6
+19 septembre 2026
+Séparation entre validation de l’audit et conformité de la machine, création d’une nouvelle tâche après audit non validé, PDF manuel, signature manuscrite et hors-ligne obligatoire.
+0.7
+19 septembre 2026
+Soumission des données par l’Employé, sélection ou ajout des insights par le Responsable, résumé généré par IA puis modifiable et confirmé par le Responsable.
+0.8
+23 septembre 2026
+Suppression de la validation ou du rejet du travail. Après soumission, le Responsable prépare le résumé puis décide directement si la machine est conforme ou non conforme.
+
+1 Contexte
+Le contrôle qualité des équipements radiologiques concernés par le projet est aujourd’hui réalisé au moyen de fiches papier. L’employé chargé du contrôle se rend dans l’établissement, identifie l’équipement et les instruments utilisés, réalise les vérifications visuelles et les mesures, puis consigne manuellement les résultats. Les données sont ensuite ressaisies dans un fichier Excel, que le Responsable utilise pour analyser les résultats et rédiger la conclusion du rapport.
+Le processus actuel suit donc trois étapes distinctes :
+1.  Saisie des résultats sur une fiche papier pendant le contrôle sur site.
+2.  Ressaisie des mêmes informations dans un fichier Excel.
+3.  Analyse des résultats et rédaction manuelle de la conclusion finale.
+La référence fonctionnelle de la Phase 1 est le Rapport de contrôle de qualité d’un appareil mobile de radiographie de CETEM BH. Cette fiche couvre notamment l’identification de l’équipement, les instruments de contrôle, les vérifications visuelles et mécaniques, les mesures électriques et radiologiques, ainsi que la correspondance entre le champ lumineux et le champ de rayons X.
+2 Problématique
+Le circuit papier, Excel et rédaction manuelle fragmente l’information et retarde la production du rapport. Il ne permet ni de contrôler immédiatement les seuils de tolérance ni de suivre clairement l’avancement d’un contrôle.
+Double saisie des données et perte de temps opérationnelle.
+Risque d’erreur ou d’omission lors de la transcription.
+Absence de calcul automatique des écarts et des verdicts de conformité au moment de la saisie.
+Traçabilité limitée de la soumission et de l’approbation.
+Dépendance à la disponibilité du Responsable pour analyser les résultats et finaliser le rapport.
+3 Vision et objectifs
+La solution cible doit fournir un flux numérique continu, depuis l’assignation du contrôle jusqu’à l’approbation du rapport final, tout en restant utilisable dans les environnements où la connexion réseau est absente ou instable.
+Remplacer la fiche papier par une application tablette adaptée à la saisie sur le terrain.
+Permettre au Responsable de créer, d’assigner et de suivre les tâches depuis une plateforme web.
+Calculer automatiquement les écarts, les moyennes et les verdicts de conformité à partir des règles de tolérance existantes.
+Proposer des insights factuels déterministes à partir des résultats, puis utiliser une IA uniquement pour rédiger un résumé fondé sur les insights retenus par le Responsable.
+Permettre à l’Employé de soumettre les données du contrôle, puis au Responsable de sélectionner ou ajouter les insights utilisés pour la synthèse.
+Permettre au Responsable, après réception des données, de préparer et confirmer le résumé puis de conclure directement si la machine est conforme ou non conforme et de finaliser le rapport.
+Présenter les contrôles sous forme d’étapes et de composants adaptés au tactile, sans reproduire à l’identique la mise en page papier.
+4 Périmètre de la Phase 1
+4.1 Éléments inclus
+Élément
+Périmètre retenu
+Type de contrôle
+Radiographie en mode Graphie pour appareils mobiles. La fiche CETEM BH est la référence et le formulaire est implémenté directement dans l’application conformément à DEC-010.
+Plateformes
+Plateforme web pour le Responsable et application tablette pour l’Employé.
+Fonctionnement hors ligne
+Saisie hors ligne obligatoire sur tablette, synchronisation différée et avertissement en cas de conflit avant tout écrasement conformément à DEC-014.
+Gestion des tâches
+Création, assignation à un Employé, suivi du cycle de vie, revue, approbation et clôture.
+Évaluation des résultats
+Calcul des valeurs dérivées et comparaison automatique avec les tolérances définies dans la fiche de référence.
+Rapport final
+Après validation de l’audit et décision Conforme ou Non conforme pour la machine, choix entre génération Word ou téléversement d’un PDF manuel. Le rapport généré est imprimé et signé manuellement.
+Authentification
+Connexion par email et mot de passe conformément à DEC-011.
+Gestion de l’équipe
+Création, consultation et désactivation des comptes Employés par le Responsable. L’assignation s’effectue à partir de cette liste conformément à DEC-015.
+Notifications
+Notification dans l’application et par email lors de l’assignation d’une tâche conformément à DEC-008.
+Insights, résumé et conclusion
+Après soumission des données, le système propose des constats factuels. Le Responsable sélectionne les insights pertinents ou en ajoute, puis demande à l’IA de rédiger un résumé. Il peut modifier et confirmer ce résumé avant la conclusion finale.
+
+4.2 Éléments exclus
+Élément
+Position pour la Phase 1
+Graphie fixe
+Option visible mais désactivée, en attente de la fiche de contrôle correspondante.
+Scopie
+Prévue pour une phase ultérieure.
+Génération automatique PDF
+Non requise : le système génère un Word ; le téléversement manuel accepte uniquement un PDF.
+Référentiel des établissements
+Non requis ; l’établissement et le service sont saisis en texte libre.
+Moteur générique de formulaires
+Reporté au backlog. Le formulaire Graphie mobile est développé spécifiquement pour la Phase 1.
+Journal d’audit exhaustif
+Non requis ; seules les informations de soumission et d’approbation sont conservées.
+Authentification SSO
+Non requise.
+
+5 Acteurs et responsabilités
+Acteur
+Responsabilités
+Responsable
+Examine les données soumises sans modifier les mesures. Il sélectionne ou ajoute les insights, lance la génération du résumé par IA, le modifie si nécessaire et le confirme. Il décide ensuite directement si la machine est conforme ou non conforme, puis finalise le rapport.
+Employé
+Reçoit les tâches, réalise le contrôle sur site, saisit les mesures et commentaires, sauvegarde hors ligne si nécessaire, puis soumet les données au Responsable. Il ne prépare pas la sélection finale des insights.
+
+Un Responsable peut suivre plusieurs tâches en parallèle, assignées à différents Employés. Un Employé peut également avoir plusieurs tâches actives simultanément conformément à DEC-005.
+6 Fonctionnement cible
+6.1 Parcours du Responsable sur le web
+Créer, consulter et désactiver les comptes Employés de son équipe.
+Créer une tâche, choisir le type de contrôle disponible et renseigner l’établissement et le service.
+Assigner la tâche à un Employé actif de l’équipe.
+Suivre l’état de la tâche et consulter les données soumises.
+Examiner les données et calculs soumis, puis sélectionner les insights proposés ou en ajouter manuellement.
+Demander à l’IA de produire un résumé à partir des insights retenus, modifier ce résumé si nécessaire et le confirmer.
+Après confirmation du résumé, déclarer directement la machine conforme ou non conforme, puis générer le rapport Word ou téléverser un PDF et clôturer la tâche.
+6.2 Parcours de l’Employé sur tablette
+Recevoir une notification dans l’application et par email lors de l’assignation.
+Consulter ses tâches actives et ouvrir le formulaire correspondant.
+Renseigner les informations d’identification, les instruments utilisés, les contrôles qualitatifs et les mesures quantitatives.
+Consulter les valeurs calculées et les verdicts avant de soumettre les données.
+Soumettre les données et commentaires du contrôle au Responsable.
+Synchroniser les données lorsque la connexion redevient disponible.
+Être averti si une version plus récente du même brouillon existe avant de confirmer un éventuel écrasement.
+Soumettre définitivement le contrôle au Responsable.
+6.3 Cycle de vie d’une tâche
+État
+Signification
+Action principale
+Brouillon
+Tâche en préparation ou formulaire non soumis.
+Le Responsable prépare la tâche ou l’Employé poursuit la saisie.
+Audit soumis
+Les données et mesures de l’Employé sont figées. Le Responsable examine les résultats, sélectionne ou ajoute les insights, puis fait générer et confirme le résumé IA.
+Décision Machine conforme ou Machine non conforme.
+Résumé confirmé
+Le Responsable confirme le résumé préparé à partir des insights retenus.
+Décision directe sur la conformité de la machine.
+Terminée
+Le Responsable a décidé Machine conforme ou Machine non conforme et un rapport officiel a été finalisé.
+État terminal ; historique consultable sans modification.
+
+7 Règles métier structurantes
+Règle
+Exigence
+Tolérances
+Les verdicts sont calculés à partir des formules et seuils définis dans la fiche de référence, par exemple ±5 %, ±10 % ou ±15 % selon le test.
+Gestion des insights et résumé IA
+Après soumission, le système propose des constats déterministes. Le Responsable sélectionne ou ajoute les insights. L’IA rédige uniquement un résumé à partir de cette sélection ; le Responsable peut l’éditer et doit le confirmer.
+Assignation
+Une tâche est toujours assignée à un Employé distinct du Responsable qui la crée.
+Synchronisation
+Aucune version locale plus ancienne ne doit écraser silencieusement une version plus récente. L’utilisateur doit être informé du conflit avant de choisir l’action à effectuer.
+Traçabilité minimale
+Le système conserve au minimum l’identité et la date de la soumission ainsi que l’identité et la date de l’approbation.
+Finalisation du rapport
+Après confirmation du résumé et décision Machine conforme ou Machine non conforme, le Responsable choisit entre génération Word et téléversement d’un PDF manuel.
+
+8 Contraintes et dépendances
+La connectivité peut être absente ou instable dans les établissements ; le fonctionnement hors ligne est donc une contrainte d’architecture majeure.
+Le modèle de données doit représenter les mesures, les unités, les valeurs calculées, les tolérances et les verdicts ; un ensemble de champs de texte libre ne suffit pas.
+Le formulaire Graphie mobile est spécifique à la Phase 1. L’ajout de Graphie fixe ou de Scopie nécessitera un développement dédié ou la création ultérieure d’un moteur générique de formulaires.
+La qualité des calculs dépend de la validation formelle des formules et seuils issus de la fiche CETEM BH.
+Le mécanisme d’intégration des nouveaux comptes Employés reste à préciser dans la SRS, sans bloquer le cadrage général du projet.
+9 Hypothèses et questions restantes
+Les décisions structurantes sont enregistrées dans le journal ci-dessous. Restent à confirmer dans la SRS : la taille maximale du PDF téléversé et la nécessité éventuelle de réintégrer une copie numérisée du rapport signé.
+Référence
+Sujet
+Résolution ou suivi
+ASM-004
+Conflits de synchronisation hors ligne
+Résolue par DEC-014.
+ASM-005
+Authentification et permissions
+Résolue par DEC-011.
+ASM-006
+Auto-assignation du Responsable
+Résolue par DEC-013.
+ASM-007
+Niveau de traçabilité attendu
+Résolue par DEC-012.
+Q-011 et Q-012
+Détails de gestion de l’équipe
+À préciser dans la prochaine révision de la SRS.
+
+10 Journal des décisions
+ID
+Décision
+Statut
+DEC-001
+Rôle unique Auditeur principal et Responsable
+Confirmée
+DEC-002
+Moteur de suggestion fondé sur des règles de tolérance, sans IA générative libre
+Confirmée
+DEC-003
+Fonctionnement hors ligne obligatoire pour l’application Employé
+Confirmée
+DEC-004
+Architecture modulaire de modèles de checklist
+Reportée et remplacée par DEC-010
+DEC-005
+Plusieurs tâches actives possibles pour un même Employé
+Confirmée
+DEC-006
+Le rapport généré est au format Word .docx ; un rapport réalisé manuellement peut être téléversé uniquement au format PDF.
+Confirmée
+DEC-007
+Établissement et service saisis en texte libre
+Confirmée
+DEC-008
+Notification d’assignation dans l’application et par email
+Confirmée
+DEC-009
+Cycle de vie : Brouillon, Audit soumis, Résumé confirmé, Machine conforme ou Machine non conforme, puis Terminé après finalisation du rapport officiel.
+Confirmée
+DEC-010
+Formulaire Graphie mobile codé spécifiquement avec une interface organisée par test
+Confirmée
+DEC-011
+Authentification par email et mot de passe, sans SSO
+Confirmée
+DEC-012
+Traçabilité limitée à la soumission et à l’approbation
+Confirmée
+DEC-013
+Auto-assignation interdite
+Confirmée
+DEC-014
+Avertissement avant tout écrasement lors d’un conflit de synchronisation
+Confirmée
+DEC-015
+Gestion des comptes Employés par le Responsable et assignation à partir de la liste d’équipe
+Confirmée ; intégration à préciser
+DEC-016
+L’Employé soumet les données du contrôle ; le Responsable sélectionne ou ajoute les insights utilisés pour le résumé et le rapport.
+Confirmée
+DEC-017
+Après réception des données complètes, le Responsable décide directement si la machine est conforme ou non conforme. Il n’existe pas d’étape de validation ou de rejet du travail de l’Employé.
+Confirmée
+DEC-018
+Le téléversement manuel accepte uniquement un PDF. Le rapport généré est imprimé puis signé manuellement par le Responsable.
+Confirmée
+DEC-019
+Le fonctionnement hors ligne est obligatoire pour le PoV ; les contrôles terminés sont consultables dans l’historique mais non modifiables.
+Confirmée
+DEC-020
+L’Employé soumet les données. Le Responsable sélectionne ou ajoute les insights et confirme le résumé IA, puis décide directement de la conformité de la machine. L’IA ne prend aucune décision.
+Confirmée
+
+11 Améliorations futures
+La mise en place d’un moteur générique de formulaires demeure une amélioration du backlog, sans engagement de planification. Elle devra être réévaluée lorsque la fiche Graphie fixe sera disponible ou lorsque la Scopie entrera dans le périmètre.
+12 Conclusion et prochaine étape
+La Phase 1 couvre l’assignation, la saisie hors ligne, les calculs, les insights factuels, la soumission figée, la confirmation du résumé et la décision sur la conformité de la machine, puis la génération Word ou le téléversement PDF. 
+Le périmètre est suffisamment défini pour maintenir la SRS et préparer les documents détaillés. La prochaine étape consiste à valider le workflow cible, le catalogue des champs, les règles de calcul, la gouvernance des insights et les règles de gestion du rapport officiel.

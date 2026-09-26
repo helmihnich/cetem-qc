@@ -1,0 +1,358 @@
+﻿
+Choix de la stack technologiqueet benchmarking
+Web Next.js • Mobile React Native • API Node.js • TypeScript de bout en bout
+Document de décision d’architecture pour un projet de petite taille
+Base du benchmark : rapidité de livraison, efficacité de l’équipe, maintenabilité, adéquation à l’écosystème, performances et évolutivité future
+Décision en une phraseUtiliser TypeScript comme langage commun, Next.js pour l’application web, React Native pour l’application mobile et Node.js pour l’API backend. Pour une petite équipe produit, cette combinaison minimise les changements de technologies tout en conservant un écosystème mature et une trajectoire claire vers une mise à l’échelle en production.
+
+Préparé : septembre 2026
+
+1. Objectif et contexte du projet
+Ce document formalise le choix technologique pour la première phase de développement du projet. Le système cible comprend une application web destinée aux responsables et utilisateurs administratifs, une application mobile destinée aux employés sur le terrain, ainsi qu’une API backend qui gère l’authentification, les affectations, les soumissions d’audit, les rapports PDF téléversés, les constats (insights), les statuts du workflow et, ultérieurement, la génération de synthèses assistée par IA.
+Le projet est volontairement de petite taille. L’objectif principal d’ingénierie n’est donc pas de maximiser un débit théorique, mais de livrer rapidement une première version fiable, de conserver une base de code compréhensible pour une petite équipe, d’éviter une infrastructure inutile et de préserver suffisamment de flexibilité pour les évolutions futures.
+Stack retenueWeb : Next.js + React + TypeScriptMobile : React Native + TypeScriptBackend : Node.js + TypeScript (Express recommandé pour l’API initiale)Partagé : schémas de validation, types API, énumérations du domaine, utilitaires, conventions de linting et de test
+
+1.1 Critères de décision
+Critère
+Poids
+Interprétation
+Délai de mise sur le marché
+25%
+Vitesse à laquelle une petite équipe peut construire et livrer la première version utilisable.
+Productivité d’une petite équipe
+20%
+Code répétitif, effort d’apprentissage, maturité des outils et vitesse de développement au quotidien.
+Réutilisation des compétences et du code
+15%
+Capacité à réutiliser les connaissances TypeScript, les contrats API, les schémas et la logique métier.
+Écosystème et intégrations
+15%
+Disponibilité de bibliothèques stables pour l’authentification, les formulaires, les fichiers, les notifications, les tests et les API.
+Maintenabilité et sûreté du typage
+10%
+Facilité à comprendre et modifier le code de manière sûre à mesure que l’application évolue.
+Performances à l’exécution
+10%
+Adéquation aux charges web/mobile/API attendues sans optimisation prématurée.
+Recrutement et support à long terme
+5%
+Disponibilité des développeurs, de la documentation, des connaissances communautaires et du support des fournisseurs.
+
+Les scores de ce document utilisent une échelle de 1 à 5 (5 = meilleure adéquation). Les totaux pondérés sont des valeurs d’aide à la décision et non des mesures universelles de performance. La pondération favorise volontairement la rapidité de livraison et la maintenabilité, car ces facteurs ont un impact majeur sur l’économie d’un projet de petite taille.
+2. Choix principal du langage : TypeScript
+Le choix le plus important n’est pas un framework particulier, mais l’utilisation de TypeScript dans les trois couches de l’application. Next.js, React Native et Node.js prennent tous très bien en charge TypeScript. React Native indique que les nouveaux projets utilisent TypeScript par défaut, et les versions modernes de Node.js incluent une prise en charge stable et légère de l’exécution TypeScript. [1][2]
+Un langage commun pour le web, le mobile et le backend réduit les changements de contexte et le coût d’intégration des développeurs.
+Le partage des types de requêtes et de réponses API réduit les erreurs d’intégration entre les clients et le serveur.
+Des schémas de validation partagés (par exemple Zod) permettent d’appliquer les mêmes règles dans les formulaires et aux frontières de l’API.
+Les énumérations telles que le statut d’une tâche, le statut d’un rapport, le type de constat et le rôle utilisateur peuvent être définies une seule fois puis réutilisées.
+Le refactoring est plus sûr, car les erreurs de typage permettent d’identifier les appels cassés plus tôt que les seuls tests à l’exécution.
+L’équipe peut standardiser une seule approche de linting, de formatage et de test au lieu de maintenir plusieurs écosystèmes de langages.
+Principe recommandéConserver les contrats métier dans un package TypeScript partagé, sans imposer le partage de l’interface utilisateur entre le web et le mobile. Partager les types, schémas, clients API et règles métier ; laisser Next.js et React Native conserver un code de présentation spécifique à chaque plateforme.
+
+3. Frontend web : Next.js
+Next.js est retenu pour l’application web destinée aux responsables et utilisateurs administratifs. Il s’agit d’un framework React qui fournit le routage, les stratégies de rendu, le bundling et des optimisations pour la production, ce qui évite à l’équipe d’assembler manuellement ces éléments. La documentation officielle présente explicitement cette approche intégrée comme un moyen de se concentrer sur la construction et la livraison du produit. [3]
+3.1 Benchmark web
+Option
+Rapidité
+Productivité
+Réutilisation
+Écosystème
+Maintenabilité
+Perf.
+Support
+Pondéré /5
+Next.js + React
+5
+5
+5
+5
+4
+4
+5
+4.75
+React + Vite
+5
+5
+5
+5
+4
+4
+5
+4.75
+Vue + Nuxt
+5
+4
+3
+4
+4
+4
+4
+4.15
+Angular
+3
+3
+3
+5
+5
+4
+5
+3.75
+
+Next.js et React + Vite obtiennent des scores similaires pour une petite application. Next.js est privilégié car le routage, les options de rendu côté serveur, les fonctionnalités proches de l’API, la gestion des ressources et les conventions de déploiement sont réunis dans un seul framework. Vite reste une excellente alternative lorsque le client web est volontairement une SPA pure et que ces fonctionnalités de framework ne sont pas nécessaires.
+3.2 Pourquoi Next.js convient à ce projet
+Mise en place rapide de tableaux de bord authentifiés, listes de tâches, pages de détail, vues de rapports et écrans d’administration.
+Les connaissances React sont directement transférables à l’application mobile React Native.
+Le routage intégré et les conventions de mise en page réduisent le nombre de décisions d’architecture à prendre au démarrage du projet.
+Rendu flexible : le projet peut utiliser des composants client pour les tableaux de bord interactifs et les capacités serveur lorsqu’elles sont utiles.
+Écosystème très riche pour les formulaires, la validation, la récupération de données, les bibliothèques de composants et les tests.
+Les données externes sur l’écosystème confortent également ce choix : State of JavaScript 2025 indique que React est utilisé par 83,6 % des répondants de la section bibliothèques et Next.js par 58,6 %, ce qui traduit une base d’utilisateurs importante. Ces résultats doivent toutefois être considérés comme des indicateurs d’adoption de l’écosystème et non comme un classement objectif de qualité. [4]
+3.3 Compromis
+Next.js introduit davantage de concepts qu’une SPA minimale React/Vite, notamment concernant les frontières serveur/client et la mise en cache.
+Les mises à niveau du framework peuvent modifier certains comportements ; les versions doivent donc être verrouillées et mises à jour de manière contrôlée.
+Pour un tableau de bord privé sans besoin de SSR ou de SEO, certaines capacités de Next.js peuvent rester inutilisées. Cela reste acceptable si l’équipe privilégie la standardisation et la flexibilité future.
+4. Application mobile : React Native
+React Native est retenu pour l’application mobile des employés, car il utilise les concepts de React tout en effectuant le rendu via des composants natifs de la plateforme. La documentation officielle décrit React Native comme un framework Android et iOS utilisant React et les capacités natives des plateformes ; il prend également en charge les modules natifs lorsque des fonctionnalités spécifiques à une plateforme sont nécessaires. [5][6]
+4.1 Benchmark mobile
+Option
+Rapidité
+Productivité
+Réutilisation
+Écosystème
+Maintenabilité
+Perf.
+Support
+Pondéré /5
+React Native
+5
+5
+5
+5
+4
+4
+5
+4.75
+Flutter
+5
+5
+2
+5
+4
+5
+4
+4.20
+Native Swift + Kotlin
+2
+2
+1
+5
+5
+5
+4
+2.95
+Ionic / Capacitor
+5
+5
+4
+4
+3
+3
+4
+4.20
+
+React Native est privilégié pour ce projet principalement parce que l’équipe web travaille déjà avec React/TypeScript. Flutter peut être tout aussi productif, mais introduit Dart ainsi qu’un second paradigme d’interface utilisateur. Le développement entièrement natif en Swift/Kotlin offre un contrôle maximal sur les plateformes, mais impose deux bases de code applicatives et est difficile à justifier pour une première version de petite taille, sauf si le produit dépend fortement de fonctionnalités propres aux plateformes.
+4.2 Pourquoi React Native convient à ce projet
+Une seule base de code mobile pour iOS et Android pour la majorité de la logique applicative et des écrans.
+Réutilisation des concepts React, de TypeScript, des hooks, des modèles de gestion d’état et des conventions API de l’application web.
+L’accès natif reste possible pour la caméra, la sélection et le téléversement de documents, les notifications, le stockage et les API de l’appareil.
+Les nouveaux projets React Native utilisent TypeScript par défaut, ce qui s’aligne sur la stratégie proposée d’un langage commun de bout en bout. [1]
+React Native recommande l’utilisation d’un framework tel qu’Expo pour les nouvelles applications, ce qui peut encore réduire la complexité de configuration et de build. [7]
+4.3 Cas où React Native ne serait pas le meilleur choix
+Un développement entièrement natif serait préférable si l’application devenait dominée par des fonctionnalités avancées spécifiques aux plateformes, des interactions graphiques extrêmement intensives ou des SDK fournisseurs nécessitant une intégration native personnalisée importante. Ce n’est pas le profil actuel du projet.
+5. Backend : Node.js + TypeScript
+Node.js est retenu pour l’API REST backend. Node.js utilise un modèle asynchrone piloté par les événements, conçu pour les applications réseau évolutives. Il convient donc bien à une API qui passe une grande partie de son temps à attendre des bases de données, du stockage objet, des services d’authentification, des services d’IA et des intégrations externes. [8]
+5.1 Benchmark backend
+Option
+Rapidité
+Productivité
+Réutilisation
+Écosystème
+Maintenabilité
+Perf.
+Support
+Pondéré /5
+Node.js + Express + TS
+5
+5
+5
+5
+4
+4
+5
+4.75
+Python + FastAPI
+5
+5
+2
+5
+4
+4
+5
+4.30
+Java + Spring Boot
+3
+3
+1
+5
+5
+5
+5
+3.45
+.NET + ASP.NET Core
+4
+4
+1
+5
+5
+5
+5
+3.85
+
+Python/FastAPI constitue une excellente option backend pour un petit projet, tandis que Java et .NET sont de solides plateformes d’entreprise. Node.js est privilégié ici car il permet de conserver un seul langage sur l’ensemble du produit et répond parfaitement à la charge attendue, principalement orientée entrées/sorties. Un autre langage backend serait justifié par des besoins tels que des calculs scientifiques intensifs, une plateforme d’entreprise préexistante ou une équipe déjà standardisée sur un autre environnement d’exécution.
+5.2 Express face aux frameworks Node.js plus structurants
+Express : recommandé pour la première version lorsque l’API reste petite et que l’équipe maîtrise déjà le framework ; peu de conventions imposées et livraison rapide.
+Fastify : bonne alternative si l’équipe souhaite des choix par défaut davantage orientés performance et une validation pilotée par des schémas.
+NestJS : utile lorsque le backend devient important et nécessite des modules imposés, de l’injection de dépendances et des conventions d’architecture plus fortes, mais il introduit davantage de concepts de framework et de code structurel.
+Recommandation backend initialeCommencer avec Node.js + TypeScript + Express. Structurer le projet avec des dossiers/modules, valider les données aux frontières de l’API, utiliser un gestionnaire d’erreurs centralisé, séparer services et repositories lorsque cela est justifié et mettre en place des tests automatisés. Ne pas ajouter la complexité d’un framework d’entreprise avant que la base de code ne l’exige.
+
+6. Pourquoi cette stack combinée est adaptée à un petit projet
+Couche
+Choix recommandé
+Raison
+Langage
+TypeScript
+Un seul langage et un seul système de types pour les clients et le serveur.
+Interface web
+Next.js / React
+Développement rapide des tableaux de bord ; conventions matures de routage et de rendu.
+Interface mobile
+React Native
+Livraison multiplateforme tout en conservant l’accès aux capacités natives.
+API
+Node.js / Express
+API simple orientée entrées/sorties avec un très vaste écosystème de packages.
+Validation
+Zod or equivalent
+Permet de partager les contrats et les règles de validation entre les packages.
+Gestionnaire de packages
+pnpm
+Support efficace des workspaces/monorepos et gestion cohérente des dépendances.
+Tests
+Jest/Vitest + React Testing Library
+Modèle de test commun à JavaScript/TypeScript.
+Contrat API
+OpenAPI + generated/shared TS types
+Réduit les divergences d’intégration entre frontend et backend.
+
+6.1 Structure de dépôt suggérée
+monorepo/
+  apps/web        -> Next.js
+  apps/mobile     -> React Native / Expo
+  apps/api        -> Node.js / Express
+  packages/types  -> shared TypeScript domain and API types
+  packages/schema -> shared validation schemas
+  packages/api    -> shared typed API client
+  packages/config -> ESLint / TypeScript / test configuration
+6.2 Impact pratique sur la livraison
+Un développeur backend peut comprendre les types de données échangés avec le frontend sans changer de langage.
+Un développeur web peut contribuer à la logique métier mobile puisque les deux applications utilisent les modèles React.
+Une modification du statut d’une tâche ou du schéma de soumission d’un audit peut faire échouer les builds TypeScript des packages dépendants au lieu de devenir une incompatibilité cachée à l’exécution.
+L’équipe peut réutiliser les utilitaires d’authentification, les fonctions de date, les types DTO et la logique de validation sans chercher à partager les composants d’interface spécifiques à chaque plateforme.
+La CI/CD reste plus simple puisque les trois applications utilisent le même écosystème d’outils basé sur Node.js.
+7. Perspective sur les performances et l’évolutivité
+Pour ce projet, le choix technologique ne doit pas être dicté par des benchmarks synthétiques de langages. Les principaux goulots d’étranglement seront plus probablement les requêtes vers la base de données, le téléversement et le téléchargement de fichiers, le traitement d’images ou de PDF, les appels à des API tierces, l’authentification et les requêtes vers des services d’IA. Ces opérations sont principalement limitées par les entrées/sorties, domaine dans lequel Node.js est particulièrement adapté. [8]
+Sujet
+Approche initiale
+Évolution en cas de montée en charge
+Concurrence API
+Entrées/sorties asynchrones Node ; conserver des handlers non bloquants
+Réplication horizontale, workers de file d’attente, cache
+Téléversement de PDF/fichiers
+Téléversement direct ou signé vers un stockage objet
+Traitement en arrière-plan et analyse antivirus
+Génération IA
+Appel API asynchrone avec timeouts et suivi de statut
+Système de files/jobs ; politiques de nouvelle tentative
+Base de données
+Index + pagination + modèles de requêtes clairs
+Réplicas de lecture/cache ou mise à l’échelle gérée
+Performances mobile
+Composants RN reposant sur le natif ; éviter les rendus inutiles
+Profiler les points critiques ; écrire des modules natifs uniquement si nécessaire
+Performances web
+Fonctionnalités Next.js de découpage du code et de rendu
+CDN/cache et optimisation au niveau des routes
+
+L’architecture moderne de React Native fournit également une interface directe avec le natif via JSI et des systèmes de modules/composants natifs typés, réduisant ainsi les limitations historiques du bridge. [6]
+8. Risques et mesures d’atténuation
+Risque
+Pourquoi c’est important
+Mesure d’atténuation
+Dépendance excessive à l’écosystème JavaScript/TypeScript
+Un écosystème unique peut concentrer le risque lié à la chaîne d’approvisionnement logicielle.
+Fichiers de verrouillage, analyse des dépendances, mises à jour contrôlées et réduction des packages inutiles.
+Complexité du framework Next.js
+Les développeurs peuvent mal utiliser les frontières serveur/client ou la mise en cache.
+Définir des conventions simples pour le projet et éviter les patterns avancés tant qu’ils ne sont pas nécessaires.
+Compatibilité des bibliothèques React Native
+Certains packages peuvent prendre du retard sur les évolutions des plateformes ou de l’architecture.
+Privilégier les bibliothèques maintenues, tester iOS/Android tôt et isoler les intégrations natives.
+Traitements Node.js intensifs en CPU
+Le prétraitement intensif de PDF, d’images ou de données pour l’IA peut bloquer la boucle d’événements.
+Déplacer les traitements lourds vers des workers/services, utiliser des files d’attente et éviter les handlers synchrones intensifs en CPU.
+Partage de code excessif
+Chercher à partager le code d’interface peut créer des abstractions plus complexes qu’une duplication raisonnable.
+Partager les contrats et la logique métier, pas tous les composants visuels.
+Complexité du monorepo
+Les outils de workspace peuvent devenir inutilement complexes.
+Utiliser un workspace pnpm léger ; ajouter une orchestration de build uniquement lorsque nécessaire.
+
+9. Recommandation finale
+Pour la taille et le workflow actuels du projet, la stack recommandée est :
+Domaine
+Décision
+Application web
+Next.js + React + TypeScript
+Application mobile
+React Native + TypeScript ; Expo est recommandé sauf si un SDK natif nécessite un workflow bare
+API backend
+Node.js + TypeScript + Express
+Contrats partagés
+Types TypeScript + schémas Zod + OpenAPI
+Dépôt
+Workspace pnpm / monorepo léger
+Tests
+Tests unitaires et d’intégration dans l’écosystème TypeScript ; tests de composants mobile/web lorsqu’ils apportent de la valeur
+
+Décision d’architectureAdopter la stack ci-dessus pour la première version de production. Réévaluer un composant uniquement lorsqu’un besoin concret apparaît et que la technologie choisie y répond mal. Ne pas introduire un second langage ou une seconde base de code mobile pour des besoins futurs hypothétiques.
+
+Ce choix est particulièrement pertinent lorsque l’équipe considère TypeScript comme le dénominateur commun de l’architecture. L’intérêt principal n’est pas que chaque technologie soit universellement supérieure, mais qu’elles forment ensemble une stack cohérente, simple à exploiter, soutenue par un vaste écosystème et offrant des performances adaptées à une application de petite taille.
+10. Base de développement initiale suggérée
+Créer un workspace pnpm contenant le web, le mobile, l’API et les packages partagés.
+Activer le mode strict de TypeScript dès le premier jour.
+Définir en premier les modèles de domaine partagés : User, Task, Audit, Insight, Report, Assignment et Status.
+Définir les contrats API et la validation avant de connecter les formulaires.
+Conserver l’authentification et l’autorisation dans le backend ; les clients ne doivent jamais être considérés comme seuls responsables de l’application des rôles.
+Utiliser un stockage objet pour les rapports téléversés plutôt que de stocker directement les fichiers binaires PDF dans la base de données applicative.
+Ajouter dans la CI des contrôles de typage, de linting, de tests et de builds de production pour les trois applications.
+Placer la génération de synthèses par IA derrière une interface ou un service afin que le workflow initial continue de fonctionner même si l’IA est désactivée ou remplacée.
+Références et sources du benchmark
+[1] React Native - Using TypeScripthttps://reactnative.dev/docs/typescript
+[2] Node.js - Modules: TypeScripthttps://nodejs.org/api/typescript.html
+[3] Next.js Documentationhttps://nextjs.org/docs
+[4] State of JavaScript 2025 - Librarieshttps://2025.stateofjs.com/en-US/libraries/
+[5] React Native - Core Components and Native Componentshttps://reactnative.dev/docs/next/intro-react-native-components
+[6] React Native - New Architecture / Architecture Overviewhttps://reactnative.dev/architecture/landing-page
+[7] React Native - Get Started / framework recommendationhttps://reactnative.dev/
+[8] Node.js - About Node.jshttps://nodejs.org/en/about
+[9] Stack Overflow Developer Survey 2025 - Technologyhttps://survey.stackoverflow.co/2025/technology
+Note sur le benchmark : les statistiques d’enquête sont utilisées uniquement comme indicateurs d’adoption de l’écosystème et de familiarité des développeurs. Les scores pondérés sont des appréciations d’ingénierie spécifiques au projet, fondées sur les critères de la section 1.1 ; ils ne constituent pas des benchmarks indépendants réalisés en laboratoire.

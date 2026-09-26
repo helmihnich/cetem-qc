@@ -1,0 +1,318 @@
+﻿GUIDE DE DESIGN UI/UX
+Système numérique de contrôle qualitédes équipements radiologiques
+Direction visuelle pour la plateforme web Responsable et l’application tablette Employé
+Objectif de designCréer une interface claire, professionnelle, légère et crédible, orientée métier. L’IA reste une fonction secondaire du workflow et ne doit pas définir l’identité visuelle du produit.
+
+Élément
+Décision
+Thème
+Clair, sobre, professionnel
+Web
+Next.js / React / TypeScript
+Tablette
+React Native / TypeScript
+Style
+Enterprise SaaS moderne, sans esthétique “AI-first”
+Priorité
+Lisibilité, rapidité d’action, traçabilité et usage tactile
+
+
+1. Vision générale du design
+Le produit doit donner l’impression d’un outil métier mature destiné au contrôle qualité, et non d’une démonstration technologique. Le parcours principal reste centré sur les machines, les tâches, les audits, les mesures, les constats, la revue et le rapport.
+Principe directeurLa structure fonctionnelle doit rester : Machine → Tâche → Audit → Mesures → Insights → Revue → Rapport. L’IA intervient uniquement pour produire un résumé à partir des insights retenus par le Responsable.
+
+Utiliser un fond blanc ou gris très clair et des surfaces blanches.
+Privilégier les bordures fines et les espacements plutôt que les ombres fortes.
+Limiter les couleurs à un accent principal et aux couleurs sémantiques des statuts.
+Éviter gradients, néons, glow, glassmorphism, illustrations futuristes et cartes décoratives surdimensionnées.
+Présenter les informations techniques de façon structurée, dense mais respirante.
+2. Identité visuelle
+2.1 Palette recommandée
+Usage
+Couleur
+Rôle
+Arrière-plan
+#F7F8FA
+Fond général de l’application
+Surface
+#FFFFFF
+Cartes, tableaux, formulaires
+Texte principal
+#1F2933
+Titres et contenu
+Texte secondaire
+#667085
+Métadonnées et aides
+Bordures
+#E4E7EC
+Séparateurs et contours
+Primaire
+#2563EB
+Actions principales, liens, focus
+Survol primaire
+#1D4ED8
+Hover des actions principales
+Succès
+#15803D
+Conforme / confirmé
+Avertissement
+#B45309
+En revue / attention
+Erreur
+#B42318
+Non conforme / erreur
+Information
+#0369A1
+Information secondaire
+
+2.2 Typographie
+Inter est recommandée pour l’interface. Geist ou IBM Plex Sans constituent de bonnes alternatives. La hiérarchie doit rester compacte :
+Niveau
+Taille indicative
+Graisse
+Titre de page
+24 px
+600
+Titre de section
+18 px
+600
+Titre de carte
+15–16 px
+600
+Texte courant
+14 px
+400
+Tableau
+13–14 px
+400/500
+Métadonnées
+12–13 px
+400
+
+Éviter les titres de tableau de bord de 40 à 60 px : ils rapprochent l’application d’un site marketing au lieu d’un outil opérationnel.
+2.3 Formes, bordures et profondeur
+Rayon de bordure : environ 6 à 10 px.
+Bordures fines : 1 px, gris clair.
+Ombres : faibles ou absentes ; réserver une ombre légère aux menus flottants et modales.
+Espacement : grille cohérente de 4/8 px, avec 16–24 px entre groupes fonctionnels.
+3. Structure de la plateforme web du Responsable
+La plateforme web doit favoriser la supervision : gestion de l’équipe, création et assignation des tâches, revue des données soumises, gestion des insights, confirmation du résumé, validation de l’audit, décision de conformité et finalisation du rapport. Ces responsabilités correspondent au périmètre fonctionnel défini pour le Responsable.
+3.1 Navigation
+Navigation desktop recommandéeSidebar fixe à gauche + barre supérieure légère. La sidebar doit être stable entre les écrans et montrer clairement la section active.
+
+Groupe
+Entrées proposées
+Vue générale
+Tableau de bord
+Opérations
+Tâches • Audits • Équipements
+Dossiers
+Rapports • Historique
+Administration
+Équipe • Paramètres
+
+Ne pas utiliser des libellés tels que « AI Workspace », « Smart Insights » ou « Intelligence Hub ». Les fonctions doivent porter le vocabulaire métier du projet.
+3.2 Tableau de bord
+Le tableau de bord doit être utile à la décision opérationnelle, sans devenir un mur de graphiques. Trois ou quatre indicateurs suffisent pour le PoV.
+Indicateur
+Exemple
+Tâches ouvertes
+14
+Audits du jour
+6
+En attente de revue
+3
+Non-conformités
+2
+
+Sous les indicateurs, afficher une table de tâches récentes avec identifiant, type, établissement, Employé, état et dernière mise à jour. Ces informations sont cohérentes avec les exigences de liste des tâches.
+3.3 Écran de détail / revue d’un audit
+Cet écran est central. Après soumission, les mesures et commentaires de l’Employé doivent rester en lecture seule ; le Responsable peut gérer les insights et le résumé, puis prendre les décisions métier.
+Zone
+Contenu
+En-tête
+Référence audit, équipement, établissement, Employé, statut, dernière mise à jour
+Onglets
+Vue d’ensemble • Mesures • Insights et résumé • Rapport • Historique
+Mesures
+Paramètre, valeur attendue, valeur mesurée/calculée, tolérance, verdict
+Insights
+Constats proposés par règles + insights ajoutés manuellement
+Résumé
+Résumé généré, édition contrôlée, confirmation
+Décisions
+Valider / non valider l’audit ; puis Machine conforme / non conforme
+Rapport
+Générer Word ou téléverser le PDF manuel selon le workflow
+
+Séparation visuelle importanteLa validation du travail et la conformité de la machine doivent être présentées comme deux décisions distinctes. L’IA ne doit jamais être placée dans le composant de décision de conformité.
+
+4. Présentation de l’IA et des insights
+Le système propose d’abord des constats factuels déterministes à partir des règles et résultats. Le Responsable sélectionne ou ajoute les insights ; l’IA rédige ensuite uniquement un résumé fondé sur cette sélection. Le Responsable peut le modifier et doit le confirmer avant la finalisation.
+4.1 Ce qu’il faut afficher
+Constat systèmeTempérature supérieure à la plage de fonctionnement définie.Mesuré : 92 °C   •   Attendu : 60–80 °C   •   Source : test de température
+
+Un libellé discret comme « Constat système » ou « Suggestion » est préférable à une grande carte « AI INSIGHT ». Pour le résumé, un petit indicateur « Généré avec assistance IA » peut assurer la transparence sans dominer l’écran.
+4.2 Ce qu’il faut éviter
+Icônes ✨ répétées, étoiles ou effets magiques.
+Dégradés violet/bleu utilisés comme signature visuelle de l’IA.
+Bloc de chat ou champ de prompt comme interface principale.
+Score de confiance décoratif lorsqu’il n’a pas de signification métier définie.
+Texte donnant l’impression que l’IA valide l’audit ou décide de la conformité.
+5. Statuts et feedback
+Les statuts doivent être lisibles mais visuellement discrets : texte + petit point ou badge à fond très léger. Ne pas colorer une ligne entière sauf situation critique.
+Statut
+Traitement visuel recommandé
+Brouillon
+Gris neutre
+Audit soumis
+Bleu clair
+En revue
+Ambre clair
+Audit validé
+Vert clair
+Audit non validé
+Rouge clair
+Machine conforme
+Vert clair
+Machine non conforme
+Rouge clair
+Terminée
+Gris/vert discret
+
+6. Formulaires et création de tâche
+Les formulaires doivent être simples, alignés et prévisibles. Les champs associés doivent être regroupés sans placer chaque champ dans une carte indépendante.
+Champ
+Comportement
+Type de contrôle
+Graphie mobile sélectionnable ; options hors périmètre visibles/désactivées si utile
+Établissement
+Texte libre
+Service
+Texte libre selon règle métier
+Employé
+Sélecteur limité aux Employés actifs de l’équipe
+Instructions
+Zone de texte courte et optionnelle selon le besoin
+
+Actions en bas à droite : « Annuler » en secondaire et « Créer la tâche » en primaire. Les erreurs doivent être affichées au niveau du champ et en langage compréhensible.
+7. Application tablette de l’Employé
+La tablette est un outil de terrain. L’interface doit privilégier le tactile, le hors-ligne et la progression dans un contrôle long. Le formulaire Graphie mobile doit être organisé par test et ne pas reproduire la fiche papier ligne par ligne.
+7.1 Écran Mes tâches
+Information
+Présentation
+Tâche
+Référence + type de contrôle
+Établissement / service
+Sous-titre
+État
+Badge compact
+Synchronisation
+Icône + texte : synchronisé / en attente / erreur
+Action
+Bouton « Ouvrir » ou ligne entièrement cliquable
+
+7.2 Formulaire de contrôle
+Découper le contrôle en sections ou étapes claires.
+Afficher la progression sans imposer un wizard rigide si l’Employé doit revenir sur une section.
+Utiliser de grands champs et zones tactiles ; éviter les petits boutons rapprochés.
+Afficher unité, tolérance et aide au plus près du champ concerné.
+Calculer et montrer les valeurs dérivées et verdicts de façon immédiate lorsque les données nécessaires sont disponibles.
+Sauvegarder clairement le brouillon local et afficher l’état de synchronisation.
+Mode hors ligneUne bannière discrète doit indiquer « Hors ligne - les modifications sont enregistrées sur cet appareil ». Au retour du réseau, afficher l’état de synchronisation sans bloquer inutilement l’Employé.
+
+7.3 Conflits de synchronisation
+En cas de versions divergentes, ne jamais écraser silencieusement. Afficher une boîte de dialogue claire avec date/heure des deux versions et les actions autorisées. Le message doit expliquer le risque sans jargon technique.
+8. Tables, listes et densité d’information
+Les tables sont adaptées aux écrans Responsable. Elles doivent rester compactes et scannables, avec une hauteur de ligne confortable et une hiérarchie nette.
+Aligner les nombres et dates de manière cohérente.
+Garder les statuts dans une colonne courte.
+Utiliser un menu contextuel « … » pour les actions secondaires.
+Éviter plus de 6 à 8 colonnes visibles ; déplacer les détails dans la page de détail.
+Prévoir recherche et filtres uniquement lorsqu’ils servent un volume réel de données.
+9. Rapport et historique
+Le rapport doit conserver une apparence documentaire classique et imprimable. Le PoV prévoit soit la génération d’un Word, soit le téléversement d’un PDF produit hors application ; le rapport généré est destiné à être imprimé et signé manuellement.
+Section du rapport
+Contenu
+Identification
+Référence, équipement, établissement, date, Employé, Responsable
+Résultats
+Mesures, calculs, tolérances et verdicts
+Constats
+Insights retenus et provenance
+Résumé
+Version confirmée par le Responsable
+Décision
+Validation de l’audit + conformité machine
+Signature
+Zones de signature manuscrite attendues
+
+Dans l’historique, les audits terminés doivent être consultables mais non modifiables. Le rapport officiel doit être accessible en lecture/téléchargement selon les droits.
+10. Bibliothèque de composants recommandée
+Composant
+Règle de design
+Bouton primaire
+Fond bleu, texte blanc, une seule action dominante par zone
+Bouton secondaire
+Fond blanc, bordure grise
+Bouton destructif
+Rouge uniquement pour action réellement destructive/refus critique
+Card
+Surface blanche, bordure 1 px, rayon 8 px, peu ou pas d’ombre
+Badge
+Petit, fond sémantique très clair, texte plus sombre
+Champ
+Hauteur 40–44 px web ; cible tactile plus généreuse sur tablette
+Modal
+Réservée aux confirmations, conflits et décisions nécessitant attention
+Toast
+Confirmation brève ; ne pas y cacher les erreurs nécessitant une action
+Empty state
+Texte utile + action ; pas d’illustration AI décorative
+Skeleton
+Utiliser pour chargements web courts plutôt qu’un spinner plein écran
+
+11. Accessibilité et ergonomie
+Ne jamais utiliser la couleur seule pour transmettre un verdict : ajouter texte et/ou icône.
+Conserver un contraste suffisant entre texte, fond et bordures.
+Afficher un focus clavier visible sur le web.
+Associer chaque champ à un label persistant.
+Sur tablette, garantir des cibles tactiles suffisamment grandes et des messages lisibles sans zoom.
+Pour les erreurs, expliquer quoi corriger et conserver les données déjà saisies.
+12. Responsive et cohérence web/tablette
+Le web et la tablette doivent partager la même identité visuelle, les mêmes statuts et le même vocabulaire, mais pas nécessairement les mêmes composants. Le web privilégie la densité et les tables ; la tablette privilégie les étapes, les grandes cibles tactiles et la continuité hors ligne.
+À partager entre plateformesTokens de couleur, typographie, statuts, icônes, règles métier et terminologie. Ne pas forcer le partage des composants d’interface lorsque l’usage web et tablette diffère.
+
+13. Anti-patterns à éviter
+À éviter
+Pourquoi
+Dashboard rempli de graphiques
+Ajoute du bruit sans aider le workflow principal
+Une carte pour chaque information
+Fragmentation visuelle et perte de hiérarchie
+Sidebar surchargée
+Navigation plus lente et architecture difficile à comprendre
+Animations décoratives
+Peu adaptées à un outil métier de contrôle qualité
+Interface de chat pour tout
+Le workflow est structuré et ne doit pas être remplacé par des prompts
+IA comme action principale
+Le Responsable reste décisionnaire ; l’IA ne produit qu’un résumé
+Couleurs saturées partout
+Réduit la lisibilité des vrais statuts et alertes
+Reproduction exacte du papier
+Mauvaise ergonomie tactile et occasion manquée de structurer le contrôle
+
+14. Écrans prioritaires à concevoir
+Plateforme
+Écrans prioritaires
+Web Responsable
+Connexion • Dashboard • Équipe • Liste tâches • Créer tâche • Détail/revue audit • Insights/résumé • Décision • Rapport • Historique
+Tablette Employé
+Connexion/activation • Mes tâches • Détail tâche • Formulaire par tests • Brouillon • Revue avant soumission • État de synchronisation • Historique
+
+Pour le démarrage du développement, les premiers écrans à figer visuellement devraient être : (1) Dashboard Responsable, (2) création de tâche, (3) détail/revue d’audit, (4) liste des tâches Employé et (5) formulaire de contrôle tablette. Ils définissent l’essentiel du design system.
+15. Direction finale
+Résultat recherchéUne application qui ressemble d’abord à un outil professionnel de contrôle qualité : structurée, calme, rapide à lire et adaptée au terrain. L’IA doit être visible lorsque la transparence l’exige, mais rester une capacité intégrée au workflow, jamais l’identité du produit.
+
+Cette direction est compatible avec la stack retenue : Next.js/React/TypeScript pour le web, React Native/TypeScript pour la tablette et Node.js/TypeScript pour l’API. Elle respecte également le principe de conserver des interfaces spécifiques à chaque plateforme tout en partageant les contrats, règles métier et conventions communes.

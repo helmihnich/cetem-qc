@@ -1,0 +1,592 @@
+
+Spécification des exigences logicielles
+Système numérique de contrôle qualité des équipements radiologiques
+
+Version
+0.7
+Statut
+Brouillon pour revue
+Date de version
+19 septembre 2026
+Auteur
+À compléter
+Document de référence
+Vision et périmètre du projet v0.7
+
+Résumé exécutif
+Cette SRS définit les exigences vérifiables de la Phase 1 pour la plateforme web du Responsable et l’application tablette de l’Employé. Elle couvre la gestion d’équipe, les tâches de contrôle, la saisie hors ligne, les calculs, la proposition et la sélection d’insights, la confirmation du résumé, la décision distincte sur la conformité de la machine, ainsi que la génération ou le téléversement du rapport officiel.
+Les exigences confirmées proviennent du document Vision et périmètre v0.7 et des décisions DEC-001 à DEC-020. Les exigences dérivées rendent ces décisions implémentables ou testables sans modifier le périmètre.
+Historique des révisions
+Version
+Date
+Modification
+0.1
+16 septembre 2026
+Première formalisation, limitée principalement au côté Responsable.
+0.2
+19 septembre 2026
+Alignement avec Vision v0.7, intégration du côté Employé, exigences rendues atomiques et testables, sécurité et traçabilité renforcées.
+0.3
+19 septembre 2026
+Résolution de Q-011 : activation par mot de passe temporaire avec changement obligatoire lors de la première activation.
+0.4
+19 septembre 2026
+Sélection des insights avant soumission et double mode de production du rapport.
+0.5
+19 septembre 2026
+Séparation validation de l’audit et conformité machine, nouvelle tâche liée, PDF manuel, signature manuscrite, historique immuable et hors-ligne obligatoire.
+0.6
+19 septembre 2026
+Responsable chargé des insights, résumé généré par IA, révision humaine obligatoire et séparation maintenue entre résumé, confirmation du résumé et conformité machine.
+0.7
+23 septembre 2026
+Suppression de la validation ou du rejet du travail ; décision directe de conformité machine après confirmation du résumé IA.
+
+1 Introduction
+1.1 Objet
+Ce document traduit le périmètre fonctionnel de la Phase 1 en exigences logicielles pouvant être conçues, développées, testées et acceptées. Il sert de référence aux équipes produit, développement, test et sécurité.
+1.2 Périmètre
+La présente version couvre le parcours complet, depuis la création d’un compte Employé et l’assignation d’une tâche jusqu’à la saisie sur tablette, la soumission des données, puis la sélection et l’ajout d’insights par le Responsable, la soumission figée, la confirmation du résumé et la décision directe sur la conformité de la machine, puis la génération ou le téléversement du rapport officiel.
+Sont exclus de la Phase 1 : Graphie fixe opérationnelle, Scopie, génération PDF, SSO, référentiel préenregistré des établissements, moteur générique de formulaires et journal détaillé de toutes les modifications.
+1.3 Références
+Référence
+Document ou décision
+Usage
+REF-001
+Vision et périmètre du projet v0.7
+Source principale du périmètre et des règles métier.
+DEC-001 à DEC-019
+Journal des décisions de cadrage
+Justification des exigences confirmées.
+CETEM BH
+Rapport de contrôle de qualité d’un appareil mobile de radiographie
+Référence métier pour les champs, calculs et tolérances de Graphie mobile.
+
+1.4 Convention des exigences
+Préfixe
+Signification
+FR
+Exigence fonctionnelle
+DR
+Exigence relative aux données
+NFR
+Exigence non fonctionnelle
+SEC
+Exigence de sécurité
+
+Chaque exigence utilise une formulation normative avec « doit ». Les critères d’acceptation définissent le résultat observable attendu.
+Statut
+Définition
+Confirmée
+Exigence explicitement couverte par Vision v0.7 ou une décision confirmée.
+Dérivée
+Exigence nécessaire pour rendre un comportement confirmé cohérent, testable ou exploitable.
+Proposée
+Exigence ou valeur cible nécessitant une validation métier ou technique.
+
+2 Description générale
+2.1 Acteurs
+Acteur
+Responsabilités principales
+Responsable
+Gérer l’équipe et les tâches, examiner les données sans modifier les mesures, sélectionner ou ajouter les insights, générer et réviser le résumé IA, confirmer le résumé, décider directement de la conformité machine et finaliser le rapport.
+Employé
+Recevoir ses tâches, réaliser le contrôle, saisir et conserver les données y compris hors ligne, synchroniser puis soumettre les mesures et commentaires au Responsable.
+Système
+Appliquer les règles de calcul, produire les verdicts et insights déterministes, générer un résumé assisté par IA à partir des insights retenus, conserver les versions et générer le rapport Word.
+
+2.2 Cycle de vie d’une tâche
+État
+Entrée dans l’état
+Sortie autorisée
+Brouillon
+Création de la tâche ou saisie non soumise.
+Soumise après validation et envoi par l’Employé.
+Audit soumis
+Soumission par l’Employé ; les mesures et commentaires deviennent non modifiables.
+Sélection des insights, résumé IA, puis décision Machine conforme ou Machine non conforme.
+Résumé confirmé
+Le résumé IA a été révisé et confirmé par le Responsable.
+Décision Machine conforme ou Machine non conforme.
+Terminée
+Résumé confirmé, décision Machine conforme ou Machine non conforme, et rapport finalisé.
+État terminal ; historique consultable sans modification.
+
+2.3 Hypothèses et dépendances
+La fiche CETEM BH fournit la liste validée des champs, formules, unités et tolérances de Graphie mobile.
+L’Employé dispose d’une tablette autorisée et peut subir une interruption prolongée de connectivité.
+Le service d’envoi d’emails est disponible pour les notifications d’assignation et l’onboarding retenu.
+Une tâche est rattachée à une seule équipe et assignée à un seul Employé actif à un instant donné.
+2.4 Décision relative à l’activation du compte
+ID
+Décision
+Conséquence
+Q-011
+Le compte Employé est créé avec un mot de passe temporaire. Lors de la première activation, l’Employé doit obligatoirement le remplacer par son propre mot de passe.
+FR-004 est confirmée. Le mot de passe temporaire ne permet pas d’accéder aux tâches tant que son remplacement n’est pas terminé.
+
+La portée de la gestion d’équipe n’est plus ouverte : Vision v0.7 confirme la création, la consultation et la désactivation des comptes Employés.
+3 Exigences fonctionnelles
+3.1 Authentification et gestion de l’équipe
+ID
+Exigence
+Critères d’acceptation
+Priorité
+Statut
+FR-001
+ConnexionLe système doit permettre au Responsable et à l’Employé de s’authentifier par email et mot de passe.
+Avec des identifiants valides, l’utilisateur accède à son espace ; avec des identifiants invalides, l’accès est refusé sans révéler lequel des deux champs est incorrect.
+Haute
+Confirmée
+FR-002
+Liste de l’équipeLe système doit permettre au Responsable de consulter les Employés de son équipe et leur statut.
+La liste affiche au minimum le nom, le prénom, l’email et le statut actif ou inactif ; elle n’affiche aucun Employé d’une autre équipe.
+Haute
+Confirmée
+FR-003
+Création d’un EmployéLe système doit permettre au Responsable de créer un compte Employé avec nom, prénom et email.
+Les champs sont obligatoires ; l’email est validé et unique ; après succès, le compte apparaît dans la liste de l’équipe.
+Haute
+Confirmée
+FR-004
+Activation du compteLe système doit créer le compte Employé avec un mot de passe temporaire et obliger l’Employé à le remplacer lors de sa première activation.
+Le mot de passe temporaire permet uniquement d’ouvrir le parcours d’activation. L’accès aux tâches reste bloqué jusqu’à la définition du nouveau mot de passe, puis le mot de passe temporaire devient inutilisable.
+Haute
+Confirmée
+FR-005
+Désactivation d’un EmployéLe système doit permettre au Responsable de désactiver un compte Employé sans supprimer son historique.
+L’Employé désactivé ne peut plus se connecter ni être sélectionné pour une nouvelle assignation ; ses tâches antérieures restent consultables.
+Haute
+Confirmée
+FR-006
+Employés actifs assignablesLe système doit alimenter le sélecteur d’assignation uniquement avec les Employés actifs de l’équipe.
+Le sélecteur exclut les comptes inactifs, les utilisateurs externes à l’équipe et le Responsable lui-même.
+Haute
+Confirmée
+
+3.2 Gestion des tâches par le Responsable
+ID
+Exigence
+Critères d’acceptation
+Priorité
+Statut
+FR-007
+Création d’une tâcheLe système doit permettre au Responsable de créer une tâche de contrôle qualité.
+La tâche est créée avec un identifiant unique, un créateur, une date de création et l’état Brouillon.
+Haute
+Confirmée
+FR-008
+Type de contrôleLe système doit présenter Graphie mobile comme sélectionnable, Graphie fixe comme visible mais désactivée, et Scopie comme indisponible.
+Aucune tâche Graphie fixe ou Scopie ne peut être créée en Phase 1.
+Haute
+Confirmée
+FR-009
+Établissement et serviceLe système doit permettre la saisie libre de l’établissement et du service concernés.
+Les deux valeurs sont enregistrées avec la tâche ; l’établissement est obligatoire et le service suit la règle de présence validée dans la fiche.
+Moyenne
+Confirmée
+FR-010
+AssignationLe système doit permettre au Responsable d’assigner la tâche à un Employé actif sélectionné dans la liste de son équipe.
+La création ne peut être finalisée sans Employé valide et l’auto-assignation est impossible.
+Haute
+Confirmée
+FR-011
+Liste des tâchesLe système doit permettre au Responsable de consulter les tâches de son équipe avec leur état et leur Employé assigné.
+Chaque ligne affiche au minimum l’identifiant, le type, l’établissement, l’Employé, l’état et la date de dernière mise à jour.
+Haute
+Dérivée
+FR-012
+Détail d’une tâcheLe système doit permettre au Responsable d’ouvrir une tâche et de consulter ses informations et ses résultats synchronisés.
+Pour une tâche soumise, tous les champs, mesures, commentaires, calculs et verdicts sont visibles en lecture.
+Haute
+Confirmée
+FR-013
+Revue d’un audit soumis / Le Responsable doit ouvrir l’audit en lecture seule et examiner les données, résultats et insights soumis.
+Le contenu reste figé et l’accès du Responsable est journalisé.
+Haute
+Confirmée
+FR-014
+Finalisation / Un contrôle doté d’un résumé confirmé, d’une décision Machine conforme ou Machine non conforme et d’un rapport officiel peut passer à l’état Terminé.
+Après finalisation, le contrôle et son rapport restent consultables mais non modifiables.
+Haute
+Confirmée
+
+3.3 Parcours de l’Employé sur tablette
+ID
+Exigence
+Critères d’acceptation
+Priorité
+Statut
+FR-015
+Notification d’assignationLe système doit notifier l’Employé dans l’application et par email lorsqu’une tâche lui est assignée.
+Après assignation, une notification in-app est visible et un email est envoyé à l’adresse du compte.
+Haute
+Confirmée
+FR-016
+Tâches assignéesL’application doit afficher à l’Employé uniquement les tâches qui lui sont assignées.
+La liste ne contient aucune tâche d’un autre Employé et permet d’ouvrir plusieurs tâches actives.
+Haute
+Confirmée
+FR-017
+Formulaire Graphie mobileL’application doit présenter le formulaire Graphie mobile organisé par test et adapté à l’usage tactile.
+Les sections de la fiche CETEM BH sont accessibles dans un ordre compréhensible sans reproduire la mise en page papier ligne par ligne.
+Haute
+Confirmée
+FR-018
+Données du contrôleL’application doit permettre la saisie des informations d’équipement, instruments, contrôles qualitatifs, mesures quantitatives et commentaires requis par la fiche.
+Chaque champ requis, son unité, son format et ses règles de validation correspondent à la spécification métier approuvée.
+Haute
+Confirmée
+FR-019
+BrouillonL’application doit permettre d’enregistrer, reprendre, modifier et supprimer un brouillon avant soumission.
+Après fermeture et redémarrage de l’application, le dernier brouillon enregistré reste disponible ; sa suppression exige une confirmation.
+Haute
+Confirmée
+FR-020
+Travail hors ligneL’application doit permettre de remplir et d’enregistrer le formulaire sans connexion réseau.
+En mode avion, l’Employé peut ouvrir une tâche déjà synchronisée, saisir toutes les sections et conserver le brouillon localement.
+Haute
+Confirmée
+FR-021
+Synchronisation différéeL’application doit synchroniser les brouillons et soumissions en attente lorsque la connexion redevient disponible.
+Chaque élément indique son état de synchronisation ; une réussite retire l’état en attente et un échec conserve les données pour une nouvelle tentative.
+Haute
+Confirmée
+FR-022
+Conflit de synchronisationLe système doit détecter deux versions divergentes d’un même brouillon et avertir l’Employé avant tout écrasement.
+Le système n’écrase aucune version silencieusement et présente les informations permettant de choisir l’action autorisée.
+Haute
+Confirmée
+FR-023
+SoumissionL’application doit permettre à l’Employé de soumettre un contrôle lorsque toutes les validations bloquantes sont satisfaites.
+En cas de succès, l’état devient Soumise, l’auteur et la date sont enregistrés et le Responsable peut consulter les résultats.
+Haute
+Confirmée
+FR-024
+Protection après soumissionL’application doit empêcher la modification normale d’une version soumise.
+Après soumission réussie, les données sont en lecture seule pour l’Employé, sauf mécanisme de réouverture approuvé ultérieurement.
+Moyenne
+Dérivée
+
+3.4 Calculs, insights et rapport
+ID
+Exigence
+Critères d’acceptation
+Priorité
+Statut
+FR-025
+Valeurs calculéesLe système doit calculer les moyennes, écarts et autres valeurs dérivées définies par la fiche CETEM BH.
+Les résultats correspondent aux jeux d’essai métier approuvés, avec les règles d’arrondi et unités spécifiées.
+Haute
+Confirmée
+FR-026
+Verdicts de conformitéLe système doit déterminer le verdict de chaque test à partir de la formule et de la tolérance applicables.
+Pour les valeurs limites, conformes et non conformes du jeu d’essai, le verdict obtenu correspond au résultat attendu.
+Haute
+Confirmée
+FR-027
+Explication du verdictLe système doit afficher au Responsable la valeur mesurée ou calculée, la tolérance appliquée et le verdict.
+Le Responsable peut comprendre chaque verdict sans consulter le code source.
+Moyenne
+Dérivée
+FR-028
+Proposition d’insights / Après soumission, le système doit proposer des constats factuels à partir des règles déterministes et des résultats calculés.
+La même combinaison de données et la même version de règles produisent les mêmes propositions ; chaque proposition indique sa source.
+Haute
+Confirmée
+FR-029
+Sélection des insights / Le Responsable doit pouvoir sélectionner ou écarter les insights proposés après la soumission des données.
+La sélection est enregistrée avec le Responsable, la date et la version de l’audit ; les mesures restent non modifiables.
+Haute
+Confirmée
+FR-030
+Ajout d’un insight / Le Responsable doit pouvoir ajouter manuellement un insight avant la génération du résumé.
+Le texte, la justification éventuelle, l’auteur et la date sont conservés.
+Haute
+Confirmée
+FR-031
+Revue protégée / Le Responsable doit examiner les mesures et commentaires soumis sans pouvoir les modifier, tout en pouvant gérer les insights et le résumé.
+Les données soumises par l’Employé restent figées ; les éléments de synthèse appartenant au Responsable peuvent évoluer jusqu’à confirmation.
+Haute
+Confirmée
+FR-032
+Génération du résumé par IA / Le Responsable doit pouvoir demander un résumé fondé uniquement sur les données de l’audit et les insights sélectionnés ou ajoutés.
+Le résumé ne contient pas de décision autonome de conformité et sa génération enregistre le modèle, la date, l’auteur de la demande et les entrées utilisées.
+Haute
+Confirmée
+FR-033
+Révision et confirmation du résumé / Le Responsable doit pouvoir modifier le résumé généré puis le confirmer.
+La version initiale générée et la version finale confirmée sont conservées ; aucun rapport ne peut être finalisé avant confirmation.
+Haute
+Confirmée
+FR-034
+Téléversement d’un rapport manuel / Après confirmation du résumé, confirmation du résumé et décision machine, le Responsable doit pouvoir téléverser uniquement un PDF produit hors application.
+Tout autre format est refusé et les métadonnées du PDF sont conservées.
+Haute
+Confirmée
+FR-035
+Rapport officiel / Le système doit identifier un seul rapport officiel et enregistrer s’il a été généré ou téléversé.
+La finalisation exige un résumé confirmé et une décision Machine conforme ou Machine non conforme. Après l’état Terminé, toute correction exige un nouveau contrôle.
+Haute
+Dérivée
+FR-036
+Téléchargement / Le système doit permettre aux Responsable et Employé autorisés de télécharger le rapport officiel depuis l’historique.
+Le bon fichier est retourné en lecture seule et reste rattaché à la bonne tâche.
+Haute
+Dérivée
+FR-038
+Conformité de la machine / Après confirmation du résumé, le Responsable doit conclure directement Machine conforme ou Machine non conforme.
+Aucune validation ou décision intermédiaire sur le travail de l’Employé n’est requise. L’IA ne prend pas cette décision.
+Haute
+Confirmée
+FR-040
+Historique / Le Responsable et l’Employé autorisés doivent consulter les contrôles terminés sans pouvoir les modifier.
+Les données, insights, résumé, décision machine et rapport restent consultables en lecture seule.
+Haute
+Confirmée
+FR-041
+Signature manuscrite / Le Responsable doit pouvoir imprimer le rapport généré afin de le signer manuellement.
+Le PoV ne réalise pas de signature électronique ; le document imprimable contient les zones de signature attendues.
+Moyenne
+Confirmée
+FR-042
+Fonctionnement hors ligne / L’Employé doit réaliser et sauvegarder le contrôle sans connexion puis le synchroniser au retour du réseau.
+La saisie, les calculs requis et les insights restent disponibles hors ligne ; la synchronisation ne perd ni ne duplique les données.
+Haute
+Confirmée
+
+4 Exigences relatives aux données
+ID
+Exigence
+Critères d’acceptation
+Priorité
+Statut
+DR-001
+IdentifiantsChaque Employé, tâche, soumission et rapport doit posséder un identifiant unique et stable.
+Aucun doublon n’est accepté et les références restent valides après clôture.
+Haute
+Dérivée
+DR-002
+Référentiel des règlesChaque formule, unité, tolérance et règle d’arrondi utilisée doit être documentée et reliée au test concerné.
+Le jeu de règles peut être comparé à la fiche CETEM BH approuvée et couvert par des tests automatisés.
+Haute
+Dérivée
+DR-003
+PrécisionLes valeurs numériques doivent conserver la précision nécessaire avant l’arrondi d’affichage.
+Les calculs ne réutilisent pas une valeur d’affichage arrondie lorsque la formule requiert la valeur complète.
+Haute
+Dérivée
+DR-004
+ValidationLe système doit refuser les valeurs dont le type, l’unité ou la plage ne respecte pas la définition du champ.
+Un message identifie le champ invalide et la soumission reste bloquée tant que l’erreur persiste.
+Haute
+Dérivée
+DR-005
+Traçabilité minimaleLa tâche doit conserver l’identité et la date de soumission ainsi que l’identité et la date d’approbation.
+Ces quatre informations figurent dans le détail de la tâche clôturée et dans le rapport si le modèle le prévoit.
+Haute
+Confirmée
+DR-006
+Conservation de l’historiqueLa désactivation d’un Employé ne doit pas supprimer les tâches, soumissions ou rapports qui lui sont associés.
+Après désactivation, l’historique reste accessible au Responsable autorisé.
+Haute
+Confirmée
+DR-007
+Provenance des insights / Chaque insight doit indiquer s’il a été proposé par une règle ou ajouté manuellement par le Responsable.
+La règle source ou l’auteur, la date et le texte sont retrouvables dans le rapport final.
+Haute
+Dérivée
+DR-008
+Sélection des insights / Le système doit conserver les propositions initiales, la sélection du Responsable et les insights ajoutés.
+La sélection utilisée pour chaque génération du résumé est traçable.
+Haute
+Dérivée
+DR-009
+Résumé et rapport / Le système doit conserver le brouillon IA, le résumé modifié et confirmé, ainsi que l’origine et les métadonnées du rapport officiel.
+Les versions, auteurs, dates et liens avec l’audit restent disponibles après clôture.
+Haute
+Dérivée
+
+5 Exigences non fonctionnelles
+ID
+Exigence
+Critères d’acceptation
+Priorité
+Statut
+NFR-001
+Persistance hors ligneLes données enregistrées hors ligne doivent survivre à la fermeture normale ou au redémarrage de l’application.
+Un brouillon enregistré est retrouvé intact après redémarrage de la tablette sans réseau.
+Haute
+Dérivée
+NFR-002
+Reprise de synchronisationUne synchronisation interrompue doit pouvoir reprendre ou être relancée sans créer de doublon.
+Après une coupure pendant l’envoi, une nouvelle tentative produit une seule version serveur cohérente.
+Haute
+Dérivée
+NFR-003
+Performance webLes écrans principaux du Responsable devraient répondre en moins de 3 secondes au 95e percentile dans les conditions de charge de recette.
+Mesure en environnement de recette sur connexion normale ; cible atteinte pour connexion, liste des tâches et détail d’une tâche.
+Moyenne
+Proposée
+NFR-004
+Réactivité tabletteL’enregistrement local d’un brouillon devrait confirmer le succès en moins d’une seconde dans les conditions de recette.
+Mesure sur les modèles de tablette supportés, sans réseau.
+Moyenne
+Proposée
+NFR-005
+Génération du rapportLa génération d’un rapport devrait se terminer en moins de 30 secondes dans les conditions de recette.
+Au moins 95 % des rapports du jeu d’essai respectent la cible et un échec produit un message récupérable.
+Moyenne
+Proposée
+NFR-006
+Compatibilité webLa plateforme web doit fonctionner sur les deux dernières versions majeures des navigateurs approuvés par le projet.
+La matrice de compatibilité est définie avant recette et les parcours critiques y sont testés.
+Moyenne
+Proposée
+NFR-007
+Erreurs et observabilitéLe système doit journaliser les erreurs serveur, échecs de synchronisation et échecs de génération de rapport avec un identifiant de corrélation.
+Une erreur de test peut être retrouvée sans exposer le mot de passe ni le contenu sensible dans les journaux.
+Haute
+Dérivée
+NFR-008
+Utilisabilité tactileLes contrôles de saisie tablette doivent être lisibles, utilisables au toucher et accompagnés de messages de validation compréhensibles.
+Les parcours critiques sont réalisables sans zoom obligatoire ni élément interactif inaccessible au toucher.
+Haute
+Confirmée
+
+6 Exigences de sécurité
+ID
+Exigence
+Critères d’acceptation
+Priorité
+Statut
+SEC-001
+Comptes individuelsChaque utilisateur doit utiliser un compte nominatif ; aucun compte partagé n’est autorisé.
+Les actions de soumission et d’approbation sont attribuables à un identifiant utilisateur unique.
+Haute
+Dérivée
+SEC-002
+Autorisation par rôleLe système doit appliquer les permissions Responsable et Employé côté serveur.
+Un Employé ne peut pas appeler une fonction réservée au Responsable, même en modifiant directement la requête.
+Haute
+Dérivée
+SEC-003
+Cloisonnement des équipesLe Responsable doit accéder uniquement aux Employés, tâches et rapports de son équipe ; l’Employé uniquement à ses tâches.
+Les tests d’autorisation croisée retournent un refus sans divulguer les données demandées.
+Haute
+Dérivée
+SEC-004
+Stockage des mots de passeLes mots de passe doivent être hachés avec un algorithme adaptatif reconnu et un sel unique ; ils ne doivent jamais être stockés ou journalisés en clair.
+La revue technique confirme l’absence de mot de passe récupérable et l’utilisation de paramètres conformes à la norme interne retenue.
+Haute
+Dérivée
+SEC-005
+Transport chiffréToutes les communications client-serveur doivent utiliser TLS ; les connexions non chiffrées doivent être refusées ou redirigées de manière sûre.
+Aucun endpoint authentifié n’est accessible en HTTP non chiffré dans l’environnement déployé.
+Haute
+Dérivée
+SEC-006
+SessionLes sessions doivent expirer après la durée d’inactivité approuvée et être invalidées après déconnexion ou désactivation du compte.
+Après expiration, déconnexion ou désactivation, la réutilisation du jeton ou cookie est refusée.
+Haute
+Proposée
+SEC-007
+Protection localeLes brouillons conservés sur tablette doivent être protégés par les mécanismes sécurisés de la plateforme et rendus inaccessibles après déconnexion selon la politique retenue.
+La revue de sécurité confirme l’absence de stockage en clair dans un emplacement accessible aux autres applications.
+Haute
+Dérivée
+SEC-008
+Validation serveurLe serveur doit valider les entrées, formats, tailles et autorisations indépendamment des contrôles de l’interface.
+Des requêtes invalides ou non autorisées sont rejetées sans altérer les données.
+Haute
+Dérivée
+SEC-009
+SecretsLes secrets techniques et clés ne doivent pas être inclus dans le code source ni exposés au client.
+L’analyse du dépôt et de l’application distribuée ne révèle aucun secret actif.
+Haute
+Dérivée
+SEC-010
+Pièces jointesLes documents externes doivent être limités aux types et tailles approuvés, renommés de manière sûre et analysés avant mise à disposition.
+Un type interdit, un fichier dépassant la limite ou un fichier détecté comme malveillant est rejeté.
+Haute
+Proposée
+SEC-011
+Événements de sécuritéLe système doit journaliser les connexions échouées, désactivations, refus d’autorisation et opérations sensibles sans créer un audit métier exhaustif.
+Chaque événement contient au minimum la date, le type, l’acteur ou identifiant disponible et le résultat, sans secret ni mot de passe.
+Moyenne
+Dérivée
+SEC-012
+Mot de passe temporaireLe mot de passe temporaire doit être invalidé dès que l’Employé définit son nouveau mot de passe et ne doit jamais permettre un accès opérationnel avant ce changement.
+Après l’activation, toute tentative avec le mot de passe temporaire est refusée ; avant l’activation, l’utilisateur est limité au changement obligatoire du mot de passe.
+Haute
+Dérivée
+SEC-011
+Contrôle de l’IA / Le résumé doit être généré uniquement à partir des données et insights autorisés et ne doit jamais être traité comme une décision automatique.
+Le Responsable doit confirmer explicitement le texte ; les entrées, la sortie initiale, la version finale et les métadonnées du modèle sont journalisées.
+Haute
+Dérivée
+
+7 Traçabilité
+Source
+Exigences principales
+DEC-002
+FR-025 à FR-031, DR-002, DR-003, DR-007 et DR-008
+DEC-003
+FR-019 à FR-023, NFR-001, NFR-002
+DEC-005
+FR-016
+DEC-006
+FR-032, FR-033
+DEC-007
+FR-009
+DEC-008
+FR-015
+DEC-009
+FR-007, FR-013, FR-014, FR-023, FR-024
+DEC-010
+FR-008, FR-017, FR-018
+DEC-011 et Q-011 résolue
+FR-001, FR-004, SEC-004, SEC-006, SEC-012
+DEC-012
+DR-005, SEC-011
+DEC-013
+FR-006, FR-010
+DEC-014
+FR-021, FR-022, NFR-002
+DEC-015
+FR-002 à FR-006, DR-006
+DEC-016
+FR-029 à FR-036, DR-007 à DR-009, SEC-010
+DEC-017 à DEC-020
+FR-031 à FR-036, FR-038, FR-040 à FR-042, DR-007 à DR-009, SEC-010 et SEC-011
+
+8 Points à valider avant approbation
+ID
+Décision attendue
+Effet sur la SRS
+VAL-001
+Approuver les cibles de performance proposées.
+Permet de confirmer NFR-003 à NFR-005.
+VAL-002
+Définir la matrice navigateurs et tablettes supportés.
+Permet de confirmer NFR-006 et les environnements de recette.
+VAL-003
+Définir la durée de session, les types et la taille maximale des pièces jointes.
+Permet de confirmer SEC-006 et SEC-010.
+VAL-004
+Valider les formules, unités, tolérances et règles d’arrondi CETEM BH.
+Conditionne la recette de FR-025 à FR-028 et DR-002 à DR-004.
+VAL-005
+Définir la taille maximale configurable d’un PDF téléversé.
+Permet de fixer la valeur de recette de FR-034 et SEC-010.
+VAL-006
+Confirmer si une copie numérisée du rapport signé doit être réintégrée au système.
+Permet de définir le cycle complet de la signature manuscrite après FR-041.
+
+9 Critères de préparation à la recette
+Chaque exigence confirmée ou dérivée possède au moins un cas de test relié à son identifiant.
+Les jeux d’essai métier couvrent les limites de tolérance, les valeurs conformes, non conformes et invalides.
+Les parcours hors ligne couvrent fermeture de l’application, reprise réseau, échec d’envoi et conflit de versions.
+Les tests d’autorisation couvrent les accès entre Employés, entre équipes et entre rôles.
+Le modèle du rapport Word, la limite de taille du PDF, les métadonnées obligatoires et la gestion éventuelle d’une copie signée sont approuvés avant la recette finale.
+Les exigences proposées sont confirmées, modifiées ou explicitement reportées avant l’approbation de la SRS.

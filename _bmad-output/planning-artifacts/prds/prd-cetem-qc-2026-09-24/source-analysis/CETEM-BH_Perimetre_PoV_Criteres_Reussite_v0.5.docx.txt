@@ -1,0 +1,313 @@
+CETEM-BH
+Périmètre du Proof of Value
+Digitalisation du contrôle de qualité d’un appareil mobile de radiographie
+Ce document définit la démonstration minimale à réaliser pour vérifier rapidement la valeur métier de la solution avant le développement du produit complet. Il fixe ce qui doit être montré, les limites du PoV, les critères mesurables de réussite et les décisions qui doivent encore être validées par CETEM-BH.
+Champ
+Valeur
+Référence
+CETEM-BH-POV-001
+Version
+0.5
+Statut
+Projet pour validation
+Date
+19 septembre 2026
+Organisation
+CETEM-BH
+Périmètre métier
+Contrôle de qualité d’un appareil mobile de radiographie en mode graphie
+Sources
+Rapport CETEM-BH papier en quatre pages et exigences projet disponibles
+
+Décision attendue
+CETEM-BH doit confirmer que le parcours, les limites et les critères décrits dans ce document représentent une démonstration suffisante pour autoriser la préparation des règles métier détaillées, des maquettes et du backlog BMAD.
+
+1 Contexte et objectif
+Le contrôle est actuellement documenté dans un rapport papier de quatre pages. Ce rapport regroupe l’identification de l’intervention et des équipements, les contrôles qualitatifs et mécaniques, les mesures de performance en mode graphie, les calculs de conformité, les commentaires, la conclusion générale et les validations.
+Le PoV doit démontrer qu’un parcours numérique peut réduire la ressaisie et les calculs manuels tout en conservant la structure métier du rapport CETEM-BH. Il ne constitue ni une mise en production ni la totalité du futur produit.
+Objectif principal
+Permettre à un employé de renseigner un contrôle de graphie mobile sur tablette, obtenir des résultats calculés automatiquement, soumettre les données au Responsable, qui sélectionne ou ajoute les insights puis génère un résumé assisté par IA, puis produire le rapport officiel par génération Word ou téléversement d’un document réalisé manuellement.
+Valeur à prouver
+Le formulaire numérique couvre fidèlement les informations utiles du rapport papier.
+Les calculs et verdicts réduisent les opérations manuelles et les risques d’erreur.
+Le parcours reste praticable sur tablette dans le contexte d’une intervention terrain.
+Le Responsable examine les mesures soumises sans les modifier, sélectionne ou ajoute les insights, génère puis révise le résumé IA, le confirme, valide ou non le travail et décide ensuite de la conformité de la machine.
+Le rapport officiel peut être généré à partir des données, des insights retenus et du résumé confirmé, ou provenir d’un document produit manuellement et téléversé.
+2 Démonstration cible
+La démonstration couvre un parcours validé jusqu’au rapport officiel et un parcours aboutissant à une machine non conforme. Elle montre aussi la saisie hors ligne, la décision distincte de conformité machine, le PDF manuel et l’impression pour signature manuscrite.
+Ouvrir une mission de contrôle existante ou un dossier de démonstration.
+Renseigner l’établissement, le lieu, la nature de l’intervention et les références.
+Identifier l’équipement, le tube à rayons X, le générateur HT et les instruments de mesure.
+Effectuer les contrôles visuels qualitatifs et les contrôles de sécurité mécanique.
+Saisir les mesures des essais de performance en mode graphie.
+Afficher automatiquement les moyennes, écarts, coefficients et verdicts.
+Après soumission, afficher des insights déterministes au Responsable et lui permettre de sélectionner les plus pertinents ou d’en ajouter de nouveaux.
+Soumettre les données figées et permettre au Responsable de préparer le résumé sans modifier les mesures.
+Après confirmation du résumé, permettre au Responsable de conclure directement Machine conforme ou Machine non conforme, puis de générer le rapport Word ou téléverser un PDF manuel.
+3 Périmètre fonctionnel inclus
+Domaine
+Fonction démontrée
+Dossier
+Ouverture d’un contrôle de démonstration et affichage de son état.
+Intervention
+Établissement, service ou lieu, demande ponctuelle ou convention, références CETEM-BH et client.
+Équipements
+Marque, modèle, numéro de série et date de mise en service pour l’équipement, le tube RX et le générateur HT.
+Instruments
+Désignation, marque, modèle et numéro de série des instruments de mesure.
+Contrôles qualitatifs
+Réponses Oui, Non ou N.A., commentaires et validation des champs obligatoires.
+Sécurité mécanique
+Freins, mouvements et éléments présents dans le formulaire de référence.
+Performance
+Exactitude et répétabilité de la tension, reproductibilité du Kerma, linéarité et géométrie du faisceau.
+Calculs
+Calcul automatique des valeurs dérivées selon les règles validées par CETEM-BH.
+Verdicts, insights et résumé
+Résultats calculés et insights proposés par règles ; sélection ou ajout par le Responsable ; résumé généré par IA puis révisé et confirmé humainement.
+Brouillon
+Sauvegarde locale du contrôle en cours sur l’appareil de démonstration.
+Révision
+Vue Responsable en lecture seule sur les mesures ; sélection ou ajout des insights, génération et confirmation du résumé, puis décision Machine conforme ou Machine non conforme.
+Rapport
+Après validation et décision Conforme ou Non conforme : génération Word imprimable pour signature manuscrite ou téléversement d’un PDF manuel.
+
+4 Essais de performance couverts
+Essai
+Entrées principales
+Résultat attendu du PoV
+Exactitude de la tension
+kV affiché et kV mesuré
+Écart calculé et comparaison à la tolérance validée.
+Répétabilité de la tension
+Série de mesures de kV
+Minimum, maximum, moyenne, écarts et verdict.
+Reproductibilité du Kerma
+Série de valeurs Kerma
+Kerma moyen, écarts relatifs et verdict.
+Linéarité
+kV, mAs, Kerma détecteur et paramètres de distance
+Kerma à 1 m, coefficients K1 et K2, écarts et verdict.
+Géométrie du faisceau
+Écarts mesurés et distance foyer-récepteur
+Somme des écarts, rapport géométrique et verdict.
+
+Les formules, tolérances, règles d’arrondi et cas limites seront définis dans un Catalogue des règles de calcul et de décision distinct. Aucune règle absente ou ambiguë dans le formulaire papier ne doit être inventée pendant l’implémentation.
+5 Périmètre explicitement exclu
+Les éléments suivants appartiennent au MVP ou à une phase ultérieure. Ils ne conditionnent pas la réussite du PoV :
+Authentification de production, invitations par courriel et gestion complète du mot de passe temporaire.
+Administration complète des employés, responsables, équipes et habilitations.
+Synchronisation hors ligne entre plusieurs appareils et résolution des conflits.
+Moteur générique de création de formulaires ou prise en charge d’autres types de contrôle.
+Notifications réelles, intégration de messagerie et relances automatiques.
+Signature électronique qualifiée, cachet numérique ou certification du document.
+Journal d’audit complet, supervision, sauvegarde et reprise après sinistre.
+Durcissement de sécurité, homologation, déploiement de production et engagements de disponibilité.
+Migration de l’historique papier et intégrations avec d’autres systèmes CETEM-BH.
+6 Utilisateurs et responsabilités dans le PoV
+Profil
+Responsabilité démontrée
+Limite du PoV
+Employé
+Renseigne le contrôle, consulte les calculs et soumet les mesures et commentaires au Responsable.
+Le compte peut être simulé ou préconfiguré.
+Responsable
+Examine les données sans modifier les mesures, sélectionne ou ajoute les insights, génère et confirme le résumé IA, décide directement de la conformité machine et finalise le rapport.
+La décision reste humaine.
+Administrateur
+Non nécessaire à la démonstration principale.
+Aucun module d’administration complet.
+
+7 Critères de réussite
+ID
+Critère mesurable
+Preuve attendue
+CR-01
+Le parcours couvre les informations nécessaires des quatre pages du rapport de référence.
+Revue champ par champ avec un représentant CETEM-BH.
+CR-02
+Un employé complète un contrôle de démonstration sur tablette sans revenir au formulaire papier.
+Démonstration chronométrée et observation utilisateur.
+CR-03
+Les champs obligatoires, formats invalides et mesures manquantes sont signalés clairement.
+Scénarios de saisie invalide exécutés pendant la recette.
+CR-04
+Tous les calculs du cas de référence correspondent aux résultats validés manuellement par CETEM-BH.
+Jeu de données de référence avec résultats attendus signés ou approuvés.
+CR-05
+Chaque essai affiche un verdict conforme ou non conforme cohérent avec la règle validée.
+Cas passant, cas échouant et cas à la limite pour chaque essai.
+CR-06
+Le brouillon reste disponible après fermeture ou actualisation de l’application sur le même appareil.
+Test de reprise du brouillon.
+CR-07
+Après soumission, les mesures et commentaires sont non modifiables ; le Responsable peut gérer les insights et le résumé de synthèse.
+Tentative de modification des mesures refusée ; modification des insights ou du résumé autorisée avant confirmation.
+CR-08
+L’IA génère un résumé uniquement à partir des données et insights retenus par le Responsable.
+Comparaison des entrées enregistrées avec le brouillon produit.
+CR-09
+Un rapport manuel PDF peut être téléversé et déclaré officiel ; tout autre format est refusé.
+Téléversement d’un PDF valide puis tentative avec un autre format.
+CR-10
+La tâche ne peut être clôturée qu’après désignation d’un rapport officiel généré ou téléversé.
+Test des deux branches de finalisation et du blocage sans rapport.
+CR-11
+Le parcours complet de démonstration dure au maximum quinze minutes avec les données préparées.
+Chronométrage de la démonstration finale.
+CR-12
+CETEM-BH confirme que la démonstration justifie la poursuite vers le MVP.
+Compte rendu de validation ou décision documentée.
+CR-13
+Après confirmation du résumé IA, le Responsable décide directement si la machine est conforme ou non conforme.
+Démonstration des deux décisions finales sans étape de validation ou rejet du travail.
+CR-15
+La saisie et la sauvegarde fonctionnent hors ligne puis se synchronisent sans perte ni doublon.
+Démonstration avec coupure puis retour du réseau.
+CR-16
+Le rapport généré est imprimable avec les zones nécessaires à la signature manuscrite.
+Impression ou aperçu d’impression du rapport.
+
+8 Scénarios minimaux de validation
+Scénario
+But
+Résultat attendu
+S1 Contrôle conforme
+Valider le parcours nominal.
+Tous les essais passent et la conclusion proposée est conforme.
+S2 Contrôle non conforme
+Vérifier le traitement d’une valeur hors tolérance.
+L’essai concerné échoue et la conclusion reflète la règle validée.
+S3 Valeur limite
+Vérifier le comportement exact au seuil.
+Résultat identique au catalogue des règles métier.
+S4 Donnée manquante
+Tester les validations de saisie.
+La soumission est bloquée ou autorisée selon la règle validée.
+S5 Reprise du brouillon
+Vérifier la continuité terrain.
+Les données locales sont restaurées sur le même appareil.
+S6 Rapport généré
+Vérifier la branche de génération après décision de conformité.
+Le Word reprend les données soumises, le résumé confirmé, la conformité machine et les zones de signature.
+S7 Insights et résumé IA
+Vérifier sélection, ajout, génération, modification et confirmation.
+Les propositions, ajouts, entrées IA, brouillon et résumé final conservent leur provenance.
+S8 Rapport téléversé
+Vérifier la branche manuelle.
+Le fichier et ses métadonnées sont associés au contrôle et déclarés officiels.
+S9 Clôture bloquée
+Vérifier la règle de finalisation.
+La clôture est refusée tant qu’aucun rapport officiel n’existe.
+S11 Hors ligne
+Vérifier le travail sans réseau.
+Saisie sauvegardée et synchronisation sans perte ni doublon.
+
+9 Hypothèses et contraintes
+Le PoV traite uniquement le contrôle d’un appareil mobile de radiographie en mode graphie.
+Le formulaire est fixe et directement dérivé du rapport CETEM-BH fourni.
+Les insights proposés sont déterminés par des règles explicites et non par une intelligence artificielle générative.
+La démonstration peut utiliser des comptes et données préconfigurés.
+La sauvegarde locale prouve la reprise d’un brouillon, mais pas une architecture hors ligne complète.
+Le rapport Word imprimable et le téléversement d’un PDF manuel sont inclus. La signature reste manuscrite et le fonctionnement hors ligne est obligatoire dans le PoV.
+Les calculs ne seront considérés comme corrects qu’après validation d’exemples chiffrés par un expert métier CETEM-BH.
+10 Décisions métier à obtenir
+ID
+Décision attendue
+Impact si non résolu
+D-01
+Confirmer la tolérance et la formule exactes du contrôle géométrique.
+Verdict géométrique impossible à fiabiliser.
+D-02
+Définir la règle de conclusion générale lorsqu’un ou plusieurs essais échouent.
+Conclusion automatique ambiguë.
+D-03
+Préciser la valeur ou le mode de détermination de kVmax.
+Saisie et scénario d’exactitude incomplets.
+D-04
+Confirmer le traitement d’une réponse N.A. et son effet sur le verdict.
+Blocage ou validation incohérente.
+D-05
+Définir les décimales, la méthode et le moment de l’arrondi.
+Écarts possibles avec les calculs manuels.
+D-06
+Confirmer si les seuils sont stricts ou inclusifs à 5 %, 10 % et 15 %.
+Verdict incertain sur les valeurs limites.
+D-07
+Confirmer la formule de linéarité, le calcul de K2 et les mesures prises en compte.
+Calcul de linéarité non validable.
+D-08
+Définir les champs obligatoires avant soumission et avant approbation.
+Validations d’interface incomplètes.
+D-09
+Valider les informations et signatures devant apparaître dans le rapport Word.
+Rapport final potentiellement inutilisable.
+D-10
+Confirmer la taille maximale configurable du PDF téléversé.
+Valeur de recette du contrôle de taille à fixer.
+D-11
+Confirmer si le rapport signé manuellement doit être numérisé et réintégré.
+Cycle documentaire après impression à préciser.
+D-12
+Aucune réouverture ni modification d’un contrôle terminé. Une nouvelle intervention crée un nouveau contrôle indépendant.
+Décision confirmée et testable.
+
+11 Livrables attendus du PoV
+Application web responsive utilisable sur une tablette de démonstration.
+Formulaire numérique fixe correspondant au contrôle sélectionné.
+Bibliothèque de fonctions de calcul testées avec les jeux de référence.
+Vue de synthèse en lecture seule permettant au Responsable de préparer le résumé et de décider directement de la conformité machine.
+Sauvegarde et reprise locale d’un brouillon.
+Générateur Word imprimable, téléversement PDF, décision de conformité machine et synchronisation hors ligne.
+Jeux de données de démonstration conforme et non conforme.
+Résultats de la recette PoV et liste des écarts reportés au MVP.
+12 Conditions de passage au MVP
+Le passage au MVP peut être recommandé lorsque les critères CR-01 à CR-11 sont satisfaits, que CETEM-BH accepte les résultats du jeu de référence et que les écarts restants sont documentés. Les deux modes de finalisation doivent être démontrés et la gouvernance des insights, des pièces jointes et des versions de rapport doit être décidée.
+13 Étapes documentaires suivantes
+Ordre
+Document
+Résultat
+1
+Workflow actuel et workflow cible
+Parcours métier et responsabilités validés.
+2
+Catalogue des champs
+Chaque champ du papier est mappé avec type, obligation et source.
+3
+Catalogue des calculs et décisions
+Formules, seuils, arrondis, cas limites et conclusions validés.
+4
+Matrice des rôles et permissions
+Droits employé, responsable et administrateur définis.
+5
+Maquettes du PoV
+Écrans tablette et révision approuvés avant développement.
+6
+Scénarios d’acceptation
+Cas conformes, non conformes, limites et erreurs prêts pour les tests.
+7
+Architecture technique du PoV
+Choix techniques minimaux et trajectoire vers le MVP.
+8
+Spécification BMAD
+Stories d’implémentation fondées sur des décisions validées.
+
+14 Approbation du cadrage
+La validation de ce document autorise la préparation des documents détaillés. Elle ne vaut pas acceptation du produit final ni autorisation de mise en production.
+Rôle
+Nom
+Décision
+Date et signature
+Référent métier CETEM-BH
+À compléter
+Approuvé / À réviser
+
+Responsable du projet
+À compléter
+Approuvé / À réviser
+
+Responsable technique
+À compléter
+Pris en compte
+
+

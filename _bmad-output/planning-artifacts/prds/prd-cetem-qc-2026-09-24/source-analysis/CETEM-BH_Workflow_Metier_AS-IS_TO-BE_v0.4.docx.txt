@@ -1,0 +1,316 @@
+
+Workflow métier AS IS et TO BE
+PoV du système numérique de contrôle qualité des équipements radiologiques
+
+Champ
+Valeur
+Référence
+0.4
+Version
+0.2
+Statut
+Brouillon pour validation métier
+Date de version
+19 septembre 2026
+Organisation
+CETEM BH
+Documents liés
+Vision v0.6, SRS v0.5 et Périmètre du PoV v0.3
+
+Ce document décrit le passage du rapport papier actuel vers un processus numérique traçable. Il fixe l’ordre des activités, les responsabilités, les validations et les deux modes de production du rapport officiel.
+
+1 Objet et décision de conception
+Le PoV doit numériser un contrôle qualité depuis l’ouverture de l’intervention jusqu’à la mise à disposition du rapport officiel. Les calculs et tolérances sont appliqués avant la synthèse. Après la soumission, les insights sont présentés au Responsable, qui retient les constats pertinents ou en ajoute avant de demander le résumé IA.
+Décision principale. 
+L’Employé saisit les informations, mesures et observations du contrôle.
+Le système calcule les résultats, évalue les tolérances et propose des insights.
+L’Employé soumet les mesures et commentaires ; il ne sélectionne pas les insights finaux.
+Le Responsable examine les données sans modifier les mesures, sélectionne ou ajoute les insights, puis génère, révise et confirme le résumé IA.
+Le Responsable confirme le résumé préparé à partir des insights retenus. Une décision Machine non conforme est une conclusion normale du contrôle et permet de finaliser le rapport.
+Il décide ensuite directement si la machine est conforme ou non conforme, puis génère le Word ou téléverse un PDF manuel.
+Un seul rapport devient officiel pour une version donnée du contrôle.
+2 Périmètre observé dans le rapport papier
+Bloc
+Éléments observés
+Identification
+Établissement, service ou lieu, nature de l’intervention, références CETEM BH et client.
+Équipement
+Marque, modèle, numéro de série et informations du tube à rayons X et du générateur HT.
+Outils de contrôle
+Désignation, marque, modèle et numéro de série des instruments de mesure.
+Contrôles qualitatifs
+Contrôles visuels et sécurité mécanique avec réponses N.A, Oui ou Non.
+Mesures et calculs
+Exactitude et répétabilité de la tension, reproductibilité, répétabilité et linéarité du rayonnement de sortie, géométrie du faisceau.
+Conclusion
+Commentaires, conclusion générale, identité du contrôleur, date, signatures et approbation du chef de service.
+
+3 Workflow actuel AS IS
+Étape
+Activité actuelle
+Support ou résultat
+1
+Préparer le formulaire correspondant au type d’appareil.
+Modèle papier en quatre pages.
+2
+Renseigner l’établissement, le service, l’intervention et l’identification de l’équipement.
+Champs manuscrits.
+3
+Identifier les appareils et outils utilisés pour les mesures.
+Tableau des instruments.
+4
+Réaliser les contrôles visuels et mécaniques.
+Cases N.A, Oui ou Non.
+5
+Saisir les mesures et effectuer les calculs de conformité.
+Tableaux, formules et tolérances.
+6
+Responsable
+Examine les données en lecture seule, sélectionne ou ajoute les insights, puis demande, révise et confirme le résumé IA.
+7
+Responsable
+Après confirmation du résumé, conclut directement Machine conforme ou Machine non conforme.
+8
+Signer, faire approuver puis classer ou transmettre le rapport.
+Rapport papier officiel.
+
+Limites principales. 
+Double saisie et risque d’erreur de calcul.
+Traçabilité limitée des corrections et validations.
+Difficulté à réutiliser les constats pour une synthèse cohérente.
+Absence de distinction structurée entre résultats calculés, insights retenus et rapport officiel.
+
+4 Workflow cible TO BE
+Étape
+Acteur
+Action
+Sortie ou statut
+1
+Employé
+Crée un contrôle et renseigne l’établissement, l’intervention, l’équipement et les instruments.
+Brouillon
+2
+Employé
+Complète les contrôles qualitatifs, mesures et commentaires, avec sauvegarde progressive.
+Saisie en cours
+3
+Système
+Vérifie les champs requis, calcule les indicateurs et compare les résultats aux tolérances configurées.
+Résultats calculés
+4
+Système
+Produit des insights proposés, chacun relié aux données et règles qui l’ont déclenché.
+Insights proposés
+5
+Employé
+Soumet les mesures et commentaires ; les données deviennent figées.
+Audit soumis et figé
+6
+Responsable
+Examine les données en lecture seule, sélectionne ou ajoute les insights, puis demande un résumé à l’IA.
+Décision sur le travail
+7
+Responsable
+Conclut directement Machine conforme ou Machine non conforme.
+Conformité décidée
+8A
+Responsable
+Choisit Générer le rapport; le système crée un Word imprimable avec les zones de signature.
+Rapport généré
+8B
+Responsable
+Choisit Téléverser un rapport et ajoute uniquement un fichier PDF.
+Rapport PDF téléversé
+9
+Responsable
+Confirme le rapport comme version officielle; le rapport généré peut être imprimé et signé manuellement.
+Contrôle terminé
+10
+Système
+Conserve l’historique immuable et synchronise les opérations réalisées hors ligne.
+Historique consultable
+
+5 Cycle de vie du contrôle
+Statut
+Déclencheur
+Actions autorisées
+Statut suivant
+Brouillon
+Création du contrôle
+Modifier les informations générales; supprimer si autorisé.
+Saisie en cours
+Saisie en cours
+Première donnée enregistrée
+Saisir et sauvegarder, y compris sans réseau; joindre des preuves et corriger.
+Prêt pour calcul
+Prêt pour calcul
+Champs minimaux complets
+Lancer ou relancer les calculs.
+Résultats calculés
+Résultats calculés
+Calculs terminés sans erreur bloquante
+Consulter les résultats et générer les propositions.
+Insights proposés
+Insights proposés
+Propositions disponibles
+L’Employé vérifie les résultats puis soumet les données sans constituer la sélection finale.
+Audit soumis
+Audit soumis
+Soumission par l’Employé
+Les mesures et commentaires sont figés ; le Responsable prépare les insights et confirme le résumé IA.
+Résumé confirmé
+Résumé confirmé
+Résumé révisé et confirmé par le Responsable
+Décider directement de la conformité de la machine.
+Machine conforme ou non conforme
+Machine conforme ou non conforme
+Décision du Responsable
+Générer le Word ou téléverser un PDF manuel.
+Rapport disponible
+Terminé
+Rapport officialisé
+Consulter l’historique sans modification.
+État terminal
+
+6 Gestion détaillée des insights
+Type
+Création
+Traitement
+Traçabilité minimale
+Proposé
+Créé automatiquement après soumission à partir d’une règle déterministe.
+Le Responsable le sélectionne ou l’écarte pendant la revue.
+Règle, données sources, résultat, auteur système et date.
+Manuel
+Ajouté par le Responsable pendant la revue.
+Il est associé à la revue et peut alimenter le résumé IA.
+Texte, justification, auteur, date et éventuelle preuve.
+Soumis
+Inclus par l’Employé dans l’audit soumis.
+Devient non modifiable; le Responsable évalue l’audit global.
+Auteur, date, provenance et version.
+Écarté
+Non retenu par le Responsable pendant la revue.
+N’apparaît pas dans le rapport, mais reste traçable.
+Responsable et date de la sélection.
+
+7 Finalisation du rapport
+Option
+Préconditions
+Traitement
+Contrôles
+Générer le rapport Word
+Résumé confirmé, conformité machine décidée et données obligatoires complètes.
+Le système injecte les données, calculs, décision, insights retenus et résumé confirmé dans le modèle approuvé.
+Modèle et version enregistrés; fichier consultable avant confirmation.
+Téléverser le rapport manuel
+Résumé confirmé, conformité machine décidée et fichier PDF conforme à la taille autorisée.
+Le Responsable ajoute le PDF préparé hors système et renseigne les métadonnées requises.
+PDF uniquement; taille, nom, empreinte, auteur, date et version.
+
+Règle d’unicité. 
+Un contrôle terminé possède un seul rapport officiel immuable. Avant finalisation, un brouillon de rapport peut être régénéré ou remplacé. Après finalisation, toute correction exige un nouvel audit lié et conserve intégralement l’historique.
+8 Rôles et permissions
+Capacité
+Employé
+Responsable
+Système
+Créer et saisir un contrôle
+Oui
+Oui si habilité
+Non
+Modifier les mesures avant soumission
+Oui
+Non pendant la revue
+Non
+Exécuter les calculs
+Déclenche
+Déclenche si nécessaire
+Exécute et journalise
+Sélectionner et ajouter des insights
+Non
+Oui après soumission
+Propose les constats déterministes
+Décider conformité machine
+Non
+Oui; Conforme ou Non conforme
+Non
+Décider de la conformité machine
+Non
+Oui après résumé confirmé
+Non
+Créer une nouvelle tâche
+Non
+Hors du flux de décision
+Lie les deux tâches
+Générer le rapport
+Non après soumission
+Oui
+Produit le document
+Téléverser le rapport manuel
+Non après soumission
+Oui
+Contrôle le fichier
+Déclarer le rapport officiel
+Non
+Oui
+Versionne et journalise
+Consulter l’historique
+Oui selon périmètre; sans modification
+Oui; sans modification
+Conserve les événements
+
+9 Exceptions et reprises
+Situation
+Comportement attendu
+Champ obligatoire manquant
+Bloquer le passage au calcul et indiquer précisément les champs concernés.
+Valeur hors plage de saisie
+Refuser ou demander confirmation selon la règle; journaliser toute dérogation autorisée.
+Résultat hors tolérance
+Créer un résultat non conforme et proposer un insight explicite sans conclure automatiquement le rapport.
+Échec de calcul
+Conserver la saisie, afficher l’erreur et empêcher la soumission tant que le problème persiste.
+Machine non conforme
+Décision du Responsable après confirmation du résumé.
+Rapport téléversé invalide
+Refuser le fichier sans perdre les données ni les insights soumis.
+Perte de connexion
+Continuer la saisie et les calculs hors ligne, puis synchroniser sans perte ni doublon au retour du réseau.
+Conflit de versions
+Empêcher l’écrasement silencieux et demander à l’utilisateur de recharger ou fusionner.
+
+
+10 Scénarios de validation du workflow
+ID
+Scénario
+Résultat attendu
+WF-01
+Parcours Machine conforme avec rapport généré.
+Le Word contient les données, insights et résumé confirmés, indique Machine conforme et devient officiel.
+WF-02
+Parcours conforme avec rapport manuel.
+Le PDF téléversé est accepté, identifié comme manuel et devient officiel; un autre format est refusé.
+WF-03
+Insight automatique écarté par le Responsable.
+L’insight reste traçable mais n’est pas utilisé dans le résumé ni inclus dans le rapport.
+WF-04
+Insight manuel ajouté avant soumission.
+L’auteur et la justification sont conservés; après soumission, le contenu est non modifiable.
+WF-06
+Résumé confirmé avec machine non conforme.
+Le contrôle peut être terminé et le rapport indique Machine non conforme.
+WF-07
+Consultation d’un audit terminé.
+Responsable et Employé autorisés voient l’historique mais ne peuvent rien modifier.
+WF-08
+Interruption réseau pendant la saisie.
+Le travail continue hors ligne puis se synchronise sans perte ni doublon.
+WF-09
+Impression du rapport généré.
+Le Word contient les zones prévues et peut être signé manuellement après impression.
+
+11 Points à valider avec CETEM BH
+Un contrôle peut-il être finalisé sans aucun insight validé lorsque tous les résultats sont conformes ?
+Quelle taille maximale configurable doit être appliquée au PDF téléversé ?
+Après signature manuscrite, une copie numérisée du rapport signé doit-elle être réintégrée dans le système ?

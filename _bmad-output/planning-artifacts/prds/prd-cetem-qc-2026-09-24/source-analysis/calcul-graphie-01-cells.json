@@ -1,0 +1,1098 @@
+﻿[
+    {
+        "sheet":  "Feuil1",
+        "cell":  "F3",
+        "formula":  "  CALCUL DES PERFORMANCES EN MODE GRAPHIE",
+        "value":  "  CALCUL DES PERFORMANCES EN MODE GRAPHIE",
+        "text":  "  CALCUL DES PERFORMANCES EN MODE GRAPHIE",
+        "numberFormat":  "General"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "D10",
+        "formula":  "EXACTITUDE DE LA TENSION",
+        "value":  "EXACTITUDE DE LA TENSION",
+        "text":  "EXACTITUDE DE LA TENSION",
+        "numberFormat":  "General"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "L10",
+        "formula":  "REPRODUCTIBILITE DU RAYONNEMENT DE SORITE",
+        "value":  "REPRODUCTIBILITE DU RAYONNEMENT DE SORITE",
+        "text":  "REPRODUCTIBILITE DU RAYONNEMENT DE SORITE",
+        "numberFormat":  "General"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "D12",
+        "formula":  "KVa",
+        "value":  "KVa",
+        "text":  "KVa",
+        "numberFormat":  "General"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "E12",
+        "formula":  "KVm",
+        "value":  "KVm",
+        "text":  "KVm",
+        "numberFormat":  "General"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "F12",
+        "formula":  "(KVa - KVm)/Kva)*100",
+        "value":  "(KVa - KVm)/Kva)*100",
+        "text":  "(KVa - KVm)/Kva)*100",
+        "numberFormat":  "General"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "D13",
+        "formula":  "50",
+        "value":  50,
+        "text":  "50",
+        "numberFormat":  "General"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "E13",
+        "formula":  "49.2",
+        "value":  49.2,
+        "text":  "49.2",
+        "numberFormat":  "General"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "F13",
+        "formula":  "=((D13-E13)/D13)*100",
+        "value":  1.5999999999999945,
+        "text":  "1.60",
+        "numberFormat":  "0.00"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "J13",
+        "formula":  "KVa",
+        "value":  "KVa",
+        "text":  "KVa",
+        "numberFormat":  "General"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "K13",
+        "formula":  "mAs",
+        "value":  "mAs",
+        "text":  "mAs",
+        "numberFormat":  "General"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "L13",
+        "formula":  "mA",
+        "value":  "mA",
+        "text":  "mA",
+        "numberFormat":  "General"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "M13",
+        "formula":  "Temps",
+        "value":  "Temps",
+        "text":  "Temps",
+        "numberFormat":  "General"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "N13",
+        "formula":  "Kerma",
+        "value":  "Kerma",
+        "text":  "Kerma",
+        "numberFormat":  "General"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "O13",
+        "formula":  "Kerma/mAs",
+        "value":  "Kerma/mAs",
+        "text":  "Kerma/mAs",
+        "numberFormat":  "General"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "P13",
+        "formula":  "(Kerma/mAs)moy",
+        "value":  "(Kerma/mAs)moy",
+        "text":  "(Kerma/mAs)moy",
+        "numberFormat":  "General"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "Q13",
+        "formula":  "∆Kerma/mAs",
+        "value":  "∆Kerma/mAs",
+        "text":  "∆Kerma/mAs",
+        "numberFormat":  "General"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "D14",
+        "formula":  "70",
+        "value":  70,
+        "text":  "70",
+        "numberFormat":  "General"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "E14",
+        "formula":  "69.6",
+        "value":  69.6,
+        "text":  "69.6",
+        "numberFormat":  "General"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "F14",
+        "formula":  "=((D14-E14)/D14)*100",
+        "value":  0.57142857142857961,
+        "text":  "0.57",
+        "numberFormat":  "0.00"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "J14",
+        "formula":  "70",
+        "value":  70,
+        "text":  "70",
+        "numberFormat":  "General"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "K14",
+        "formula":  "40",
+        "value":  40,
+        "text":  "40",
+        "numberFormat":  "General"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "L14",
+        "formula":  "200",
+        "value":  200,
+        "text":  "200",
+        "numberFormat":  "General"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "M14",
+        "formula":  "0.2",
+        "value":  0.2,
+        "text":  "0.2",
+        "numberFormat":  "General"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "N14",
+        "formula":  "1.308",
+        "value":  1.308,
+        "text":  "1.308",
+        "numberFormat":  "General"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "O14",
+        "formula":  "=N14/K14",
+        "value":  0.0327,
+        "text":  "0.0327",
+        "numberFormat":  "General"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "P14",
+        "formula":  "= (O14+O15+O16)/3",
+        "value":  0.063250000000000015,
+        "text":  "0.06325",
+        "numberFormat":  "General"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "Q14",
+        "formula":  "= ((O14-P14)/P14)*100",
+        "value":  -48.300395256917007,
+        "text":  "-48.30",
+        "numberFormat":  "0.00"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "D15",
+        "formula":  "120",
+        "value":  120,
+        "text":  "120",
+        "numberFormat":  "General"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "E15",
+        "formula":  "119.8",
+        "value":  119.8,
+        "text":  "119.8",
+        "numberFormat":  "General"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "F15",
+        "formula":  "=((D15-E15)/D15)*100",
+        "value":  0.16666666666666904,
+        "text":  "0.17",
+        "numberFormat":  "0.00"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "J15",
+        "formula":  "70",
+        "value":  70,
+        "text":  "70",
+        "numberFormat":  "General"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "K15",
+        "formula":  "40",
+        "value":  40,
+        "text":  "40",
+        "numberFormat":  "General"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "L15",
+        "formula":  "320",
+        "value":  320,
+        "text":  "320",
+        "numberFormat":  "General"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "M15",
+        "formula":  "0.125",
+        "value":  0.125,
+        "text":  "0.125",
+        "numberFormat":  "General"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "N15",
+        "formula":  "3.154",
+        "value":  3.154,
+        "text":  "3.154",
+        "numberFormat":  "General"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "O15",
+        "formula":  "=N15/K15",
+        "value":  0.07885,
+        "text":  "0.07885",
+        "numberFormat":  "General"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "Q15",
+        "formula":  "= ((O15-P14)/P14)*100",
+        "value":  24.664031620553338,
+        "text":  "24.66",
+        "numberFormat":  "0.00"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "J16",
+        "formula":  "70",
+        "value":  70,
+        "text":  "70",
+        "numberFormat":  "General"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "K16",
+        "formula":  "40",
+        "value":  40,
+        "text":  "40",
+        "numberFormat":  "General"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "L16",
+        "formula":  "500",
+        "value":  500,
+        "text":  "500",
+        "numberFormat":  "General"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "M16",
+        "formula":  "0.08",
+        "value":  0.08,
+        "text":  "0.08",
+        "numberFormat":  "General"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "N16",
+        "formula":  "3.128",
+        "value":  3.128,
+        "text":  "3.128",
+        "numberFormat":  "General"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "O16",
+        "formula":  "=N16/K16",
+        "value":  0.0782,
+        "text":  "0.0782",
+        "numberFormat":  "General"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "Q16",
+        "formula":  "=((O16-P14)/P14)*100",
+        "value":  23.636363636363615,
+        "text":  "23.64",
+        "numberFormat":  "0.00"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "D17",
+        "formula":  "²",
+        "value":  "²",
+        "text":  "²",
+        "numberFormat":  "General"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "N17",
+        "formula":  "              ",
+        "value":  "              ",
+        "text":  "              ",
+        "numberFormat":  "General"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "B19",
+        "formula":  "KVa",
+        "value":  "KVa",
+        "text":  "KVa",
+        "numberFormat":  "General"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "C19",
+        "formula":  "KVm",
+        "value":  "KVm",
+        "text":  "KVm",
+        "numberFormat":  "General"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "D19",
+        "formula":  " ∆KVmin",
+        "value":  " ∆KVmin",
+        "text":  " ∆KVmin",
+        "numberFormat":  "General"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "E19",
+        "formula":  "∆KVmax",
+        "value":  "∆KVmax",
+        "text":  "∆KVmax",
+        "numberFormat":  "General"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "B20",
+        "formula":  "70",
+        "value":  70,
+        "text":  "70",
+        "numberFormat":  "General"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "C20",
+        "formula":  "69.7",
+        "value":  69.7,
+        "text":  "69.70",
+        "numberFormat":  "0.00"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "D20",
+        "formula":  "=SUM((B26-D26)/D26)*100",
+        "value":  -0.086132644272182424,
+        "text":  "                                0.086-",
+        "numberFormat":  "_-* #,##0.000_-;_-* #,##0.000-;_-* \"-\"??_-;_-@_-"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "E20",
+        "formula":  "= ((C26 - D26)/D26)*100",
+        "value":  0.057421762848128416,
+        "text":  "0.06",
+        "numberFormat":  "0.00"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "B21",
+        "formula":  "70",
+        "value":  70,
+        "text":  "70",
+        "numberFormat":  "General"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "C21",
+        "formula":  "69.6",
+        "value":  69.6,
+        "text":  "69.60",
+        "numberFormat":  "0.00"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "L21",
+        "formula":  "REPETABILITE DU RAYONNEMENT DE SORTIE",
+        "value":  "REPETABILITE DU RAYONNEMENT DE SORTIE",
+        "text":  "REPETABILITE DU RAYONNEMENT DE SORTIE",
+        "numberFormat":  "General"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "B22",
+        "formula":  "70",
+        "value":  70,
+        "text":  "70",
+        "numberFormat":  "General"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "C22",
+        "formula":  "69.7",
+        "value":  69.7,
+        "text":  "69.70",
+        "numberFormat":  "0.00"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "B23",
+        "formula":  "70",
+        "value":  70,
+        "text":  "70",
+        "numberFormat":  "General"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "C23",
+        "formula":  "69.6",
+        "value":  69.6,
+        "text":  "69.60",
+        "numberFormat":  "0.00"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "B24",
+        "formula":  "70",
+        "value":  70,
+        "text":  "70",
+        "numberFormat":  "General"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "C24",
+        "formula":  "69.7",
+        "value":  69.7,
+        "text":  "69.70",
+        "numberFormat":  "0.00"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "J24",
+        "formula":  "KVa",
+        "value":  "KVa",
+        "text":  "KVa",
+        "numberFormat":  "General"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "K24",
+        "formula":  "mAs",
+        "value":  "mAs",
+        "text":  "mAs",
+        "numberFormat":  "General"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "L24",
+        "formula":  "Kerma",
+        "value":  "Kerma",
+        "text":  "Kerma",
+        "numberFormat":  "General"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "M24",
+        "formula":  "Kerma/mAs",
+        "value":  "Kerma/mAs",
+        "text":  "Kerma/mAs",
+        "numberFormat":  "General"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "N24",
+        "formula":  "Kerma_moy",
+        "value":  "Kerma_moy",
+        "text":  "Kerma_moy",
+        "numberFormat":  "General"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "O24",
+        "formula":  "(Kerma/mAs)moy",
+        "value":  "(Kerma/mAs)moy",
+        "text":  "(Kerma/mAs)moy",
+        "numberFormat":  "General"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "P24",
+        "formula":  "∆Kerma",
+        "value":  "∆Kerma",
+        "text":  "∆Kerma",
+        "numberFormat":  "General"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "B25",
+        "formula":  "KVm_min",
+        "value":  "KVm_min",
+        "text":  "KVm_min",
+        "numberFormat":  "General"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "C25",
+        "formula":  "KVm_max",
+        "value":  "KVm_max",
+        "text":  "KVm_max",
+        "numberFormat":  "General"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "D25",
+        "formula":  "KVm_moy",
+        "value":  "KVm_moy",
+        "text":  "KVm_moy",
+        "numberFormat":  "General"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "J25",
+        "formula":  "70",
+        "value":  70,
+        "text":  "70",
+        "numberFormat":  "General"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "K25",
+        "formula":  "40",
+        "value":  40,
+        "text":  "40",
+        "numberFormat":  "General"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "L25",
+        "formula":  "2.677",
+        "value":  2.677,
+        "text":  "2.677",
+        "numberFormat":  "General"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "M25",
+        "formula":  "= L25/K25",
+        "value":  0.066925,
+        "text":  "0.066925",
+        "numberFormat":  "General"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "N25",
+        "formula":  "=(L25+L26+L27+L28+L29)/5",
+        "value":  2.7006,
+        "text":  "2.7006",
+        "numberFormat":  "General"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "O25",
+        "formula":  "=(M25+M26+M27+M28+M29)/5",
+        "value":  0.067515,
+        "text":  "0.067515",
+        "numberFormat":  "General"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "P25",
+        "formula":  "=((L25-N25)/N25)*100",
+        "value":  -0.87387987854551075,
+        "text":  "-0.8739",
+        "numberFormat":  "0.0000"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "B26",
+        "formula":  "69.6",
+        "value":  69.6,
+        "text":  "69.6",
+        "numberFormat":  "General"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "C26",
+        "formula":  "69.7",
+        "value":  69.7,
+        "text":  "69.7",
+        "numberFormat":  "General"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "D26",
+        "formula":  "=SUM(C20:C24)/5",
+        "value":  69.66,
+        "text":  "69.66",
+        "numberFormat":  "0.00"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "J26",
+        "formula":  "70",
+        "value":  70,
+        "text":  "70",
+        "numberFormat":  "General"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "K26",
+        "formula":  "40",
+        "value":  40,
+        "text":  "40",
+        "numberFormat":  "General"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "L26",
+        "formula":  "2.708",
+        "value":  2.708,
+        "text":  "2.708",
+        "numberFormat":  "General"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "M26",
+        "formula":  "= L26/K26",
+        "value":  0.06770000000000001,
+        "text":  "0.0677",
+        "numberFormat":  "General"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "P26",
+        "formula":  "=((L26-N25)/N25)*100",
+        "value":  0.27401318225579774,
+        "text":  "0.2740",
+        "numberFormat":  "0.0000"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "J27",
+        "formula":  "70",
+        "value":  70,
+        "text":  "70",
+        "numberFormat":  "General"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "K27",
+        "formula":  "40",
+        "value":  40,
+        "text":  "40",
+        "numberFormat":  "General"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "L27",
+        "formula":  "2.705",
+        "value":  2.705,
+        "text":  "2.705",
+        "numberFormat":  "General"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "M27",
+        "formula":  "= L27/K27",
+        "value":  0.067625,
+        "text":  "0.067625",
+        "numberFormat":  "General"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "P27",
+        "formula":  "= ((L27-N25)/N25)*100",
+        "value":  0.16292675701695769,
+        "text":  "0.16",
+        "numberFormat":  "0.00"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "J28",
+        "formula":  "70",
+        "value":  70,
+        "text":  "70",
+        "numberFormat":  "General"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "K28",
+        "formula":  "40",
+        "value":  40,
+        "text":  "40",
+        "numberFormat":  "General"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "L28",
+        "formula":  "2.708",
+        "value":  2.708,
+        "text":  "2.708",
+        "numberFormat":  "General"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "M28",
+        "formula":  "= L28/K28",
+        "value":  0.06770000000000001,
+        "text":  "0.0677",
+        "numberFormat":  "General"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "P28",
+        "formula":  "= ((L28-N25)/N25)*100",
+        "value":  0.27401318225579774,
+        "text":  "0.27",
+        "numberFormat":  "0.00"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "J29",
+        "formula":  "70",
+        "value":  70,
+        "text":  "70",
+        "numberFormat":  "General"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "K29",
+        "formula":  "40",
+        "value":  40,
+        "text":  "40",
+        "numberFormat":  "General"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "L29",
+        "formula":  "2.705",
+        "value":  2.705,
+        "text":  "2.705",
+        "numberFormat":  "General"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "M29",
+        "formula":  "= L29/K29",
+        "value":  0.067625,
+        "text":  "0.067625",
+        "numberFormat":  "General"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "P29",
+        "formula":  "=((L29-N25)/N25)*100",
+        "value":  0.16292675701695769,
+        "text":  "0.16",
+        "numberFormat":  "0.00"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "L30",
+        "formula":  "                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             ",
+        "value":  "                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             ",
+        "text":  "                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             ",
+        "numberFormat":  "General"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "M35",
+        "formula":  "LINEARITE DU RAYONNEMENT DE SORTIE",
+        "value":  "LINEARITE DU RAYONNEMENT DE SORTIE",
+        "text":  "LINEARITE DU RAYONNEMENT DE SORTIE",
+        "numberFormat":  "General"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "J39",
+        "formula":  "KVa",
+        "value":  "KVa",
+        "text":  "KVa",
+        "numberFormat":  "General"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "K39",
+        "formula":  "mAs",
+        "value":  "mAs",
+        "text":  "mAs",
+        "numberFormat":  "General"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "L39",
+        "formula":  "Kerma(dét)",
+        "value":  "Kerma(dét)",
+        "text":  "Kerma(dét)",
+        "numberFormat":  "General"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "M39",
+        "formula":  "Kerma(1m)",
+        "value":  "Kerma(1m)",
+        "text":  "Kerma(1m)",
+        "numberFormat":  "General"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "N39",
+        "formula":  "Kerma(1m)/mAs",
+        "value":  "Kerma(1m)/mAs",
+        "text":  "Kerma(1m)/mAs",
+        "numberFormat":  "General"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "O39",
+        "formula":  "(Kerma(1m)/mAs)moy",
+        "value":  "(Kerma(1m)/mAs)moy",
+        "text":  "(Kerma(1m)/mAs)moy",
+        "numberFormat":  "General"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "P39",
+        "formula":  "∆Kerma(1m)/mAs",
+        "value":  "∆Kerma(1m)/mAs",
+        "text":  "∆Kerma(1m)/mAs",
+        "numberFormat":  "General"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "Q39",
+        "formula":  "∆Kerma(1m)/mAs(ini)",
+        "value":  "∆Kerma(1m)/mAs(ini)",
+        "text":  "∆Kerma(1m)/mAs(ini)",
+        "numberFormat":  "General"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "J40",
+        "formula":  "70",
+        "value":  70,
+        "text":  "70",
+        "numberFormat":  "General"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "K40",
+        "formula":  "10",
+        "value":  10,
+        "text":  "10",
+        "numberFormat":  "General"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "L40",
+        "formula":  "0.672",
+        "value":  0.672,
+        "text":  "0.672",
+        "numberFormat":  "General"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "M40",
+        "formula":  "=AVERAGE(0.49*L40)",
+        "value":  0.32928,
+        "text":  "0.32928",
+        "numberFormat":  "General"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "N40",
+        "formula":  "= M40/K40",
+        "value":  0.032928,
+        "text":  "0.032928",
+        "numberFormat":  "General"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "O40",
+        "formula":  "= (N40+N41+N42)/3",
+        "value":  0.033262833333333332,
+        "text":  "0.033262833",
+        "numberFormat":  "General"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "P40",
+        "formula":  "= ((N40-O40)/O40)*100",
+        "value":  -1.0066290203780981,
+        "text":  "-1.01",
+        "numberFormat":  "0.00"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "Q40",
+        "formula":  "= ( O40-O42)/O42*100",
+        "value":  -2146826281,
+        "text":  "#DIV/0!",
+        "numberFormat":  "General"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "J41",
+        "formula":  "70",
+        "value":  70,
+        "text":  "70",
+        "numberFormat":  "General"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "K41",
+        "formula":  "40",
+        "value":  40,
+        "text":  "40",
+        "numberFormat":  "General"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "L41",
+        "formula":  "2.708",
+        "value":  2.708,
+        "text":  "2.708",
+        "numberFormat":  "General"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "M41",
+        "formula":  "= 0.49*L41",
+        "value":  1.32692,
+        "text":  "1.32692",
+        "numberFormat":  "General"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "N41",
+        "formula":  "=M41/K41",
+        "value":  0.033173,
+        "text":  "0.033173",
+        "numberFormat":  "General"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "O41",
+        "formula":  "(Kerma(1m)/mAs)moy_ini",
+        "value":  "(Kerma(1m)/mAs)moy_ini",
+        "text":  "(Kerma(1m)/mAs)moy_ini",
+        "numberFormat":  "General"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "P41",
+        "formula":  "= ((N41-O40)/O40)*100",
+        "value":  -0.27007120058923823,
+        "text":  "-0.27",
+        "numberFormat":  "0.00"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "J42",
+        "formula":  "70",
+        "value":  70,
+        "text":  "70",
+        "numberFormat":  "General"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "K42",
+        "formula":  "160",
+        "value":  160,
+        "text":  "160",
+        "numberFormat":  "General"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "L42",
+        "formula":  "11",
+        "value":  11,
+        "text":  "11",
+        "numberFormat":  "General"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "M42",
+        "formula":  "= 0.49*L42",
+        "value":  5.39,
+        "text":  "5.39",
+        "numberFormat":  "General"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "N42",
+        "formula":  "=M42/K42",
+        "value":  0.033687499999999995,
+        "text":  "0.0336875",
+        "numberFormat":  "General"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "P42",
+        "formula":  "= ((N42-O40)/O40)*100",
+        "value":  1.2767002209673364,
+        "text":  "1.28",
+        "numberFormat":  "0.00"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "J44",
+        "formula":  "NB : Kerma (mGy)",
+        "value":  "NB : Kerma (mGy)",
+        "text":  "NB : Kerma (mGy)",
+        "numberFormat":  "General"
+    },
+    {
+        "sheet":  "Feuil1",
+        "cell":  "L48",
+        "formula":  ",",
+        "value":  ",",
+        "text":  ",",
+        "numberFormat":  "General"
+    }
+]

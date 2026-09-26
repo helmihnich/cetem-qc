@@ -1,0 +1,102 @@
+Modélisation fonctionnelle et UML du PoV CETEM BH
+Contrôle qualité des appareils mobiles de radiographie
+Version 0.3  |  23 septembre 2026  |  Document de conception fonctionnelle
+Ce document traduit le périmètre du Proof of Value en représentations visuelles utilisables par les équipes métier, UX et développement. L’Employé soumet les mesures et commentaires. Le Responsable sélectionne ou ajoute les insights, demande à l’IA de rédiger un résumé, peut le modifier et doit le confirmer. Il décide ensuite directement si la machine est conforme ou non conforme. Il n’existe pas d’étape de validation ou de rejet du travail de l’Employé.
+Contenu du document
+Contexte fonctionnel général
+Cas d’utilisation UML
+Séquence principale du contrôle
+Séquence d’une machine non conforme
+Cycle de vie du contrôle
+Classes métier principales
+Règles de lecture et points à confirmer
+
+1 Contexte fonctionnel général
+Cette vue situe la solution entre les utilisateurs métier, le lieu d’intervention et la conservation des rapports. Elle ne décrit pas une architecture d’infrastructure définitive.
+
+Figure 1 Vue d’ensemble des acteurs et échanges
+Lecture du diagramme
+L’Employé utilise principalement la tablette, y compris sans réseau, pour réaliser le contrôle.
+Le Responsable utilise l’interface web pour gérer les tâches, examiner les audits et finaliser les rapports.
+L’établissement hospitalier fournit le contexte de l’intervention et l’équipement contrôlé.
+Le système conserve le rapport officiel et l’historique immuable.
+
+2 Cas d’utilisation UML
+Le diagramme répartit les fonctions du PoV entre l’Employé et le Responsable. Le système automatise les calculs, la traçabilité et la production documentaire.
+
+Figure 2 Responsabilités fonctionnelles des acteurs
+Lecture du diagramme
+L’Employé saisit les données, consulte les résultats, puis soumet les mesures et commentaires.
+Le Responsable ne modifie pas les données soumises ; il sélectionne ou ajoute les insights de revue.
+L’IA rédige un résumé modifiable qui doit être confirmé par le Responsable.
+Après confirmation, le Responsable décide directement si la machine est conforme ou non conforme.
+
+3 Séquence principale du contrôle
+Cette séquence représente le scénario principal depuis la soumission des données jusqu’à la finalisation humaine du rapport.
+
+Figure 3 Parcours nominal jusqu’au rapport officiel
+Lecture du diagramme
+Les calculs et propositions initiales d’insights sont déterministes.
+Le Responsable sélectionne ou ajoute les insights après la soumission.
+L’IA produit seulement un brouillon de résumé, modifiable et soumis à confirmation.
+Le Responsable décide directement de la conformité puis finalise le rapport.
+
+4 Séquence d’une machine non conforme
+Cette séquence montre qu’une décision Machine non conforme constitue une conclusion normale du contrôle et permet la production du rapport officiel.
+
+Figure 4 Décision de non conformité et rapport officiel
+Lecture du diagramme
+Les données soumises restent figées et consultables.
+Le Responsable prépare les insights et confirme le résumé avant sa décision.
+Machine non conforme ne signifie pas que le travail de l’Employé est rejeté.
+Le rapport officiel documente la non-conformité et peut être généré en Word ou téléversé en PDF.
+
+5 Cycle de vie du contrôle
+Le diagramme d’états formalise les transitions autorisées et les deux branches issues de la revue du Responsable.
+
+Figure 5 États et transitions principales
+Lecture du diagramme
+Avant soumission, l’Employé peut corriger les mesures et commentaires.
+Après soumission, ces données deviennent immuables ; le Responsable prépare les insights et confirme le résumé IA.
+Le résumé confirmé conduit directement à Machine conforme ou Machine non conforme.
+Terminé est un état final en lecture seule, atteint après désignation du rapport officiel.
+
+6 Classes métier principales
+Ce modèle de domaine sert de base à la conception de la base de données et des API. Il reste volontairement indépendant d’une technologie précise.
+
+Figure 6 Modèle conceptuel simplifié
+Lecture du diagramme
+Une Tâche organise le travail assigné à l’Employé.
+Un Audit contient les résultats et les insights retenus par le Responsable.
+Le RésuméIA conserve le brouillon produit, le texte final, le modèle utilisé et la confirmation humaine.
+Le Rapport conserve son origine, son format, sa version et son empreinte pour la traçabilité.
+
+7 Règles transverses et décisions ouvertes
+Les règles suivantes doivent rester cohérentes dans l’interface, les API et le modèle de données.
+Sujet
+Règle retenue
+Conséquence de conception
+Immutabilité
+Audit non modifiable après soumission.
+Versionner les événements et interdire les mises à jour métier.
+Décision
+Résumé confirmé, puis décision directe de conformité machine.
+Aucun statut de validation ou de rejet du travail.
+Rapport
+Word généré ou PDF téléversé.
+Conserver origine, format, empreinte, auteur et date.
+Hors ligne
+Fonction obligatoire du PoV.
+File locale, identifiants stables et résolution des conflits.
+IA
+Résumé fondé sur les insights retenus, modifiable et confirmé humainement.
+Journaliser les entrées, le modèle, le brouillon et la version finale.
+Signature
+Signature manuscrite après impression.
+Prévoir les zones de signature dans le Word généré.
+Décisions encore à confirmer
+Taille maximale du fichier PDF téléversé.
+Réintégration éventuelle d’une copie numérisée du rapport signé.
+Autorisation de finaliser un audit sans insight lorsque tous les résultats sont normaux.
+Utilisation recommandée
+Ces diagrammes peuvent servir de référence commune pendant les ateliers BMAD, la définition des epics et user stories, la conception des écrans et la préparation des contrats API. Le diagramme de classes est conceptuel : les choix techniques, contraintes de stockage et règles détaillées de synchronisation doivent être précisés lors de l’architecture de solution.
