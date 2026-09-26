@@ -1,0 +1,20 @@
+{
+  "name": "cetem-qc",
+  "private": true,
+  "packageManager": "pnpm@12.7.0",
+  "engines": {
+    "node": "24.21.0"
+  },
+  "scripts": {
+    "dev:web": "pnpm --filter @cetem-qc/web dev",
+    "dev:mobile": "pnpm --filter @cetem-qc/mobile start",
+    "dev:api": "pnpm --filter @cetem-qc/api dev",
+    "typecheck": "pnpm -r --if-present typecheck"
+  },
+  "devDependencies": {
+    "@types/node": "24.10.1",
+    "@types/react": "19.2.7",
+    "@types/react-dom": "19.2.3",
+    "typescript": "6.0.3"
+  }
+}

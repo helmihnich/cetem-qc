@@ -1,0 +1,125 @@
+# STATUS DEFINITIONS:
+# ==================
+# Epic Status:
+#   - backlog: Epic not yet started
+#   - in-progress: Epic actively being worked on
+#   - done: All stories in epic completed
+
+# Story Status:
+#   - backlog: Story only exists in epic file
+#   - ready-for-dev: Story file created, ready for development
+#   - in-progress: Developer actively working on implementation
+#   - review: Implementation complete, ready for review
+#   - done: Story completed
+
+# Retrospective Status:
+#   - optional: Can be completed but not required
+#   - done: Retrospective has been completed
+
+# Action Item Status:
+#   - open: Committed during a retrospective, not yet addressed
+#   - in-progress: Actively being worked on
+#   - done: Completed
+
+# WORKFLOW NOTES:
+# ===============
+# - Epic transitions to 'in-progress' automatically when its first story starts (via build's sprint sync)
+# - Stories can be worked in parallel if team capacity allows
+# - Developer typically creates the next story after the previous one is 'done' to incorporate learnings
+# - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
+# - Retrospective appends its action items to action_items; the status view surfaces open ones
+generated: 09-26-2026 18:00
+last_updated: 09-27-2026 00:18
+project: cetem-qc
+project_key: NOKEY
+tracking_system: file-system
+story_location: _bmad-output/implementation-artifacts
+development_status:
+  epic-1: in-progress
+  1-1-establish-the-pnpm-workspace-and-application-skeleton: review
+  1-2-define-the-versioned-api-contract-and-module-boundaries: backlog
+  1-3-establish-postgresql-migration-and-transaction-foundations: backlog
+  epic-1-retrospective: optional
+
+  epic-2: backlog
+  2-1-bootstrap-the-first-responsable-through-a-controlled-process: backlog
+  2-2-authenticate-users-and-enforce-role-access-on-the-server: backlog
+  2-3-enforce-temporary-credential-activation-and-session-policy: backlog
+  epic-2-retrospective: optional
+
+  epic-3: backlog
+  3-1-view-own-team-employees: backlog
+  3-2-create-an-employe-account-and-hand-over-a-one-time-credentia: backlog
+  3-3-activate-or-deactivate-an-employe-without-deleting-history: backlog
+  epic-3-retrospective: optional
+
+  epic-4: backlog
+  4-1-create-an-assigned-graphie-mobile-task: backlog
+  4-2-review-the-operational-task-list: backlog
+  4-3-make-assigned-work-visible-in-app: backlog
+  epic-4-retrospective: optional
+
+  epic-5: backlog
+  5-1-open-assigned-work-across-supported-phone-and-tablet-form-fa: backlog
+  5-2-protect-local-drafts-and-apply-the-resolved-offline-access-w: backlog
+  5-3-save-resume-and-explicitly-delete-a-local-draft: backlog
+  5-4-capture-the-confirmed-graphie-mobile-form-structure: backlog
+  5-5-continue-editing-a-synchronized-task-offline: backlog
+  epic-5-retrospective: optional
+
+  epic-6: backlog
+  6-1-implement-explicitly-defined-source-workbook-calculations: backlog
+  6-2-share-versioned-calculation-logic-between-mobile-and-server: backlog
+  6-3-display-authorized-calculation-results-in-the-employe-form: backlog
+  6-4-display-authorized-calculation-results-in-responsable-review: backlog
+  6-5-separate-formula-regression-fixtures-from-approved-acceptanc: backlog
+  epic-6-retrospective: optional
+
+  epic-7: backlog
+  7-1-queue-durable-synchronization-operations: backlog
+  7-2-show-synchronization-and-submission-state-distinctly: backlog
+  7-3-accept-submissions-transactionally-and-idempotently: backlog
+  7-4-freeze-accepted-measurements-and-comments: backlog
+  epic-7-retrospective: optional
+
+  epic-8: backlog
+  8-1-resolve-a-synchronization-conflict-explicitly: backlog
+  8-2-create-a-correction-draft-after-validation-rejection: backlog
+  8-3-create-a-responsable-only-replacement-after-acceptance: backlog
+  8-4-handle-unfinished-tasks-after-employee-deactivation: backlog
+  epic-8-retrospective: optional
+
+  epic-9: backlog
+  9-1-review-accepted-audit-evidence-read-only: backlog
+  9-2-generate-deterministic-insight-proposals-from-approved-rules: backlog
+  9-3-retain-or-discard-proposed-insights-with-provenance: backlog
+  9-4-add-a-manual-insight: backlog
+  epic-9-retrospective: optional
+
+  epic-10: backlog
+  10-1-request-an-ai-assisted-summary-draft: backlog
+  10-2-write-edit-and-explicitly-confirm-a-summary: backlog
+  10-3-reopen-a-confirmed-summary-before-official-designation: backlog
+  10-4-record-the-explicit-human-machine-conformity-decision: backlog
+  epic-10-retrospective: optional
+
+  epic-11: backlog
+  11-1-generate-an-inspectable-word-report-candidate: backlog
+  11-2-validate-scan-and-store-a-manual-pdf-file: backlog
+  11-3-create-a-report-candidate-from-a-ready-pdf: backlog
+  11-4-designate-exactly-one-current-report-official: backlog
+  11-5-view-and-download-authorized-completed-history: backlog
+  11-6-keep-report-candidates-current-through-asynchronous-processi: backlog
+  epic-11-retrospective: optional
+
+  epic-12: backlog
+  12-1-configure-a-controlled-pov-deployment-environment: backlog
+  12-2-emit-useful-security-and-workflow-diagnostics: backlog
+  12-3-demonstrate-account-provisioning-through-assigned-mobile-wor: backlog
+  12-4-demonstrate-offline-persistence-through-server-acceptance: backlog
+  12-5-demonstrate-conflict-and-validation-correction-recovery: backlog
+  12-6-demonstrate-review-summary-and-human-decision-gates: backlog
+  12-7-demonstrate-report-candidates-through-authorized-history: backlog
+  12-8-demonstrate-post-acceptance-replacement-and-deactivation-rec: backlog
+  12-9-record-performance-and-platform-acceptance-conditions: backlog
+  epic-12-retrospective: optional

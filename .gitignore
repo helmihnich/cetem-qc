@@ -1,0 +1,10 @@
+node_modules/
+.pnpm-store/
+.corepack-cache/
+.next/
+.expo/
+dist/
+coverage/
+*.tsbuildinfo
+.env*
+!.env.example

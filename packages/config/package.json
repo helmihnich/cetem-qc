@@ -1,0 +1,7 @@
+{
+  "name": "@cetem-qc/config",
+  "private": true,
+  "exports": {
+    "./typescript.json": "./tsconfig.base.json"
+  }
+}
