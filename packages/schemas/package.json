@@ -3,8 +3,9 @@
   "version": "0.0.0",
   "private": true,
   "dependencies": {
+    "@cetem-qc/types": "workspace:*",
     "zod": "4.6.5"
   },
   "type": "module",
-  "exports": { ".": "./src/index.ts" }
+  "exports": { ".": "./src/index.ts", "./api/v1": "./src/api/v1.ts" }
 }

@@ -9,12 +9,17 @@
     "dev:web": "pnpm --filter @cetem-qc/web dev",
     "dev:mobile": "pnpm --filter @cetem-qc/mobile start",
     "dev:api": "pnpm --filter @cetem-qc/api dev",
-    "typecheck": "pnpm -r --if-present typecheck"
+    "typecheck": "pnpm -r --if-present typecheck",
+    "contracts:generate": "pnpm --filter @cetem-qc/types generate",
+    "contracts:check": "pnpm --filter @cetem-qc/types check:generated",
+    "boundaries:check": "tsx scripts/check-boundaries.ts",
+    "boundaries:test": "tsx --test scripts/check-boundaries.test.ts"
   },
   "devDependencies": {
     "@types/node": "24.10.1",
     "@types/react": "19.2.7",
     "@types/react-dom": "19.2.3",
+    "tsx": "4.20.6",
     "typescript": "6.0.3"
   }
 }
