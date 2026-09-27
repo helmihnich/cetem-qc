@@ -30,8 +30,168 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
+  /authenticate:
+    post:
+      operationId: authenticateWithPassword
+      summary: Authenticate with email and password
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AuthenticationRequest'
+      responses:
+        '200':
+          description: Authenticated account
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthenticationResponse'
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '401':
+          description: Credentials rejected
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '500':
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /session:
+    get:
+      operationId: getCurrentSession
+      summary: Check current server session and activation state
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Current session
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionResponse'
+        '401':
+          description: Session rejected
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '500':
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+    delete:
+      operationId: logoutCurrentSession
+      summary: Invalidate the current server session
+      security:
+        - bearerAuth: []
+      responses:
+        '204':
+          description: Session invalidated
+        '401':
+          description: Session rejected
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '500':
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /authenticate/password:
+    post:
+      operationId: replaceTemporaryPassword
+      summary: Replace a temporary password
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PasswordReplacementRequest'
+      responses:
+        '200':
+          description: Password replaced
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthenticationResponse'
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '401':
+          description: Credentials rejected
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '500':
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
 components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: opaque
   schemas:
+    AuthenticationRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email: { type: string, minLength: 1 }
+        password: { type: string, minLength: 1 }
+    PasswordReplacementRequest:
+      type: object
+      required: [currentPassword, newPassword]
+      properties:
+        currentPassword: { type: string, minLength: 1 }
+        newPassword: { type: string, minLength: 1 }
+    AuthenticatedUser:
+      type: object
+      required: [id, email, displayName, role, mustChangePassword]
+      properties:
+        id: { type: string }
+        email: { type: string }
+        displayName: { type: string }
+        role:
+          type: string
+          enum: [responsable, employe]
+        mustChangePassword: { type: boolean }
+    AuthenticationResponse:
+      type: object
+      required: [user, sessionExpiresAt, token]
+      properties:
+        user:
+          $ref: '#/components/schemas/AuthenticatedUser'
+        sessionExpiresAt: { type: string, format: date-time }
+        token: { type: string, minLength: 1 }
+    SessionResponse:
+      type: object
+      required: [user, sessionExpiresAt]
+      properties:
+        user:
+          $ref: '#/components/schemas/AuthenticatedUser'
+        sessionExpiresAt: { type: string, format: date-time }
     HealthResponse:
       type: object
       required: [status, version]

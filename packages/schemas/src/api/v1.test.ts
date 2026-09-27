@@ -32,3 +32,19 @@ test("OpenAPI declares string query enum and required response fields", async ()
   assert.match(openapi, /required: \[status, version\]/);
   assert.match(openapi, /required: \[error\][\s\S]*required: \[code, message\][\s\S]*details:[\s\S]*required: \[path, message\]/);
 });
+
+test("session 500 responses reference the shared API error schema", async () => {
+  type GetError = apiV1Operations["getCurrentSession"]["responses"][500];
+  type DeleteError = apiV1Operations["logoutCurrentSession"]["responses"][500];
+  const apiError: apiV1Components["schemas"]["ApiError"] = {
+    error: { code: "INTERNAL_ERROR", message: "Une erreur est survenue." },
+  };
+  const getError: GetError["content"]["application/json"] = apiError;
+  const deleteError: DeleteError["content"]["application/json"] = apiError;
+  assert.deepEqual(apiErrorSchema.parse(getError), apiError);
+  assert.deepEqual(apiErrorSchema.parse(deleteError), apiError);
+
+  const openapi = await readFile(path.resolve(contractPath), "utf8");
+  assert.match(openapi, /getCurrentSession[\s\S]*?'500':[\s\S]*?\$ref: '#\/components\/schemas\/ApiError'/);
+  assert.match(openapi, /logoutCurrentSession[\s\S]*?'500':[\s\S]*?\$ref: '#\/components\/schemas\/ApiError'/);
+});

@@ -1,12 +1,51 @@
 import express from "express";
-import { healthQuerySchema } from "@cetem-qc/schemas/api/v1";
+import type { Server } from "node:http";
+import type { Pool } from "pg";
+import { apiErrorSchema, authenticationRequestSchema, authenticationResponseSchema, healthQuerySchema, passwordReplacementRequestSchema, sessionResponseSchema } from "@cetem-qc/schemas/api/v1";
 import { getHealth } from "./modules/health/health-query.js";
+import {
+  authenticateWithPassword,
+  InvalidCredentialsError,
+  replacePasswordAfterAuthentication,
+} from "./modules/identity-auth/authentication.js";
+import { createSession, findActiveSession, revokeSession } from "./modules/identity-auth/sessions.js";
 
-export function createApp() {
+export function createApp(pool?: Pool) {
   const app = express();
+  let sharedPool = pool;
+  const getPool = () => sharedPool ??= createDatabasePool();
+  app.locals.closeDatabase = async () => { if (sharedPool && sharedPool !== pool) await sharedPool.end(); };
 
   app.use(express.json());
   const v1 = express.Router();
+
+  const unauthorized = (response: express.Response) => {
+    response.status(401).json(apiErrorSchema.parse({
+      error: { code: "AUTHENTICATION_FAILED", message: "Email ou mot de passe invalide." },
+    }));
+  };
+
+  const bearerToken = (authorization: string | undefined): string | undefined => {
+    const match = authorization?.match(/^Bearer ([A-Za-z0-9_-]{40,})$/);
+    return match?.[1];
+  };
+
+  const requireSession = async (request: express.Request, response: express.Response, next: express.NextFunction) => {
+    const token = bearerToken(request.header("authorization"));
+    if (!token) { unauthorized(response); return; }
+    try {
+      const session = await findActiveSession(getPool(), token);
+      if (!session) { unauthorized(response); return; }
+      const allowedDuringActivation = request.method === "GET" && request.path === "/session"
+        || request.method === "DELETE" && request.path === "/session"
+        || request.method === "POST" && request.path === "/authenticate/password";
+      if (session.mustChangePassword && !allowedDuringActivation) { unauthorized(response); return; }
+      response.locals.session = session;
+      next();
+    } catch {
+      response.status(500).json(apiErrorSchema.parse({ error: { code: "INTERNAL_ERROR", message: "Une erreur est survenue." } }));
+    }
+  };
 
   v1.get("/health", async (request, response) => {
     const parsed = healthQuerySchema.safeParse(request.query);
@@ -27,11 +66,170 @@ export function createApp() {
     response.json(await getHealth(parsed.data));
   });
 
+  v1.post("/authenticate", async (request, response) => {
+    const parsed = authenticationRequestSchema.safeParse(request.body);
+    if (!parsed.success) {
+      response.status(400).json({
+        error: { code: "VALIDATION_ERROR", message: "Les informations saisies sont invalides." },
+      });
+      return;
+    }
+    try {
+      const account = await authenticateWithPassword(getPool(), parsed.data.email, parsed.data.password);
+      const session = await createSession(getPool(), account);
+      const payload = authenticationResponseSchema.parse({
+        token: session.token,
+        sessionExpiresAt: session.expiresAt,
+        user: {
+          id: account.id,
+          email: account.email,
+          displayName: account.displayName,
+          role: account.role,
+          mustChangePassword: account.mustChangePassword,
+        },
+      });
+      response.status(200).json(payload);
+    } catch (error) {
+      if (error instanceof InvalidCredentialsError) {
+        response.status(401).json(apiErrorSchema.parse({
+          error: { code: "AUTHENTICATION_FAILED", message: error.message },
+        }));
+        return;
+      }
+      response.status(500).json(apiErrorSchema.parse({
+        error: { code: "INTERNAL_ERROR", message: "Une erreur est survenue." },
+      }));
+    }
+  });
+
+  // All server operations registered after the public auth flow require a live session.
+  v1.use(requireSession);
+
+  v1.get("/session", (request, response) => {
+    const session = response.locals.session as Awaited<ReturnType<typeof findActiveSession>>;
+    if (!session) { unauthorized(response); return; }
+    response.status(200).json(sessionResponseSchema.parse({
+      sessionExpiresAt: session.expiresAt,
+      user: {
+        id: session.id, email: session.email, displayName: session.displayName,
+        role: session.role, mustChangePassword: session.mustChangePassword,
+      },
+    }));
+  });
+
+  v1.delete("/session", async (_request, response) => {
+    const session = response.locals.session as NonNullable<Awaited<ReturnType<typeof findActiveSession>>>;
+    try {
+      await revokeSession(getPool(), session.token);
+      response.status(204).end();
+    } catch {
+      response.status(500).json(apiErrorSchema.parse({ error: { code: "INTERNAL_ERROR", message: "Une erreur est survenue." } }));
+    }
+  });
+
+  v1.post("/authenticate/password", requireSession, async (request, response) => {
+    const parsed = passwordReplacementRequestSchema.safeParse(request.body);
+    if (!parsed.success) {
+      response.status(400).json({
+        error: { code: "VALIDATION_ERROR", message: "Les informations saisies sont invalides." },
+      });
+      return;
+    }
+    try {
+      const currentSession = response.locals.session as NonNullable<Awaited<ReturnType<typeof findActiveSession>>>;
+      const replacementSession = await replacePasswordAfterAuthentication(
+        getPool(),
+        currentSession.email,
+        parsed.data.currentPassword,
+        parsed.data.newPassword,
+      );
+      const account = replacementSession;
+      const payload = authenticationResponseSchema.parse({
+        token: replacementSession.token,
+        sessionExpiresAt: replacementSession.expiresAt,
+        user: {
+          id: account.id,
+          email: account.email,
+          displayName: account.displayName,
+          role: account.role,
+          mustChangePassword: account.mustChangePassword,
+        },
+      });
+      response.status(200).json(payload);
+    } catch (error) {
+      if (error instanceof InvalidCredentialsError) {
+        response.status(401).json(apiErrorSchema.parse({
+          error: { code: "AUTHENTICATION_FAILED", message: error.message },
+        }));
+        return;
+      }
+      response.status(500).json(apiErrorSchema.parse({
+        error: { code: "INTERNAL_ERROR", message: "Une erreur est survenue." },
+      }));
+    }
+  });
+
   app.use("/api/v1", v1);
   return app;
 }
 
+function createDatabasePool(): Pool {
+  const connectionString = process.env.DATABASE_URL;
+  if (!connectionString) throw new Error("DATABASE_URL must be set before handling authentication requests.");
+  // Loaded lazily so health checks and isolated route construction do not require database configuration.
+  const { Pool: PgPool } = require("pg") as typeof import("pg");
+  const pool = new PgPool({ connectionString });
+  pool.on("error", (error) => console.error("Unexpected PostgreSQL pool error", error));
+  return pool;
+}
+
+export async function shutdownApplication(
+  server: Pick<Server, "close">,
+  closeDatabase: () => Promise<void>,
+): Promise<Array<{ message: string; error: unknown }>> {
+  const failures: Array<{ message: string; error: unknown }> = [];
+
+  try {
+    await new Promise<void>((resolve, reject) => {
+      server.close((error) => error ? reject(error) : resolve());
+    });
+  } catch (error) {
+    failures.push({ message: "HTTP server shutdown failed", error });
+  }
+
+  try {
+    await closeDatabase();
+  } catch (error) {
+    failures.push({ message: "PostgreSQL pool shutdown failed", error });
+  }
+
+  return failures;
+}
+
+function handleShutdownFailures(failures: Array<{ message: string; error: unknown }>): void {
+  for (const { message, error } of failures) {
+    reportShutdownError(message, error);
+    if (process.exitCode === undefined) process.exitCode = 1;
+  }
+}
+
+function reportShutdownError(message: string, error: unknown): void {
+  try {
+    console.error(message, error);
+  } catch {
+    // Shutdown reporting must not prevent remaining cleanup.
+  }
+}
+
 const port = Number(process.env.PORT ?? 3001);
-createApp().listen(port, "127.0.0.1", () => {
-  console.log(`CETEM-QC API listening on http://127.0.0.1:${port}/api/v1`);
-});
+if (typeof require !== "undefined" && require.main === module) {
+  const app = createApp();
+  const server = app.listen(port, "127.0.0.1", () => {
+    console.log(`CETEM-QC API listening on http://127.0.0.1:${port}/api/v1`);
+  });
+  const shutdown = () => {
+    void shutdownApplication(server, app.locals.closeDatabase).then(handleShutdownFailures);
+  };
+  process.once("SIGINT", shutdown);
+  process.once("SIGTERM", shutdown);
+}

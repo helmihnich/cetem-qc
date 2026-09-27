@@ -5,7 +5,8 @@
     "dev": "tsx watch src/index.ts",
     "build": "tsc --noEmit",
     "typecheck": "tsc --noEmit",
-    "db:migrate": "tsx src/db/migrate.ts"
+    "db:migrate": "tsx src/db/migrate.ts",
+    "bootstrap:responsable": "tsx src/scripts/bootstrap-responsable.ts"
   },
   "dependencies": {
     "@cetem-qc/schemas": "workspace:*",
