@@ -9,6 +9,7 @@ import { createOwnTeamEmployee, updateOwnTeamEmployeeStatus } from "./modules/te
 import { hashPassword } from "./modules/identity-auth/index.js";
 import { verifyPassword } from "./modules/identity-auth/index.js";
 import { authenticateWithPassword } from "./modules/identity-auth/authentication.js";
+import { createAssignedTask, listEligibleTaskAssignees } from "./modules/tasks/tasks.js";
 import { createSession, findActiveSession } from "./modules/identity-auth/sessions.js";
 import { Pool as PostgresPool } from "pg";
 import { readFile } from "node:fs/promises";
@@ -34,7 +35,18 @@ function testPool(failInsert = false, failStatusUpdate = false): Pool {
       return session && !session.revoked_at && account?.is_active ? { rows: [{ id: account.id, email: account.email, display_name: account.display_name, role: account.role, must_change_password: account.must_change_password, expires_at: session.expires_at }], rowCount: 1 } : { rows: [], rowCount: 0 };
     }
     if (statement === "BEGIN" || statement === "COMMIT" || statement === "ROLLBACK" || statement.includes("pg_advisory_xact_lock")) return { rows: [], rowCount: 0 };
-    if (statement.includes("FROM identity_teams WHERE responsable_account_id")) return { rows: [{ team_id: "team-1" }], rowCount: 1 };
+    if (statement.startsWith("SELECT employee.id, employee.first_name, employee.surname") && !statement.includes("employee.email") && statement.includes("ORDER BY employee.surname")) {
+      return { rows: employees.filter((employee) => employee.team_id === "team-1" && employee.role === "employe" && employee.is_active).map(({ id, first_name, surname }) => ({ id, first_name, surname })), rowCount: employees.filter((employee) => employee.team_id === "team-1" && employee.role === "employe" && employee.is_active).length };
+    }
+    if (statement.startsWith("SELECT employee.id, employee.team_id") && statement.includes("FOR UPDATE OF employee")) {
+      const target = employees.find((employee) => employee.id === values?.[1]);
+      const ownerTeam = values?.[0] === "responsable-1";
+      return target && target.team_id === "team-1" && target.role === "employe" && target.is_active && ownerTeam ? { rows: [{ id: target.id, team_id: target.team_id }], rowCount: 1 } : { rows: [], rowCount: 0 };
+    }
+    if (statement.startsWith("INSERT INTO tasks")) return { rows: [{ id: "00000000-0000-4000-8000-000000000099", establishment: values?.[0], service: values?.[1], task_type: "graphie_mobile", created_by: values?.[2], created_at: new Date(), state: "draft" }], rowCount: 1 };
+    if (statement.startsWith("INSERT INTO task_assignments")) return { rows: [], rowCount: 1 };
+    if (statement.includes("FROM identity_teams WHERE responsable_account_id") && statement.includes("SELECT id AS team_id")) return values?.[0] === "responsable-1" ? { rows: [{ team_id: "team-1" }], rowCount: 1 } : { rows: [], rowCount: 0 };
+    if (statement.includes("FROM identity_teams WHERE responsable_account_id")) return values?.[0] === "responsable-1" ? { rows: [{ id: "team-1" }], rowCount: 1 } : { rows: [], rowCount: 0 };
     if (statement.startsWith("UPDATE identity_accounts employee")) {
       if (statement.includes("SET is_active = $1")) {
         if (failStatusUpdate) throw new Error("database failure");
@@ -49,7 +61,7 @@ function testPool(failInsert = false, failStatusUpdate = false): Pool {
       target.must_change_password = true;
       return { rows: [{ id: target.id, first_name: target.first_name, surname: target.surname, email: target.email, is_active: true }], rowCount: 1 };
     }
-    if (statement.includes("FROM identity_teams team")) return { rows: employees.map(({ id, first_name, surname, email, is_active }) => ({ id, first_name, surname, email, is_active })), rowCount: employees.length };
+    if (statement.startsWith("SELECT employee.id, employee.first_name, employee.surname, employee.email, employee.is_active")) return { rows: employees.map(({ id, first_name, surname, email, is_active }) => ({ id, first_name, surname, email, is_active })), rowCount: employees.length };
     if (statement.includes("INSERT INTO identity_accounts")) {
       if (failInsert) throw new Error("database failure");
       if (employees.some((employee) => employee.email === values?.[0])) throw Object.assign(new Error("duplicate"), { code: "23505", constraint: "identity_accounts_email_case_insensitive_unique" });
@@ -89,6 +101,10 @@ function request(root: string, token: string, method: string, body?: unknown) {
   return fetch(`${root}/employees`, { method, headers: { authorization: `Bearer ${token}`, ...(body ? { "content-type": "application/json" } : {}) }, ...(body ? { body: JSON.stringify(body) } : {}) });
 }
 
+function taskRequest(root: string, token: string, method: string, body?: unknown) {
+  return fetch(`${root}/tasks`, { method, headers: { authorization: `Bearer ${token}`, ...(body ? { "content-type": "application/json" } : {}) }, ...(body ? { body: JSON.stringify(body) } : {}) });
+}
+
 test("Responsable creates an employee, sees it in the roster, and roster omits the one-time credential", async () => {
   responsable.password_hash = await hashPassword("temporary-secret"); employees.length = 0; accountRows = 0; sessions.clear();
   await withServer(testPool(), async (root) => {
@@ -113,6 +129,27 @@ test("employee creation validates names/email and rejects duplicates and anonymo
     assert.equal((await request(root, token, "POST", body)).status, 201);
     assert.equal((await request(root, token, "POST", body)).status, 409);
     assert.equal((await fetch(`${root}/employees`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })).status, 401);
+  });
+});
+
+test("task creation exposes active own-team employees and rejects invalid or out-of-scope assignments", async () => {
+  responsable.password_hash = await hashPassword("temporary-secret"); employees.length = 0; accountRows = 0; sessions.clear(); authenticatedAccount = responsable;
+  await withServer(testPool(), async (root) => {
+    const token = await login(root);
+    const created = await request(root, token, "POST", { firstName: "Nour", surname: "Ali", email: "eligible@example.com" });
+    const employeeId = (await created.json() as { employee: { id: string } }).employee.id;
+    employees.push({ ...employees[0]!, id: "inactive-employee", email: "inactive@example.com", is_active: false });
+    employees.push({ ...employees[0]!, id: "other-team-employee", email: "other@example.com", team_id: "other-team" });
+    const list = await fetch(`${root}/task-assignees`, { headers: { authorization: `Bearer ${token}` } });
+    assert.equal(list.status, 200);
+    assert.deepEqual((await list.json() as { assignees: Array<{ id: string }> }).assignees.map((assignee) => assignee.id), [employeeId]);
+    const payload = { establishment: "Centre de contrôle", service: "Radiologie", type: "graphie_mobile", assigneeId: employeeId };
+    for (const body of [{ ...payload, establishment: " " }, { ...payload, type: "graphie_fixe" }, { ...payload, teamId: "other-team" }]) {
+      assert.equal((await taskRequest(root, token, "POST", body)).status, 400);
+    }
+    const employeeToken = loginAs({ ...responsable, id: "employee-user", role: "employe" }); authenticatedAccount = { ...responsable, id: "employee-user", role: "employe" };
+    assert.equal((await taskRequest(root, employeeToken, "POST", payload)).status, 403);
+    assert.equal((await fetch(`${root}/tasks`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(payload) })).status, 401);
   });
 });
 
@@ -282,7 +319,7 @@ test("PostgreSQL protected requests reject an existing session while inactive an
   try {
     await setup.query(`CREATE SCHEMA "${schema}"`);
     await setup.query(`SET search_path TO "${schema}"`);
-    for (const migration of ["0001_identity_accounts.sql", "0002_identity_authentication.sql", "0003_identity_sessions.sql", "0004_team_membership.sql", "0005_employee_email_normalization.sql"]) {
+    for (const migration of ["0001_identity_accounts.sql", "0002_identity_authentication.sql", "0003_identity_sessions.sql", "0004_team_membership.sql", "0005_employee_email_normalization.sql", "0006_tasks.sql"]) {
       await setup.query(await readFile(resolve("src/db/migrations", migration), "utf8"));
     }
     const passwordHash = await hashPassword("employee-session-password");
@@ -313,6 +350,89 @@ test("PostgreSQL protected requests reject an existing session while inactive an
     await withServer(scopedPool, async (root) => {
       assert.equal((await fetch(`${root}/session`, { headers: { authorization: `Bearer ${session.token}` } })).status, 200);
     });
+  } finally {
+    if (!setupReleased) setup.release();
+    await pool.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);
+    await pool.end();
+  }
+});
+
+test("PostgreSQL enforces eligible task assignment and persists task provenance atomically", { skip: !process.env.CETEM_QC_TEST_DATABASE_URL }, async () => {
+  const databaseUrl = process.env.CETEM_QC_TEST_DATABASE_URL!;
+  const parsedUrl = new URL(databaseUrl);
+  assert.match(parsedUrl.pathname, /^\/(cetem_qc_test|cetem_qc_test_[a-z0-9_]+)$/i, "refusing to use a database not explicitly named cetem_qc_test");
+  const pool = new PostgresPool({ connectionString: databaseUrl, max: 3 });
+  const schema = `story41_tasks_${randomUUID().replaceAll("-", "")}`;
+  const setup = await pool.connect();
+  let setupReleased = false;
+  try {
+    await setup.query(`CREATE SCHEMA "${schema}"`);
+    await setup.query(`SET search_path TO "${schema}"`);
+    for (const migration of ["0001_identity_accounts.sql", "0002_identity_authentication.sql", "0003_identity_sessions.sql", "0004_team_membership.sql", "0005_employee_email_normalization.sql", "0006_tasks.sql"]) {
+      await setup.query(await readFile(resolve("src/db/migrations", migration), "utf8"));
+    }
+    const passwordHash = await hashPassword("task-test-password");
+    const insertResponsable = (email: string) => setup.query<{ id: string }>("INSERT INTO identity_accounts (email, display_name, role, password_hash, must_change_password) VALUES ($1,'Owner','responsable',$2,false) RETURNING id", [email, passwordHash]);
+    const owner = (await insertResponsable(`owner-${randomUUID()}@example.test`)).rows[0]!.id;
+    const otherOwner = (await insertResponsable(`other-${randomUUID()}@example.test`)).rows[0]!.id;
+    const team = (await setup.query<{ id: string }>("INSERT INTO identity_teams (responsable_account_id) VALUES ($1) RETURNING id", [owner])).rows[0]!.id;
+    const otherTeam = (await setup.query<{ id: string }>("INSERT INTO identity_teams (responsable_account_id) VALUES ($1) RETURNING id", [otherOwner])).rows[0]!.id;
+    const insertEmployee = async (email: string, employeeTeam: string, active: boolean) => (await setup.query<{ id: string }>("INSERT INTO identity_accounts (email, display_name, role, password_hash, must_change_password, team_id, first_name, surname, is_active) VALUES ($1,'Employee',$2,$3,false,$4,'Nour','Ali',$5) RETURNING id", [email, "employe", passwordHash, employeeTeam, active])).rows[0]!.id;
+    const activeEmployee = await insertEmployee(`active-${randomUUID()}@example.test`, team, true);
+    const inactiveEmployee = await insertEmployee(`inactive-${randomUUID()}@example.test`, team, false);
+    const otherTeamEmployee = await insertEmployee(`other-employee-${randomUUID()}@example.test`, otherTeam, true);
+    const nonEmployee = (await setup.query<{ id: string }>("INSERT INTO identity_accounts (email, display_name, role, password_hash, must_change_password) VALUES ($1,'Other Responsable','responsable',$2,false) RETURNING id", [`other-responsable-${randomUUID()}@example.test`, passwordHash])).rows[0]!.id;
+    const eligible = await listEligibleTaskAssignees({ query: async (sql: string, values?: unknown[]) => { await setup.query(`SET search_path TO "${schema}"`); return setup.query(sql, values); } } as unknown as Pool, owner);
+    assert.deepEqual(eligible.map((employee) => employee.id), [activeEmployee]);
+    const scopedPool = {
+      query: async (sql: string, values?: unknown[]) => { const client = await pool.connect(); try { await client.query(`SET search_path TO "${schema}"`); return await client.query(sql, values); } finally { client.release(); } },
+      connect: async () => { const client = await pool.connect(); await client.query(`SET search_path TO "${schema}"`); return client; },
+    } as unknown as Pool;
+    for (const assigneeId of [inactiveEmployee, otherTeamEmployee, owner, otherOwner, nonEmployee]) {
+      await assert.rejects(() => createAssignedTask(scopedPool, owner, { establishment: "Centre", service: "Service", type: "graphie_mobile", assigneeId }));
+    }
+    const task = await createAssignedTask(scopedPool, owner, { establishment: "Centre Hospitalier", service: "Service libre", type: "graphie_mobile", assigneeId: activeEmployee });
+    assert.equal(task.creatorId, owner);
+    assert.equal(task.assigneeId, activeEmployee);
+    assert.equal(task.state, "draft");
+    assert.ok(Number.isFinite(Date.parse(task.createdAt)));
+    assert.match(task.id, /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
+    assert.equal(task.type, "graphie_mobile");
+    assert.equal(task.establishment, "Centre Hospitalier");
+    assert.equal(task.service, "Service libre");
+    const persisted = await scopedPool.query<{ id: string; establishment: string; service: string; task_type: string; created_by: string; created_at: Date; state: string; team_id: string; employee_id: string; task_count: string; assignment_count: string }>(
+      `SELECT task.id, task.establishment, task.service, task.task_type, task.created_by, task.created_at, task.state,
+              assignment.team_id, assignment.employee_id,
+              (SELECT count(*) FROM tasks)::text AS task_count, (SELECT count(*) FROM task_assignments)::text AS assignment_count
+       FROM tasks task JOIN task_assignments assignment ON assignment.task_id = task.id`,
+    );
+    assert.equal(persisted.rows.length, 1);
+    assert.deepEqual(persisted.rows[0], {
+      id: task.id,
+      establishment: "Centre Hospitalier",
+      service: "Service libre",
+      task_type: "graphie_mobile",
+      created_by: owner,
+      created_at: new Date(task.createdAt),
+      state: "draft",
+      team_id: team,
+      employee_id: activeEmployee,
+      task_count: "1",
+      assignment_count: "1",
+    });
+
+    await assert.rejects(() => createAssignedTask(scopedPool, owner, { establishment: "  ", service: "Service libre", type: "graphie_mobile", assigneeId: activeEmployee }));
+    const afterTaskInsertFailure = await scopedPool.query<{ task_count: string; assignment_count: string }>("SELECT (SELECT count(*) FROM tasks)::text AS task_count, (SELECT count(*) FROM task_assignments)::text AS assignment_count");
+    assert.deepEqual(afterTaskInsertFailure.rows[0], { task_count: "1", assignment_count: "1" });
+
+    const triggerName = `fail_assignment_${randomUUID().replaceAll("-", "")}`;
+    await setup.query(`CREATE FUNCTION fail_task_assignment() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'forced task assignment persistence failure'; END $$`);
+    await setup.query(`CREATE TRIGGER "${triggerName}" BEFORE INSERT ON task_assignments FOR EACH ROW EXECUTE FUNCTION fail_task_assignment()`);
+    await assert.rejects(() => createAssignedTask(scopedPool, owner, { establishment: "Rollback Centre", service: "Service libre", type: "graphie_mobile", assigneeId: activeEmployee }), /forced task assignment persistence failure/);
+    await setup.query(`DROP TRIGGER "${triggerName}" ON task_assignments`);
+    await setup.query("DROP FUNCTION fail_task_assignment()");
+    const afterAssignmentInsertFailure = await scopedPool.query<{ task_count: string; assignment_count: string }>("SELECT (SELECT count(*) FROM tasks)::text AS task_count, (SELECT count(*) FROM task_assignments)::text AS assignment_count");
+    assert.deepEqual(afterAssignmentInsertFailure.rows[0], { task_count: "1", assignment_count: "1" });
   } finally {
     if (!setupReleased) setup.release();
     await pool.query(`DROP SCHEMA IF EXISTS "${schema}" CASCADE`);

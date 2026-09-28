@@ -125,6 +125,40 @@ export interface paths {
         patch: operations["updateOwnTeamEmployeeStatus"];
         trace?: never;
     };
+    "/task-assignees": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List active employees eligible for the authenticated Responsable's team */
+        get: operations["listTaskAssignees"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tasks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Create a Graphie Mobile task assigned to an eligible employee */
+        post: operations["createAssignedTask"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -183,6 +217,42 @@ export interface components {
         };
         UpdateEmployeeStatusResponse: {
             employee: components["schemas"]["TeamEmployee"];
+        };
+        TaskAssigneeListResponse: {
+            assignees: components["schemas"]["TaskAssignee"][];
+        };
+        TaskAssignee: {
+            /** Format: uuid */
+            id: string;
+            firstName: string;
+            surname: string;
+        };
+        CreateTaskRequest: {
+            establishment: string;
+            service: string;
+            /** @enum {string} */
+            type: "graphie_mobile";
+            /** Format: uuid */
+            assigneeId: string;
+        };
+        TaskResponse: {
+            task: components["schemas"]["Task"];
+        };
+        Task: {
+            /** Format: uuid */
+            id: string;
+            establishment: string;
+            service: string;
+            /** @enum {string} */
+            type: "graphie_mobile";
+            /** Format: uuid */
+            assigneeId: string;
+            /** Format: uuid */
+            creatorId: string;
+            /** Format: date-time */
+            createdAt: string;
+            /** @constant */
+            state: "draft";
         };
         HealthResponse: {
             /** @constant */
@@ -643,6 +713,122 @@ export interface operations {
             };
             /** @description Employee not found in the authenticated Responsable's team */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    listTaskAssignees: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Eligible task assignees */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskAssigneeListResponse"];
+                };
+            };
+            /** @description Session rejected */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Responsable role required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    createAssignedTask: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateTaskRequest"];
+            };
+        };
+        responses: {
+            /** @description Task created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskResponse"];
+                };
+            };
+            /** @description Invalid task details */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Session rejected */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Responsable role required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Assignee is not an active employee in the Responsable's team */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };

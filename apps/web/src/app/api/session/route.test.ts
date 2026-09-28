@@ -4,6 +4,8 @@ import { DELETE, GET, POST } from "./route.js";
 import { GET as getEmployees } from "../employees/route.js";
 import { PATCH as updateEmployeeStatus } from "../employees/[employeeId]/status/route.js";
 import { POST as createEmployee } from "../employees/create/route.js";
+import { POST as createTask } from "../tasks/route.js";
+import { GET as getTaskAssignees } from "../task-assignees/route.js";
 import { POST as regenerateCredential } from "../employees/[employeeId]/credential/route.js";
 import { POST as replacePassword } from "./password/route.js";
 
@@ -130,5 +132,35 @@ test("cookie-authenticated employee, credential, password and logout mutations a
     ]);
     assert.deepEqual(responses.map((response) => response.status), [403, 403, 403, 403]);
     assert.equal(forwards, 0);
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test("task assignee proxy uses the HttpOnly cookie without exposing it and task mutation checks same-origin before forwarding", async () => {
+  let forwardedAuthorization = "";
+  let forwardedBody = "";
+  globalThis.fetch = async (_input, init) => {
+    forwardedAuthorization = new Headers(init?.headers).get("authorization") ?? "";
+    forwardedBody = String(init?.body ?? "");
+    return init?.method === "POST" ? Response.json({ task: { id: "id", state: "draft" } }, { status: 201 }) : Response.json({ assignees: [] });
+  };
+  try {
+    const assignees = await getTaskAssignees(new Request("http://localhost/api/task-assignees", { headers: { cookie: `cetem_qc_session=${validToken}` } }));
+    assert.equal(assignees.status, 200);
+    assert.equal(forwardedAuthorization, `Bearer ${validToken}`);
+    assert.match(assignees.headers.get("cache-control") ?? "", /no-store/);
+
+    forwardedAuthorization = "";
+    const invalidOrigins = [undefined, "null", "not-an-origin", "https://attacker.example"];
+    for (const origin of invalidOrigins) {
+      const headers = new Headers({ cookie: `cetem_qc_session=${validToken}`, "content-type": "application/json" });
+      if (origin !== undefined) headers.set("origin", origin);
+      const rejected = await createTask(new Request("http://localhost/api/tasks", { method: "POST", headers, body: "{}" }));
+      assert.equal(rejected.status, 403);
+    }
+    assert.equal(forwardedAuthorization, "", "invalid origins must be rejected before token forwarding");
+    const created = await createTask(new Request("http://localhost/api/tasks", { method: "POST", headers: { origin: "http://localhost", cookie: `cetem_qc_session=${validToken}`, "content-type": "application/json" }, body: JSON.stringify({ establishment: "Centre", service: "", type: "graphie_mobile", assigneeId: "00000000-0000-4000-8000-000000000001" }) }));
+    assert.equal(created.status, 201);
+    assert.equal(forwardedAuthorization, `Bearer ${validToken}`);
+    assert.deepEqual(JSON.parse(forwardedBody), { establishment: "Centre", service: "", type: "graphie_mobile", assigneeId: "00000000-0000-4000-8000-000000000001" });
   } finally { globalThis.fetch = originalFetch; }
 });

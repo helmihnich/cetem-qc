@@ -17,6 +17,9 @@ type CreateEmployeeRequestContract = apiV1Operations["createOwnTeamEmployee"]["r
 type EmployeeCredentialResponseContract = apiV1Operations["createOwnTeamEmployee"]["responses"][201]["content"]["application/json"];
 type UpdateEmployeeStatusRequestContract = apiV1Operations["updateOwnTeamEmployeeStatus"]["requestBody"]["content"]["application/json"];
 type UpdateEmployeeStatusResponseContract = apiV1Operations["updateOwnTeamEmployeeStatus"]["responses"][200]["content"]["application/json"];
+type TaskAssigneeListResponseContract = apiV1Operations["listTaskAssignees"]["responses"][200]["content"]["application/json"];
+type CreateTaskRequestContract = apiV1Operations["createAssignedTask"]["requestBody"]["content"]["application/json"];
+type TaskResponseContract = apiV1Operations["createAssignedTask"]["responses"][201]["content"]["application/json"];
 
 // Keep the runtime parser tied to the generated wire representation.
 export const healthQuerySchema: z.ZodType<HealthQueryContract> = healthQuerySchemaBase;
@@ -67,6 +70,17 @@ export const employeeCredentialResponseSchema: z.ZodType<EmployeeCredentialRespo
 }).strict();
 export const updateEmployeeStatusRequestSchema: z.ZodType<UpdateEmployeeStatusRequestContract> = z.object({ active: z.boolean() }).strict();
 export const updateEmployeeStatusResponseSchema: z.ZodType<UpdateEmployeeStatusResponseContract> = z.object({ employee: teamEmployeeSchema }).strict();
+export const taskAssigneeListResponseSchema: z.ZodType<TaskAssigneeListResponseContract> = z.object({
+  assignees: z.array(z.object({ id: z.string().uuid(), firstName: z.string(), surname: z.string() }).strict()),
+}).strict();
+export const createTaskRequestSchema: z.ZodType<CreateTaskRequestContract> = z.object({
+  establishment: z.string().trim().min(1).max(200), service: z.string().max(200), type: z.literal("graphie_mobile"), assigneeId: z.string().uuid(),
+}).strict();
+const taskSchema = z.object({
+  id: z.string().uuid(), establishment: z.string(), service: z.string(), type: z.literal("graphie_mobile"),
+  assigneeId: z.string().uuid(), creatorId: z.string().uuid(), createdAt: z.string().datetime(), state: z.literal("draft"),
+}).strict();
+export const taskResponseSchema: z.ZodType<TaskResponseContract> = z.object({ task: taskSchema }).strict();
 export const sessionTokenResponseSchema = z.object({ token: sessionTokenSchema });
 export type HealthQuery = z.infer<typeof healthQuerySchema>;
 export type HealthResponse = z.infer<typeof healthResponseSchema>;
@@ -80,4 +94,7 @@ export type CreateEmployeeRequest = z.infer<typeof createEmployeeRequestSchema>;
 export type EmployeeCredentialResponse = z.infer<typeof employeeCredentialResponseSchema>;
 export type UpdateEmployeeStatusRequest = z.infer<typeof updateEmployeeStatusRequestSchema>;
 export type UpdateEmployeeStatusResponse = z.infer<typeof updateEmployeeStatusResponseSchema>;
+export type TaskAssigneeListResponse = z.infer<typeof taskAssigneeListResponseSchema>;
+export type CreateTaskRequest = z.infer<typeof createTaskRequestSchema>;
+export type TaskResponse = z.infer<typeof taskResponseSchema>;
 export type SessionTokenResponse = z.infer<typeof sessionTokenResponseSchema>;

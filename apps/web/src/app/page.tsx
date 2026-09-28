@@ -3,6 +3,7 @@
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import { fr } from "@cetem-qc/i18n";
 import { EmployeeManagement } from "./employee-management";
+import { TaskCreation } from "./task-creation";
 
 type Session = { user: { id: string; email: string; displayName: string; role: "responsable" | "employe"; mustChangePassword: boolean }; sessionExpiresAt: string };
 type Employee = { id: string; firstName: string; surname: string; email: string; active: boolean };
@@ -102,6 +103,7 @@ export default function HomePage() {
           : session.user.role !== "responsable" ? <section className="auth-card"><p className="error-state" role="alert">{fr.auth.responsableOnly}</p><button className="secondary-button" type="button" onClick={() => void signOut()}>{fr.auth.logout}</button></section>
           : <><div className="page-heading"><div><p className="eyebrow">ESPACE RESPONSABLE</p><h1>{fr.employees.title}</h1><p className="subtitle">{fr.employees.description}</p></div></div>
             <EmployeeManagement employees={employees} onCreated={(employee) => setEmployees((current) => current.some((item) => item.email === employee.email) ? current : [...current, employee].sort((a, b) => a.surname.localeCompare(b.surname) || a.firstName.localeCompare(b.firstName)))} onRefresh={loadEmployees} />
+            <TaskCreation />
             <section className="roster-card" aria-labelledby="roster-title"><div className="card-heading"><div><h2 id="roster-title">Employés</h2><p>Les membres de votre équipe</p></div>{!error && <span className="count-badge">{employees.length}</span>}</div>
               {error ? <div className="state-message error-state" role="alert">{error}</div> : employees.length === 0 ? <div className="state-message empty-state"><span className="empty-icon" aria-hidden="true">○</span><p>{fr.employees.empty}</p></div>
                 : <div className="table-wrap"><table><thead><tr><th>{fr.employees.firstName}</th><th>{fr.employees.surname}</th><th>{fr.employees.email}</th><th>{fr.employees.status}</th></tr></thead><tbody>{employees.map((employee) => <tr key={employee.email}><td className="name-cell">{employee.firstName}</td><td className="name-cell">{employee.surname}</td><td>{employee.email}</td><td><span className={`status-pill ${employee.active ? "status-active" : "status-inactive"}`}><span className="status-dot" />{employee.active ? fr.employees.active : fr.employees.inactive}</span></td></tr>)}</tbody></table></div>}</section>
