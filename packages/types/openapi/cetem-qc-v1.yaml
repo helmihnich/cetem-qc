@@ -147,6 +147,181 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
+  /employees:
+    get:
+      operationId: listOwnTeamEmployees
+      summary: List employees in the authenticated Responsable's team
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Employees in the current Responsable's team
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmployeeListResponse'
+        '401':
+          description: Session rejected
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '403':
+          description: Responsable role required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '500':
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+    post:
+      operationId: createOwnTeamEmployee
+      summary: Create an employee in the authenticated Responsable's team
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateEmployeeRequest'
+      responses:
+        '201':
+          description: Employee created; credential is returned once for manual handover
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmployeeCredentialResponse'
+        '400':
+          description: Invalid employee details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '401':
+          description: Session rejected
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '403':
+          description: Responsable role required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '409':
+          description: Email already exists
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '500':
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /employees/{employeeId}/credential:
+    post:
+      operationId: regenerateEmployeeCredential
+      summary: Regenerate the temporary credential before employee activation
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: employeeId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Temporary credential regenerated and returned once
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmployeeCredentialResponse'
+        '401':
+          description: Session rejected
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '403':
+          description: Responsable role required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: Employee not found or already activated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '500':
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /employees/{employeeId}/status:
+    patch:
+      operationId: updateOwnTeamEmployeeStatus
+      summary: Activate or deactivate an employee in the authenticated Responsable's team
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: employeeId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateEmployeeStatusRequest'
+      responses:
+        '200':
+          description: Employee status updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpdateEmployeeStatusResponse'
+        '400':
+          description: Invalid employee status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '401':
+          description: Session rejected
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '403':
+          description: Responsable role required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: Employee not found in the authenticated Responsable's team
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '500':
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
 components:
   securitySchemes:
     bearerAuth:
@@ -192,6 +367,50 @@ components:
         user:
           $ref: '#/components/schemas/AuthenticatedUser'
         sessionExpiresAt: { type: string, format: date-time }
+    EmployeeListResponse:
+      type: object
+      required: [employees]
+      properties:
+        employees:
+          type: array
+          items:
+            $ref: '#/components/schemas/TeamEmployee'
+    TeamEmployee:
+      type: object
+      required: [id, firstName, surname, email, active]
+      properties:
+        id: { type: string, format: uuid }
+        firstName: { type: string }
+        surname: { type: string }
+        email: { type: string, format: email }
+        active: { type: boolean }
+    CreateEmployeeRequest:
+      type: object
+      required: [firstName, surname, email]
+      additionalProperties: false
+      properties:
+        firstName: { type: string, minLength: 1, maxLength: 100 }
+        surname: { type: string, minLength: 1, maxLength: 100 }
+        email: { type: string, format: email, minLength: 3, maxLength: 254 }
+    EmployeeCredentialResponse:
+      type: object
+      required: [employee, temporaryCredential]
+      properties:
+        employee:
+          $ref: '#/components/schemas/TeamEmployee'
+        temporaryCredential: { type: string, minLength: 1 }
+    UpdateEmployeeStatusRequest:
+      type: object
+      additionalProperties: false
+      required: [active]
+      properties:
+        active: { type: boolean }
+    UpdateEmployeeStatusResponse:
+      type: object
+      required: [employee]
+      properties:
+        employee:
+          $ref: '#/components/schemas/TeamEmployee'
     HealthResponse:
       type: object
       required: [status, version]

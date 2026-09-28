@@ -22,11 +22,12 @@ export async function bootstrapFirstResponsable(
     await transaction.query("SELECT pg_advisory_xact_lock($1)", [1_339_347_526]);
     const existing = await transaction.query("SELECT 1 FROM identity_accounts LIMIT 1");
     if (existing.rowCount) throw new Error("An identity account already exists; bootstrap is single-use.");
-    await transaction.query(
+    const created = await transaction.query<{ id: string }>(
       `INSERT INTO identity_accounts (email, display_name, role, password_hash, must_change_password)
-       VALUES ($1, $2, 'responsable', $3, true)`,
+       VALUES ($1, $2, 'responsable', $3, true) RETURNING id`,
       [email, displayName, passwordHash],
     );
+    await transaction.query("INSERT INTO identity_teams (responsable_account_id) VALUES ($1)", [created.rows[0].id]);
   });
   return { email, temporaryPassword };
 }

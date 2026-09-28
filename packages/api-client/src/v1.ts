@@ -1,5 +1,5 @@
-import { apiErrorSchema, authenticationRequestSchema, authenticationResponseSchema, healthResponseSchema, passwordReplacementRequestSchema, sessionResponseSchema } from "@cetem-qc/schemas/api/v1";
-import type { AuthenticationRequest, AuthenticationResponse, HealthResponse, PasswordReplacementRequest } from "@cetem-qc/schemas/api/v1";
+import { apiErrorSchema, authenticationRequestSchema, authenticationResponseSchema, createEmployeeRequestSchema, employeeCredentialResponseSchema, employeeListResponseSchema, healthResponseSchema, passwordReplacementRequestSchema, sessionResponseSchema } from "@cetem-qc/schemas/api/v1";
+import type { AuthenticationRequest, AuthenticationResponse, CreateEmployeeRequest, EmployeeCredentialResponse, EmployeeListResponse, HealthResponse, PasswordReplacementRequest } from "@cetem-qc/schemas/api/v1";
 
 export class ApiRequestError extends Error {
   constructor(
@@ -15,11 +15,13 @@ export class ApiRequestError extends Error {
 export interface ApiClientOptions {
   baseUrl: string;
   fetch?: typeof fetch;
+  sessionToken?: string;
+  onSessionToken?: (token: string | undefined) => void;
 }
 
-export function createApiClient({ baseUrl, fetch: fetcher = fetch }: ApiClientOptions) {
+export function createApiClient({ baseUrl, fetch: fetcher = fetch, sessionToken: initialSessionToken, onSessionToken }: ApiClientOptions) {
   const root = `${baseUrl.replace(/\/$/, "")}/api/v1`;
-  let sessionToken: string | undefined;
+  let sessionToken: string | undefined = initialSessionToken;
 
   return {
     async getHealth(): Promise<HealthResponse> {
@@ -39,7 +41,7 @@ export function createApiClient({ baseUrl, fetch: fetcher = fetch }: ApiClientOp
     },
     async authenticate(input: AuthenticationRequest): Promise<AuthenticationResponse> {
       const session = await post("/authenticate", authenticationRequestSchema.parse(input), false);
-      sessionToken = session.token;
+      setSessionToken(session.token);
       return session;
     },
     async getSession() {
@@ -47,20 +49,40 @@ export function createApiClient({ baseUrl, fetch: fetcher = fetch }: ApiClientOp
       if (!payload.response.ok) throw toRequestError(payload.response.status, payload.data);
       return sessionResponseSchema.parse(payload.data);
     },
+    async listOwnTeamEmployees(): Promise<EmployeeListResponse> {
+      const payload = await request("/employees", { method: "GET", headers: { accept: "application/json", ...sessionHeaders() } });
+      if (!payload.response.ok) throw toRequestError(payload.response.status, payload.data);
+      return employeeListResponseSchema.parse(payload.data);
+    },
+    async createOwnTeamEmployee(input: CreateEmployeeRequest): Promise<EmployeeCredentialResponse> {
+      const payload = await request("/employees", { method: "POST", headers: { accept: "application/json", "content-type": "application/json", ...sessionHeaders() }, body: JSON.stringify(createEmployeeRequestSchema.parse(input)) });
+      if (!payload.response.ok) throw toRequestError(payload.response.status, payload.data);
+      return employeeCredentialResponseSchema.parse(payload.data);
+    },
+    async regenerateEmployeeCredential(employeeId: string): Promise<EmployeeCredentialResponse> {
+      const payload = await request(`/employees/${encodeURIComponent(employeeId)}/credential`, { method: "POST", headers: { accept: "application/json", ...sessionHeaders() } });
+      if (!payload.response.ok) throw toRequestError(payload.response.status, payload.data);
+      return employeeCredentialResponseSchema.parse(payload.data);
+    },
     async replaceTemporaryPassword(input: PasswordReplacementRequest): Promise<AuthenticationResponse> {
       const session = await post("/authenticate/password", passwordReplacementRequestSchema.parse(input));
-      sessionToken = session.token;
+      setSessionToken(session.token);
       return session;
     },
     async logout(): Promise<void> {
       const payload = await request("/session", { method: "DELETE", headers: { accept: "application/json", ...sessionHeaders() } });
       if (!payload.response.ok) throw toRequestError(payload.response.status, payload.data);
-      sessionToken = undefined;
+      setSessionToken(undefined);
     },
   };
 
   function sessionHeaders(): Record<string, string> {
     return sessionToken ? { authorization: `Bearer ${sessionToken}` } : {};
+  }
+
+  function setSessionToken(token: string | undefined) {
+    sessionToken = token;
+    onSessionToken?.(token);
   }
 
   async function request(path: string, init: RequestInit) {

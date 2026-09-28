@@ -10,6 +10,7 @@ function fakePool(existing = false) {
     connect: async () => ({
       query: async (sql: string, values?: unknown[]) => {
         queries.push({ sql: sql.trim(), values });
+        if (sql.includes("INSERT INTO identity_accounts")) return { rows: [{ id: "responsable-id" }], rowCount: 1 };
         return { rows: [], rowCount: sql.includes("SELECT 1 FROM identity_accounts") && existing ? 1 : 0 };
       },
       release: () => undefined,
@@ -29,6 +30,8 @@ test("bootstrap stores only a salted hash and marks the first Responsable for pa
   assert.notEqual(insert.values?.[2], result.temporaryPassword);
   assert.equal(await verifyPassword(result.temporaryPassword, insert.values?.[2] as string), true);
   assert.equal(await verifyPassword("wrong", insert.values?.[2] as string), false);
+  const team = queries.find(({ sql }) => sql.startsWith("INSERT INTO identity_teams"));
+  assert.deepEqual(team?.values, ["responsable-id"]);
 });
 
 test("bootstrap refuses a second account without exposing or inserting a new credential", async () => {

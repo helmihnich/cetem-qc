@@ -23,3 +23,7 @@ export async function verifyPassword(password: string, encoded: string): Promise
 export function generateTemporaryPassword(): string {
   return randomBytes(24).toString("base64url");
 }
+
+export function generateTemporaryCredential(): string {
+  return randomBytes(24).toString("base64url");
+}

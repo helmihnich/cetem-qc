@@ -12,6 +12,11 @@ type AuthenticationRequestContract = apiV1Operations["authenticateWithPassword"]
 type PasswordReplacementRequestContract = apiV1Operations["replaceTemporaryPassword"]["requestBody"]["content"]["application/json"];
 type AuthenticationResponseContract = apiV1Operations["authenticateWithPassword"]["responses"][200]["content"]["application/json"];
 type SessionResponseContract = apiV1Operations["getCurrentSession"]["responses"][200]["content"]["application/json"];
+type EmployeeListResponseContract = apiV1Operations["listOwnTeamEmployees"]["responses"][200]["content"]["application/json"];
+type CreateEmployeeRequestContract = apiV1Operations["createOwnTeamEmployee"]["requestBody"]["content"]["application/json"];
+type EmployeeCredentialResponseContract = apiV1Operations["createOwnTeamEmployee"]["responses"][201]["content"]["application/json"];
+type UpdateEmployeeStatusRequestContract = apiV1Operations["updateOwnTeamEmployeeStatus"]["requestBody"]["content"]["application/json"];
+type UpdateEmployeeStatusResponseContract = apiV1Operations["updateOwnTeamEmployeeStatus"]["responses"][200]["content"]["application/json"];
 
 // Keep the runtime parser tied to the generated wire representation.
 export const healthQuerySchema: z.ZodType<HealthQueryContract> = healthQuerySchemaBase;
@@ -47,6 +52,21 @@ export const sessionResponseSchema: z.ZodType<SessionResponseContract> = z.objec
   sessionExpiresAt: z.string().datetime(),
   user: authenticatedUserSchema,
 });
+const teamEmployeeSchema = z.object({
+  id: z.string().uuid(), firstName: z.string(), surname: z.string(), email: z.string().email(), active: z.boolean(),
+}).strict();
+export const employeeListResponseSchema: z.ZodType<EmployeeListResponseContract> = z.object({
+  employees: z.array(teamEmployeeSchema),
+}).strict();
+export const createEmployeeRequestSchema: z.ZodType<CreateEmployeeRequestContract> = z.object({
+  firstName: z.string().trim().min(1).max(100), surname: z.string().trim().min(1).max(100), email: z.string().trim().email().max(254),
+}).strict();
+export const employeeCredentialResponseSchema: z.ZodType<EmployeeCredentialResponseContract> = z.object({
+  employee: teamEmployeeSchema,
+  temporaryCredential: z.string().min(1),
+}).strict();
+export const updateEmployeeStatusRequestSchema: z.ZodType<UpdateEmployeeStatusRequestContract> = z.object({ active: z.boolean() }).strict();
+export const updateEmployeeStatusResponseSchema: z.ZodType<UpdateEmployeeStatusResponseContract> = z.object({ employee: teamEmployeeSchema }).strict();
 export const sessionTokenResponseSchema = z.object({ token: sessionTokenSchema });
 export type HealthQuery = z.infer<typeof healthQuerySchema>;
 export type HealthResponse = z.infer<typeof healthResponseSchema>;
@@ -55,4 +75,9 @@ export type AuthenticationRequest = z.infer<typeof authenticationRequestSchema>;
 export type PasswordReplacementRequest = z.infer<typeof passwordReplacementRequestSchema>;
 export type AuthenticationResponse = z.infer<typeof authenticationResponseSchema>;
 export type SessionResponse = z.infer<typeof sessionResponseSchema>;
+export type EmployeeListResponse = z.infer<typeof employeeListResponseSchema>;
+export type CreateEmployeeRequest = z.infer<typeof createEmployeeRequestSchema>;
+export type EmployeeCredentialResponse = z.infer<typeof employeeCredentialResponseSchema>;
+export type UpdateEmployeeStatusRequest = z.infer<typeof updateEmployeeStatusRequestSchema>;
+export type UpdateEmployeeStatusResponse = z.infer<typeof updateEmployeeStatusResponseSchema>;
 export type SessionTokenResponse = z.infer<typeof sessionTokenResponseSchema>;
