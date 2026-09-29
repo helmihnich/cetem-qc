@@ -322,6 +322,93 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
+  /employee/tasks:
+    get:
+      operationId: listAssignedEmployeeTasks
+      summary: List tasks assigned to the authenticated employee
+      description: Returns only tasks explicitly assigned to the authenticated Employé. Request query parameters are not supported.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Tasks assigned to the authenticated employee
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmployeeTaskListResponse'
+        '400':
+          description: Unsupported query parameters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '401':
+          description: Session rejected
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '403':
+          description: Employé role required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '500':
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /employee/tasks/{taskId}:
+    get:
+      operationId: getAssignedEmployeeTask
+      summary: Read a task assigned to the authenticated employee
+      description: Request query parameters are not supported.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: taskId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Task assigned to the authenticated employee
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmployeeTaskResponse'
+        '401':
+          description: Session rejected
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '403':
+          description: Employé role required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '400':
+          description: Unsupported query parameters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: Task not found or not assigned to the authenticated employee
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '500':
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
   /task-assignees:
     get:
       operationId: listTaskAssignees
@@ -600,6 +687,37 @@ components:
           type: string
           const: draft
         lastUpdatedAt: { type: string, format: date-time }
+    EmployeeTaskListResponse:
+      type: object
+      additionalProperties: false
+      required: [tasks]
+      properties:
+        tasks:
+          type: array
+          items:
+            $ref: '#/components/schemas/EmployeeTaskListItem'
+    EmployeeTaskListItem:
+      type: object
+      additionalProperties: false
+      required: [id, type, establishment, service, state, createdAt]
+      properties:
+        id: { type: string, format: uuid }
+        type:
+          type: string
+          enum: [graphie_mobile]
+        establishment: { type: string }
+        service: { type: string }
+        state:
+          type: string
+          const: draft
+        createdAt: { type: string, format: date-time }
+    EmployeeTaskResponse:
+      type: object
+      additionalProperties: false
+      required: [task]
+      properties:
+        task:
+          $ref: '#/components/schemas/EmployeeTaskListItem'
     HealthResponse:
       type: object
       required: [status, version]

@@ -125,6 +125,46 @@ export interface paths {
         patch: operations["updateOwnTeamEmployeeStatus"];
         trace?: never;
     };
+    "/employee/tasks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List tasks assigned to the authenticated employee
+         * @description Returns only tasks explicitly assigned to the authenticated Employé. Request query parameters are not supported.
+         */
+        get: operations["listAssignedEmployeeTasks"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/employee/tasks/{taskId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read a task assigned to the authenticated employee
+         * @description Request query parameters are not supported.
+         */
+        get: operations["getAssignedEmployeeTask"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/task-assignees": {
         parameters: {
             query?: never;
@@ -272,6 +312,24 @@ export interface components {
             state: "draft";
             /** Format: date-time */
             lastUpdatedAt: string;
+        };
+        EmployeeTaskListResponse: {
+            tasks: components["schemas"]["EmployeeTaskListItem"][];
+        };
+        EmployeeTaskListItem: {
+            /** Format: uuid */
+            id: string;
+            /** @enum {string} */
+            type: "graphie_mobile";
+            establishment: string;
+            service: string;
+            /** @constant */
+            state: "draft";
+            /** Format: date-time */
+            createdAt: string;
+        };
+        EmployeeTaskResponse: {
+            task: components["schemas"]["EmployeeTaskListItem"];
         };
         HealthResponse: {
             /** @constant */
@@ -731,6 +789,129 @@ export interface operations {
                 };
             };
             /** @description Employee not found in the authenticated Responsable's team */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    listAssignedEmployeeTasks: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Tasks assigned to the authenticated employee */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EmployeeTaskListResponse"];
+                };
+            };
+            /** @description Unsupported query parameters */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Session rejected */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Employé role required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    getAssignedEmployeeTask: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                taskId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Task assigned to the authenticated employee */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EmployeeTaskResponse"];
+                };
+            };
+            /** @description Unsupported query parameters */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Session rejected */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Employé role required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Task not found or not assigned to the authenticated employee */
             404: {
                 headers: {
                     [name: string]: unknown;

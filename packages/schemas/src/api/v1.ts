@@ -21,6 +21,8 @@ type TaskAssigneeListResponseContract = apiV1Operations["listTaskAssignees"]["re
 type TaskListResponseContract = apiV1Operations["listOwnTeamTasks"]["responses"][200]["content"]["application/json"];
 type CreateTaskRequestContract = apiV1Operations["createAssignedTask"]["requestBody"]["content"]["application/json"];
 type TaskResponseContract = apiV1Operations["createAssignedTask"]["responses"][201]["content"]["application/json"];
+type EmployeeTaskListResponseContract = apiV1Operations["listAssignedEmployeeTasks"]["responses"][200]["content"]["application/json"];
+type EmployeeTaskResponseContract = apiV1Operations["getAssignedEmployeeTask"]["responses"][200]["content"]["application/json"];
 
 // Keep the runtime parser tied to the generated wire representation.
 export const healthQuerySchema: z.ZodType<HealthQueryContract> = healthQuerySchemaBase;
@@ -88,6 +90,13 @@ const taskSchema = z.object({
   assigneeId: z.string().uuid(), creatorId: z.string().uuid(), createdAt: z.string().datetime(), state: z.literal("draft"),
 }).strict();
 export const taskResponseSchema: z.ZodType<TaskResponseContract> = z.object({ task: taskSchema }).strict();
+const employeeTaskSchema = z.object({
+  id: z.string().uuid(), type: z.literal("graphie_mobile"), establishment: z.string(), service: z.string(),
+  state: z.literal("draft"), createdAt: z.string().datetime(),
+}).strict();
+export const employeeTaskListQuerySchema = z.object({}).strict();
+export const employeeTaskListResponseSchema: z.ZodType<EmployeeTaskListResponseContract> = z.object({ tasks: z.array(employeeTaskSchema) }).strict();
+export const employeeTaskResponseSchema: z.ZodType<EmployeeTaskResponseContract> = z.object({ task: employeeTaskSchema }).strict();
 export const sessionTokenResponseSchema = z.object({ token: sessionTokenSchema });
 export type HealthQuery = z.infer<typeof healthQuerySchema>;
 export type HealthResponse = z.infer<typeof healthResponseSchema>;
@@ -105,4 +114,6 @@ export type TaskAssigneeListResponse = z.infer<typeof taskAssigneeListResponseSc
 export type TaskListResponse = z.infer<typeof taskListResponseSchema>;
 export type CreateTaskRequest = z.infer<typeof createTaskRequestSchema>;
 export type TaskResponse = z.infer<typeof taskResponseSchema>;
+export type EmployeeTaskListResponse = z.infer<typeof employeeTaskListResponseSchema>;
+export type EmployeeTaskResponse = z.infer<typeof employeeTaskResponseSchema>;
 export type SessionTokenResponse = z.infer<typeof sessionTokenResponseSchema>;

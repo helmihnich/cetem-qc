@@ -37,6 +37,51 @@ interface TaskListRow extends QueryResultRow {
   last_updated_at: Date;
 }
 
+interface EmployeeTaskRow extends QueryResultRow {
+  id: string;
+  establishment: string;
+  service: string;
+  task_type: "graphie_mobile";
+  state: "draft";
+  created_at: Date;
+}
+
+export async function listAssignedEmployeeTasks(pool: Pool, employeeId: string) {
+  const result = await pool.query<EmployeeTaskRow>(
+    `SELECT task.id, task.establishment, task.service, task.task_type,
+            task.state, task.created_at
+     FROM tasks task
+     JOIN task_assignments assignment ON assignment.task_id = task.id
+     WHERE assignment.employee_id = $1`,
+    [employeeId],
+  );
+  return result.rows.map(toEmployeeTask);
+}
+
+export async function getAssignedEmployeeTask(pool: Pool, employeeId: string, taskId: string) {
+  const result = await pool.query<EmployeeTaskRow>(
+    `SELECT task.id, task.establishment, task.service, task.task_type,
+            task.state, task.created_at
+     FROM tasks task
+     JOIN task_assignments assignment ON assignment.task_id = task.id
+     WHERE assignment.employee_id = $1 AND task.id = $2`,
+    [employeeId, taskId],
+  );
+  const row = result.rows[0];
+  return row ? toEmployeeTask(row) : undefined;
+}
+
+function toEmployeeTask(row: EmployeeTaskRow) {
+  return {
+    id: row.id,
+    type: row.task_type,
+    establishment: row.establishment,
+    service: row.service,
+    state: row.state,
+    createdAt: row.created_at.toISOString(),
+  };
+}
+
 export async function listOwnTeamTasks(pool: Pool, responsableId: string) {
   const result = await pool.query<TaskListRow>(
     `SELECT task.id, task.task_type, task.establishment,

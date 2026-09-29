@@ -4,7 +4,7 @@ import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import type { apiV1Components, apiV1Operations } from "@cetem-qc/types";
-import { apiErrorSchema, createEmployeeRequestSchema, employeeCredentialResponseSchema, employeeListResponseSchema, healthQuerySchema, healthResponseSchema, taskListQuerySchema, taskListResponseSchema, updateEmployeeStatusRequestSchema, updateEmployeeStatusResponseSchema } from "./v1.js";
+import { apiErrorSchema, createEmployeeRequestSchema, employeeCredentialResponseSchema, employeeListResponseSchema, employeeTaskListQuerySchema, employeeTaskListResponseSchema, employeeTaskResponseSchema, healthQuerySchema, healthResponseSchema, taskListQuerySchema, taskListResponseSchema, updateEmployeeStatusRequestSchema, updateEmployeeStatusResponseSchema } from "./v1.js";
 
 const contractPath = fileURLToPath(new URL("../../../types/openapi/cetem-qc-v1.yaml", import.meta.url));
 
@@ -71,6 +71,29 @@ test("task list schema exposes only the six authorized fields and rejects scope 
   const openapi = await readFile(path.resolve(contractPath), "utf8");
   assert.match(openapi, /listOwnTeamTasks[\s\S]*?TaskListResponse/);
   assert.match(openapi, /TaskListItem:[\s\S]*?required: \[id, type, establishment, assignee, state, lastUpdatedAt\]/);
+});
+
+test("employee task contracts are strict and reject unsupported list scope", async () => {
+  const task: apiV1Components["schemas"]["EmployeeTaskListItem"] = {
+    id: "00000000-0000-4000-8000-000000000010",
+    type: "graphie_mobile",
+    establishment: "Centre attribué",
+    service: "Radiologie",
+    state: "draft",
+    createdAt: "2026-09-28T10:00:00.000Z",
+  };
+  const response: apiV1Operations["listAssignedEmployeeTasks"]["responses"][200]["content"]["application/json"] = { tasks: [task] };
+  const detail: apiV1Operations["getAssignedEmployeeTask"]["responses"][200]["content"]["application/json"] = { task };
+  assert.deepEqual(employeeTaskListQuerySchema.parse({}), {});
+  assert.equal(employeeTaskListQuerySchema.safeParse({ teamId: "other-team" }).success, false);
+  assert.deepEqual(employeeTaskListResponseSchema.parse(response), response);
+  assert.deepEqual(employeeTaskResponseSchema.parse(detail), detail);
+  assert.deepEqual(employeeTaskListResponseSchema.parse({ tasks: [] }), { tasks: [] });
+  assert.equal(employeeTaskResponseSchema.safeParse({ task: { ...task, employeeId: "another-employee" } }).success, false);
+
+  const openapi = await readFile(path.resolve(contractPath), "utf8");
+  assert.match(openapi, /listAssignedEmployeeTasks[\s\S]*?EmployeeTaskListResponse/);
+  assert.match(openapi, /getAssignedEmployeeTask[\s\S]*?EmployeeTaskResponse/);
 });
 
 test("OpenAPI declares string query enum and required response fields", async () => {
