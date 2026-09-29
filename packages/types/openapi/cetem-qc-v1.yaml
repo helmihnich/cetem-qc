@@ -354,6 +354,43 @@ paths:
               schema:
                 $ref: '#/components/schemas/ApiError'
   /tasks:
+    get:
+      operationId: listOwnTeamTasks
+      summary: List tasks assigned within the authenticated Responsable's team
+      description: Returns only task ID, type, establishment, assignee, state, and last-update timestamp. Request query parameters are not supported.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Tasks assigned within the authenticated Responsable's team
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskListResponse'
+        '400':
+          description: Unsupported query parameters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '401':
+          description: Session rejected
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '403':
+          description: Responsable role required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '500':
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
     post:
       operationId: createAssignedTask
       summary: Create a Graphie Mobile task assigned to an eligible employee
@@ -539,6 +576,30 @@ components:
         state:
           type: string
           const: draft
+    TaskListResponse:
+      type: object
+      additionalProperties: false
+      required: [tasks]
+      properties:
+        tasks:
+          type: array
+          items:
+            $ref: '#/components/schemas/TaskListItem'
+    TaskListItem:
+      type: object
+      additionalProperties: false
+      required: [id, type, establishment, assignee, state, lastUpdatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        type:
+          type: string
+          enum: [graphie_mobile]
+        establishment: { type: string }
+        assignee: { type: string }
+        state:
+          type: string
+          const: draft
+        lastUpdatedAt: { type: string, format: date-time }
     HealthResponse:
       type: object
       required: [status, version]

@@ -4,6 +4,7 @@ import { FormEvent, useCallback, useEffect, useState } from "react";
 import { fr } from "@cetem-qc/i18n";
 import { EmployeeManagement } from "./employee-management";
 import { TaskCreation } from "./task-creation";
+import { TaskList } from "./task-list";
 
 type Session = { user: { id: string; email: string; displayName: string; role: "responsable" | "employe"; mustChangePassword: boolean }; sessionExpiresAt: string };
 type Employee = { id: string; firstName: string; surname: string; email: string; active: boolean };
@@ -101,7 +102,8 @@ export default function HomePage() {
           : session.user.mustChangePassword ? <section className="auth-card"><p className="eyebrow">ESPACE RESPONSABLE</p><h1>{fr.auth.activationTitle}</h1><p className="subtitle">{fr.auth.activationDescription}</p>
             <form onSubmit={(event) => void activateAccount(event)} className="auth-form"><label>{fr.auth.currentPassword}<input type="password" autoComplete="current-password" required value={password} onChange={(event) => setPassword(event.target.value)} /></label><label>{fr.auth.newPassword}<input type="password" autoComplete="new-password" minLength={12} required value={newPassword} onChange={(event) => setNewPassword(event.target.value)} /></label><button className="primary-button" disabled={busy}>{busy ? fr.common.loading : fr.auth.activate}</button></form>{error && <p className="error-state" role="alert">{error}</p>}</section>
           : session.user.role !== "responsable" ? <section className="auth-card"><p className="error-state" role="alert">{fr.auth.responsableOnly}</p><button className="secondary-button" type="button" onClick={() => void signOut()}>{fr.auth.logout}</button></section>
-          : <><div className="page-heading"><div><p className="eyebrow">ESPACE RESPONSABLE</p><h1>{fr.employees.title}</h1><p className="subtitle">{fr.employees.description}</p></div></div>
+          : <><div className="page-heading"><div><p className="eyebrow">ESPACE RESPONSABLE</p><h1>{fr.tasks.listTitle}</h1><p className="subtitle">{fr.tasks.listDescription}</p></div></div>
+            <TaskList />
             <EmployeeManagement employees={employees} onCreated={(employee) => setEmployees((current) => current.some((item) => item.email === employee.email) ? current : [...current, employee].sort((a, b) => a.surname.localeCompare(b.surname) || a.firstName.localeCompare(b.firstName)))} onRefresh={loadEmployees} />
             <TaskCreation />
             <section className="roster-card" aria-labelledby="roster-title"><div className="card-heading"><div><h2 id="roster-title">Employés</h2><p>Les membres de votre équipe</p></div>{!error && <span className="count-badge">{employees.length}</span>}</div>

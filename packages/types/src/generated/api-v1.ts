@@ -149,7 +149,11 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /**
+         * List tasks assigned within the authenticated Responsable's team
+         * @description Returns only task ID, type, establishment, assignee, state, and last-update timestamp. Request query parameters are not supported.
+         */
+        get: operations["listOwnTeamTasks"];
         put?: never;
         /** Create a Graphie Mobile task assigned to an eligible employee */
         post: operations["createAssignedTask"];
@@ -253,6 +257,21 @@ export interface components {
             createdAt: string;
             /** @constant */
             state: "draft";
+        };
+        TaskListResponse: {
+            tasks: components["schemas"]["TaskListItem"][];
+        };
+        TaskListItem: {
+            /** Format: uuid */
+            id: string;
+            /** @enum {string} */
+            type: "graphie_mobile";
+            establishment: string;
+            assignee: string;
+            /** @constant */
+            state: "draft";
+            /** Format: date-time */
+            lastUpdatedAt: string;
         };
         HealthResponse: {
             /** @constant */
@@ -747,6 +766,62 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TaskAssigneeListResponse"];
+                };
+            };
+            /** @description Session rejected */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Responsable role required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    listOwnTeamTasks: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Tasks assigned within the authenticated Responsable's team */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskListResponse"];
+                };
+            };
+            /** @description Unsupported query parameters */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
                 };
             };
             /** @description Session rejected */

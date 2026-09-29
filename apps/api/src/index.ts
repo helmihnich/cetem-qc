@@ -1,7 +1,7 @@
 import express from "express";
 import type { Server } from "node:http";
 import type { Pool } from "pg";
-import { apiErrorSchema, authenticationRequestSchema, authenticationResponseSchema, createEmployeeRequestSchema, createTaskRequestSchema, employeeCredentialResponseSchema, employeeListResponseSchema, healthQuerySchema, passwordReplacementRequestSchema, sessionResponseSchema, taskAssigneeListResponseSchema, taskResponseSchema, updateEmployeeStatusRequestSchema, updateEmployeeStatusResponseSchema } from "@cetem-qc/schemas/api/v1";
+import { apiErrorSchema, authenticationRequestSchema, authenticationResponseSchema, createEmployeeRequestSchema, createTaskRequestSchema, employeeCredentialResponseSchema, employeeListResponseSchema, healthQuerySchema, passwordReplacementRequestSchema, sessionResponseSchema, taskAssigneeListResponseSchema, taskListQuerySchema, taskListResponseSchema, taskResponseSchema, updateEmployeeStatusRequestSchema, updateEmployeeStatusResponseSchema } from "@cetem-qc/schemas/api/v1";
 import { getHealth } from "./modules/health/health-query.js";
 import {
   authenticateWithPassword,
@@ -11,7 +11,7 @@ import {
 import { createSession, findActiveSession, revokeSession } from "./modules/identity-auth/sessions.js";
 import { listOwnTeamEmployees } from "./modules/team-access/queries/list-own-team-employees.js";
 import { createOwnTeamEmployee, DuplicateEmployeeEmailError, regenerateOwnTeamEmployeeCredential, updateOwnTeamEmployeeStatus } from "./modules/team-access/employee-credentials.js";
-import { createAssignedTask, listEligibleTaskAssignees, TaskAssigneeUnavailableError } from "./modules/tasks/tasks.js";
+import { createAssignedTask, listEligibleTaskAssignees, listOwnTeamTasks, TaskAssigneeUnavailableError } from "./modules/tasks/tasks.js";
 
 export function createApp(pool?: Pool) {
   const app = express();
@@ -165,6 +165,25 @@ export function createApp(pool?: Pool) {
       response.status(200).json(taskAssigneeListResponseSchema.parse({ assignees: await listEligibleTaskAssignees(getPool(), session.id) }));
     } catch {
       response.status(500).json(apiErrorSchema.parse({ error: { code: "INTERNAL_ERROR", message: "Une erreur est survenue." } }));
+    }
+  });
+
+  v1.get("/tasks", async (request, response) => {
+    response.set("Cache-Control", "no-store");
+    const session = response.locals.session as NonNullable<Awaited<ReturnType<typeof findActiveSession>>>;
+    if (session.role !== "responsable") {
+      response.status(403).json(apiErrorSchema.parse({ error: { code: "FORBIDDEN", message: "Accès réservé au Responsable de l'équipe." } }));
+      return;
+    }
+    if (!taskListQuerySchema.safeParse(request.query).success) {
+      response.status(400).json(apiErrorSchema.parse({ error: { code: "VALIDATION_ERROR", message: "Les paramètres de la requête sont invalides." } }));
+      return;
+    }
+    try {
+      const tasks = await listOwnTeamTasks(getPool(), session.id);
+      response.status(200).json(taskListResponseSchema.parse({ tasks }));
+    } catch {
+      response.status(500).json(apiErrorSchema.parse({ error: { code: "INTERNAL_ERROR", message: "La liste des tâches n'a pas pu être chargée." } }));
     }
   });
 

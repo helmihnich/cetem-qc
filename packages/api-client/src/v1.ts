@@ -1,5 +1,8 @@
-import { apiErrorSchema, authenticationRequestSchema, authenticationResponseSchema, createEmployeeRequestSchema, createTaskRequestSchema, employeeCredentialResponseSchema, employeeListResponseSchema, healthResponseSchema, passwordReplacementRequestSchema, sessionResponseSchema, taskAssigneeListResponseSchema, taskResponseSchema } from "@cetem-qc/schemas/api/v1";
-import type { AuthenticationRequest, AuthenticationResponse, CreateEmployeeRequest, CreateTaskRequest, EmployeeCredentialResponse, EmployeeListResponse, HealthResponse, PasswordReplacementRequest, TaskResponse } from "@cetem-qc/schemas/api/v1";
+import { apiErrorSchema, authenticationRequestSchema, authenticationResponseSchema, createEmployeeRequestSchema, createTaskRequestSchema, employeeCredentialResponseSchema, employeeListResponseSchema, healthResponseSchema, passwordReplacementRequestSchema, sessionResponseSchema, taskAssigneeListResponseSchema, taskListResponseSchema, taskResponseSchema } from "@cetem-qc/schemas/api/v1";
+import type { AuthenticationRequest, AuthenticationResponse, CreateEmployeeRequest, CreateTaskRequest, EmployeeCredentialResponse, EmployeeListResponse, HealthResponse, PasswordReplacementRequest, TaskListResponse, TaskResponse } from "@cetem-qc/schemas/api/v1";
+
+export { taskListResponseSchema };
+export type { TaskListResponse };
 
 export class ApiRequestError extends Error {
   constructor(
@@ -63,6 +66,11 @@ export function createApiClient({ baseUrl, fetch: fetcher = fetch, sessionToken:
       const payload = await request("/task-assignees", { method: "GET", headers: { accept: "application/json", ...sessionHeaders() } });
       if (!payload.response.ok) throw toRequestError(payload.response.status, payload.data);
       return taskAssigneeListResponseSchema.parse(payload.data);
+    },
+    async listOwnTeamTasks(): Promise<TaskListResponse> {
+      const payload = await request("/tasks", { method: "GET", headers: { accept: "application/json", ...sessionHeaders() } });
+      if (!payload.response.ok) throw toRequestError(payload.response.status, payload.data);
+      return taskListResponseSchema.parse(payload.data);
     },
     async createAssignedTask(input: CreateTaskRequest): Promise<TaskResponse> {
       const payload = await request("/tasks", { method: "POST", headers: { accept: "application/json", "content-type": "application/json", ...sessionHeaders() }, body: JSON.stringify(createTaskRequestSchema.parse(input)) });

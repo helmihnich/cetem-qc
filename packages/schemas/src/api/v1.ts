@@ -18,6 +18,7 @@ type EmployeeCredentialResponseContract = apiV1Operations["createOwnTeamEmployee
 type UpdateEmployeeStatusRequestContract = apiV1Operations["updateOwnTeamEmployeeStatus"]["requestBody"]["content"]["application/json"];
 type UpdateEmployeeStatusResponseContract = apiV1Operations["updateOwnTeamEmployeeStatus"]["responses"][200]["content"]["application/json"];
 type TaskAssigneeListResponseContract = apiV1Operations["listTaskAssignees"]["responses"][200]["content"]["application/json"];
+type TaskListResponseContract = apiV1Operations["listOwnTeamTasks"]["responses"][200]["content"]["application/json"];
 type CreateTaskRequestContract = apiV1Operations["createAssignedTask"]["requestBody"]["content"]["application/json"];
 type TaskResponseContract = apiV1Operations["createAssignedTask"]["responses"][201]["content"]["application/json"];
 
@@ -73,6 +74,12 @@ export const updateEmployeeStatusResponseSchema: z.ZodType<UpdateEmployeeStatusR
 export const taskAssigneeListResponseSchema: z.ZodType<TaskAssigneeListResponseContract> = z.object({
   assignees: z.array(z.object({ id: z.string().uuid(), firstName: z.string(), surname: z.string() }).strict()),
 }).strict();
+export const taskListQuerySchema = z.object({}).strict();
+const taskListItemSchema = z.object({
+  id: z.string().uuid(), type: z.literal("graphie_mobile"), establishment: z.string(), assignee: z.string(),
+  state: z.literal("draft"), lastUpdatedAt: z.string().datetime(),
+}).strict();
+export const taskListResponseSchema: z.ZodType<TaskListResponseContract> = z.object({ tasks: z.array(taskListItemSchema) }).strict();
 export const createTaskRequestSchema: z.ZodType<CreateTaskRequestContract> = z.object({
   establishment: z.string().trim().min(1).max(200), service: z.string().max(200), type: z.literal("graphie_mobile"), assigneeId: z.string().uuid(),
 }).strict();
@@ -95,6 +102,7 @@ export type EmployeeCredentialResponse = z.infer<typeof employeeCredentialRespon
 export type UpdateEmployeeStatusRequest = z.infer<typeof updateEmployeeStatusRequestSchema>;
 export type UpdateEmployeeStatusResponse = z.infer<typeof updateEmployeeStatusResponseSchema>;
 export type TaskAssigneeListResponse = z.infer<typeof taskAssigneeListResponseSchema>;
+export type TaskListResponse = z.infer<typeof taskListResponseSchema>;
 export type CreateTaskRequest = z.infer<typeof createTaskRequestSchema>;
 export type TaskResponse = z.infer<typeof taskResponseSchema>;
 export type SessionTokenResponse = z.infer<typeof sessionTokenResponseSchema>;

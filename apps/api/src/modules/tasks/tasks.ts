@@ -27,6 +27,42 @@ interface TaskRow extends QueryResultRow {
   state: "draft";
 }
 
+interface TaskListRow extends QueryResultRow {
+  id: string;
+  establishment: string;
+  task_type: "graphie_mobile";
+  assignee: string;
+  assignee_is_active: boolean;
+  state: "draft";
+  last_updated_at: Date;
+}
+
+export async function listOwnTeamTasks(pool: Pool, responsableId: string) {
+  const result = await pool.query<TaskListRow>(
+    `SELECT task.id, task.task_type, task.establishment,
+            concat_ws(' ', employee.first_name, employee.surname) AS assignee,
+            employee.is_active AS assignee_is_active,
+            task.state, task.updated_at AS last_updated_at
+     FROM tasks task
+     JOIN task_assignments assignment ON assignment.task_id = task.id
+     JOIN identity_teams team ON team.id = assignment.team_id
+     JOIN identity_accounts employee
+       ON employee.id = assignment.employee_id
+      AND employee.team_id = assignment.team_id
+      AND employee.role = 'employe'
+     WHERE team.responsable_account_id = $1`,
+    [responsableId],
+  );
+  return result.rows.map((row) => ({
+    id: row.id,
+    type: row.task_type,
+    establishment: row.establishment,
+    assignee: row.assignee_is_active ? row.assignee : `${row.assignee} — Inactif`,
+    state: row.state,
+    lastUpdatedAt: row.last_updated_at.toISOString(),
+  }));
+}
+
 export async function listEligibleTaskAssignees(pool: Pool, responsableId: string): Promise<TaskAssignee[]> {
   const result = await pool.query<{ id: string; first_name: string; surname: string } & QueryResultRow>(
     `SELECT employee.id, employee.first_name, employee.surname

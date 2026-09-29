@@ -30,6 +30,12 @@ export const fr = {
     signIn: "Connectez-vous pour consulter votre équipe.",
   },
   tasks: {
+    listTitle: "Tâches de mon équipe",
+    listDescription: "Consultez l'état des tâches et leur dernière mise à jour.",
+    listEmpty: "Aucune tâche n'est affectée à votre équipe pour le moment.",
+    listError: "La liste des tâches n'a pas pu être chargée.",
+    state: "État",
+    lastUpdated: "Dernière mise à jour",
     title: "Créer une tâche",
     description: "Affectez un contrôle Graphie Mobile à un Employé actif de votre équipe.",
     establishment: "Établissement",
