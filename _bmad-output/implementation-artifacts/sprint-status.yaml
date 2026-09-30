@@ -63,7 +63,7 @@ development_status:
   5-1-open-assigned-work-across-supported-phone-and-tablet-form-fa: done
   5-2-protect-local-drafts-and-apply-the-resolved-offline-access-w: done
   5-3-save-resume-and-explicitly-delete-a-local-draft: done
-  5-4-capture-the-confirmed-graphie-mobile-form-structure: backlog
+  5-4-capture-the-confirmed-graphie-mobile-form-structure: ready-for-dev
   5-5-continue-editing-a-synchronized-task-offline: backlog
   epic-5-retrospective: optional
 
@@ -184,9 +184,10 @@ action_items:
     ref: "_bmad-output/implementation-artifacts/epic-4-retro-2026-09-30.md"
   - id: "epic-4-retro-item-9-keep-dep-01-dependent-form-portions-bloc"
     epic: 4
-    action: "Keep DEP-01-dependent form portions blocked until approved source definitions
-      exist; keep Epic 6 calculations and Epic 7 synchronization/submission out of
-      Epic 5 unless an authoritative Epic 5 story requires them."
+    action: "Treat the Story 5.4 PoV catalogue structure as resolved by Product Owner
+      decision while keeping unsupported DEP-01R business rules unresolved; keep Epic 6
+      calculations and Epic 7 synchronization/submission out of Epic 5 unless an
+      authoritative Epic 5 story requires them."
     owner: "Epic 5 story authors and product/business owner"
     status: open
     ref: "_bmad-output/implementation-artifacts/epic-4-retro-2026-09-30.md"

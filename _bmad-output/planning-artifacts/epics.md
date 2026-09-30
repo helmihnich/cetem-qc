@@ -28,7 +28,7 @@ Phase 1 Graphie Mobile PoV. This inventory and story breakdown derive from the f
 - FR-006: Assignment choices are active employees in the Responsable's team, excluding the Responsable.
 - FR-007: Responsable creates uniquely identified tasks with creator, creation date and initial draft state; employees cannot initiate unassigned work.
 - FR-008: Graphie Mobile is executable; Graphie fixe is disabled and Scopie unavailable.
-- FR-009: Establishment and service are free text; establishment is required; remaining mandatory-field rules are gated by DEP-01.
+- FR-009: Establishment and service are free text; establishment is required; other mandatory-field rules require explicit decision or stronger source.
 - FR-010: A task requires assignment to an active same-team employee and prohibits self-assignment.
 - FR-011: Responsable task list shows ID, type, establishment, assignee, state and last update.
 - FR-012: Responsable opens own-team tasks/results; accepted evidence, measurements, comments and calculations are read-only.
@@ -36,8 +36,8 @@ Phase 1 Graphie Mobile PoV. This inventory and story breakdown derive from the f
 - FR-014: Official report designation completes the software workflow; completed control/report are read-only for either conformity outcome; handwritten signing is not a gate.
 - FR-015: Assigned tasks are visible in-app; real email notifications are out of Phase 1.
 - FR-016: Employé sees only own assigned tasks and may have multiple active tasks.
-- FR-017: Fixed, touch-adapted Graphie Mobile form is organized by tests; paper layout need not be copied literally.
-- FR-018: Capture approved intervention/equipment/instrument metadata, qualitative checks, measurements and comments using approved units/formats/validation; exact catalogue is DEP-01.
+- FR-017: Fixed, touch-adapted Graphie Mobile form follows the versioned project-defined PoV catalogue; paper layout need not be copied literally. Catalogue structure is resolved for PoV by Product Owner decision, not CETEM approval.
+- FR-018: Capture catalogue-defined intervention/equipment/instrument metadata, qualitative checks, measurements and comments with source-supported or explicitly decided units/formats. Catalogue entries retain provenance; guidance does not establish business validation rules.
 - FR-019: Employé saves/resumes/edits pre-submission drafts; explicit confirmed deletion; saved work survives normal restart.
 - FR-020: All field sections of a synchronized task remain fillable/saveable offline; offline authentication follows OD-01.
 - FR-021: Synchronize saved drafts and queued submissions after reconnect with per-item status; retry preserves data; pending submission is not submitted.
@@ -84,7 +84,7 @@ Phase 1 Graphie Mobile PoV. This inventory and story breakdown derive from the f
 
 **Remaining validation/implementation details:** exact supported OS/device/browser matrix, performance test conditions and formal acceptance owner remain to be confirmed for acceptance; they do not alter the resolved product workflow. PDF baseline and maximum are resolved in UX/architecture even though the older PRD OD-04 row is stale. The finalized UX decision register and architecture spine carry the later resolution.
 
-**External gates:** DEP-01 approved field/rule catalogue and edge semantics; DEP-02 CETEM-approved expected calculation/verdict fixtures; DEP-03 approved Word/report content, provenance and signature fields. Workbook extraction is formula evidence, not CETEM approval. Keep source-derived regression fixtures separate from approved acceptance fixtures. Mark dependent behavior blocked/partial; never invent thresholds, rounding, N.A., missing-value behavior, insight rules or report fields.
+**External gates:** DEP-01 form structure is resolved for Story 5.4 by the 2026-10-01 Product Owner decision; the versioned project-defined catalogue is not CETEM-approved. DEP-01R retains unresolved business rules and edge semantics; DEP-02 retains CETEM-approved expected calculation/verdict fixtures; DEP-03 retains approved Word/report content, provenance and signature fields. Workbook extraction is formula evidence, not CETEM approval. Keep source-derived regression fixtures separate from approved acceptance fixtures. Never invent thresholds, rounding, N.A., missing-value behavior, insight rules or report fields.
 
 **Implementation/platform:** French-only user-facing copy. Employé app supports Android/iOS phones and tablets; platform presentation/navigation/storage stays platform-owned. Server-side authorization is mandatory. Provider interfaces remain replaceable for AI, private object storage, malware scanning and document generation. PoV only: no microservices/Kubernetes/multi-region/HA/autoscaling without direct Phase 1 requirement.
 
@@ -115,7 +115,7 @@ This map reflects the user-approved epic structure.
 | FR-002, FR-003, FR-005 | Epic 3 | Employé account creation/credential handover, own-team listing and resolved deactivation behavior |
 | FR-006–FR-011, FR-015 | Epic 4 | Eligible assignment, task creation/list and in-app visibility |
 | FR-016–FR-020, FR-042 | Epic 5 | Mobile access, approved form capture, saved/offline field work |
-| FR-025, FR-026, FR-027 | Epic 6 | Formula calculations, permitted individual verdicts and presentation; DEP-01/02 gates apply |
+| FR-025, FR-026, FR-027 | Epic 6 | Formula calculations, permitted individual verdicts and presentation; DEP-01R/02 gates apply |
 | FR-021, FR-023, FR-024 | Epic 7 | Durable sync, server acceptance, immutable evidence and traceability |
 | FR-022, FR-024, FR-005 | Epic 8 | Conflict/correction/replacement/deactivation recovery; distinct typed flows |
 | FR-012, FR-013, FR-027–FR-031 | Epic 9 | Responsable evidence review and deterministic/manual insight handling |
@@ -142,10 +142,10 @@ Responsable can create and list Employé accounts in the Responsable's team, han
 Responsable can create a uniquely identified Graphie Mobile task and assign it only to an eligible active employee in the same team; employees can see assigned work in-app. **FRs:** FR-006–FR-011, FR-015.
 
 ### Epic 5: Employé Mobile Field Work
-Employé can open authorized assignments on Android/iOS phones and tablets, capture the approved Graphie Mobile form, save/resume drafts securely, and continue authorized work offline. **FRs:** FR-016–FR-020, FR-042. **Dependency:** form fields and validation are partially blocked by DEP-01; implement only confirmed/source-supported scope pending approval.
+Employé can open authorized assignments on Android/iOS phones and tablets, capture the approved Graphie Mobile form, save/resume drafts securely, and continue authorized work offline. **FRs:** FR-016–FR-020, FR-042. **Dependency:** Story 5.4 form structure is no longer blocked by the missing CETEM catalogue (Product Owner decision 2026-10-01); DEP-01R still gates unresolved business rules where applicable.
 
 ### Epic 6: Traceable Calculations and Individual Results
-Employé and Responsable can see source-faithful calculations and only those individual tolerance results backed by approved CETEM rules. **FRs:** FR-025–FR-027. **Dependencies:** DEP-01 blocks missing rules; DEP-02 blocks CETEM acceptance of calculation/verdict behavior. Source-derived regression fixtures remain separately labeled from approved acceptance fixtures.
+Employé and Responsable can see source-faithful calculations and only those individual tolerance results backed by approved CETEM rules. **FRs:** FR-025–FR-027. **Dependencies:** DEP-01R blocks unresolved rules; DEP-02 blocks CETEM acceptance of calculation/verdict behavior. Source-derived regression fixtures remain separately labeled from approved acceptance fixtures.
 
 ### Epic 7: Reliable Synchronization and Server-Accepted Submission
 Saved drafts and explicit submission requests survive interruption and reach one authoritative accepted version; local save, synchronized draft, pending submission and server acceptance remain distinct. **FRs:** FR-021, FR-023, FR-024. **Dependencies:** confirmed OD-01/02 policies; rule-dependent submission validation remains partially blocked by DEP-01/02.
@@ -154,7 +154,7 @@ Saved drafts and explicit submission requests survive interruption and reach one
 Employé resolves sync conflicts or non-conflict validation rejection through their distinct flows; Responsable creates post-acceptance replacements and handles deactivated-employee tasks without losing attribution or history. **FRs:** FR-005, FR-022, FR-024, with history linkage under FR-040. **Dependencies:** OD-02/03 resolved; recovery must use distinct lineage types and never mutate accepted evidence.
 
 ### Epic 9: Responsable Audit Review and Insights
-Responsable reviews accepted evidence read-only, sees authorized results and manages deterministic proposals/manual insights with provenance; zero retained insights remains valid. **FRs:** FR-012, FR-013, FR-027–FR-031. **Dependency:** deterministic rule proposals are blocked until the applicable DEP-01 insight rules are approved.
+Responsable reviews accepted evidence read-only, sees authorized results and manages deterministic proposals/manual insights with provenance; zero retained insights remains valid. **FRs:** FR-012, FR-013, FR-027–FR-031. **Dependency:** deterministic rule proposals are blocked until the applicable DEP-01R insight rules are decided.
 
 ### Epic 10: Confirmed Summary and Human Conformity Decision
 Responsable completes an AI-assisted or manual summary, explicitly confirms it, then makes a separate human Machine conforme / Machine non conforme decision. AI failure never blocks completion; reopening follows resolved OD-10 invalidation rules. **FRs:** FR-032, FR-033, FR-038.
@@ -416,7 +416,7 @@ So that I can continue field work without losing confirmed local changes.
 
 **Traceability:** FR-019, NFR-001, NFR-004, AD-5, UX-DR2 (button-primary, button-destructive, confirmation-dialog, loading-state), UX-DR4, UX-DR13.
 
-### Story 5.4: Capture the confirmed Graphie Mobile form structure
+### Story 5.4: Capture the project-defined PoV Graphie Mobile form structure
 
 As an Employé,
 I want a fixed control form organized into understandable test sections,
@@ -424,14 +424,17 @@ So that I can enter the field evidence in a consistent order.
 
 **Acceptance Criteria:**
 
-**Given** the approved CETEM BH field catalogue is available
+**Given** the approved PoV Graphie Mobile catalogue (versioned and configuration-driven) is available
 **When** the employee opens the Graphie Mobile form
-**Then** the form captures approved intervention/equipment/instrument metadata, qualitative checks, measurement values and comments, grouped by the confirmed test families
-**And** labels, units, formats, mandatory flags, ranges, special values and blocking validation match the approved catalogue exactly
-**And** all user-facing labels and help/error states are French; controls remain touch-operable and state is never conveyed by color alone
-**And** where DEP-01 has not supplied a field/rule, the implementation marks that portion blocked and does not invent a field, validation rule, tolerance, rounding rule or N.A. behavior.
+**Then** the form captures the project-defined intervention, equipment, measuring-instrument, qualitative-check, measurement and comment fields grouped by the versioned PoV catalogue
+**And** fields derived from the CETEM workbook preserve their documented source meaning and do not imply CETEM approval of the source extraction
+**And** externally derived generic QC fields are explicitly treated as project-defined PoV catalogue items rather than CETEM-approved requirements
+**And** labels, units, formats and validation behavior match the versioned PoV catalogue, with each field/rule's source or decision provenance traceable as `CETEM_WORKBOOK`, `IAEA_GUIDANCE`, `AAPM_GUIDANCE` or `PROJECT_POV_DECISION`
+**And** unsupported tolerance, rounding, N.A., blank/zero, mandatory, range or conformity rules are not invented
+**And** all user-facing labels, section names, help and validation messages are French; controls remain touch-operable and state is never conveyed by color alone
+**And** entered data uses Story 5.3's durable local draft lifecycle.
 
-**Traceability:** FR-017, FR-018, DR-002, DR-004, UX-DR2 (form-field, audit-sections), UX-DR4, UX-DR6, UX-DR12. **Dependency:** DEP-01 (partially blocked).
+**Traceability:** FR-017, FR-018, DR-002, DR-004, UX-DR2 (form-field, audit-sections), UX-DR4, UX-DR6, UX-DR12. **Dependency:** DEP-01 form-structure portion resolved for PoV by Product Owner decision (2026-10-01); unresolved business rules remain separately tracked and do not block catalogue-driven form structure.
 
 ### Story 5.5: Continue editing a synchronized task offline
 
@@ -465,7 +468,7 @@ So that the field form reproduces CETEM BH's supplied calculation evidence.
 **And** it preserves the explicit 0.49 linearity factor and formula wrapper, and does not infer MIN/MAX extrema, mAs, kVmax, K2, baseline values, rounding or special-value handling
 **And** missing/zero/invalid inputs whose behavior is undefined by CETEM remain unavailable/blocked rather than mapped to zero, N.A. or a pass.
 
-**Traceability:** FR-025, DR-002, DR-003, AD-7. **Dependency:** DEP-01 for unspecified rules; source extraction authorizes only documented formulas.
+**Traceability:** FR-025, DR-002, DR-003, AD-7. **Dependency:** DEP-01R for unspecified rules; source extraction authorizes only documented formulas.
 
 ### Story 6.2: Share versioned calculation logic between mobile and server
 
@@ -497,7 +500,7 @@ So that I can distinguish a number from a validated conformity result while work
 **And** an individual pass/fail appears only when its threshold, boundary and comparison rule are approved; no automatic overall conformity is computed
 **And** state uses text and appropriate semantic cues, never color alone or a fabricated pass/fail; unresolved values are not rendered as zero, N.A. or passing.
 
-**Traceability:** FR-026, FR-027, UX-DR2 (measurement-result), UX-DR6, UX-DR12. **Dependency:** DEP-01.
+**Traceability:** FR-026, FR-027, UX-DR2 (measurement-result), UX-DR6, UX-DR12. **Dependency:** DEP-01R.
 
 ### Story 6.4: Display authorized calculation results in Responsable review
 
@@ -513,7 +516,7 @@ So that review does not confuse numerical evidence with an unapproved verdict.
 **And** unavailable thresholds/verdicts are clearly identified as unavailable; no automatic overall conformity or fabricated pass/fail appears
 **And** accepted values remain read-only and status is conveyed by text as well as visual semantics.
 
-**Traceability:** FR-012, FR-026, FR-027, SEC-002, SEC-003, UX-DR2 (measurement-result), UX-DR6, UX-DR12. **Dependency:** DEP-01.
+**Traceability:** FR-012, FR-026, FR-027, SEC-002, SEC-003, UX-DR2 (measurement-result), UX-DR6, UX-DR12. **Dependency:** DEP-01R.
 
 ### Story 6.5: Separate formula regression fixtures from approved acceptance fixtures
 
@@ -628,7 +631,7 @@ So that the original attempt remains intact while valid data can be resubmitted.
 **When** the employee chooses Créer un brouillon de correction
 **Then** a new editable draft is initialized from the rejected snapshot and linked with `rejected-submission-correction`
 **And** the original submission attempt remains preserved read-only and is not labeled a synchronization conflict or server-accepted submission
-**And** the correction uses the normal save/submission flow and reports unresolved DEP-01/02-dependent fields as gated rather than inventing rules.
+**And** the correction uses the normal save/submission flow and reports unresolved DEP-01R/02-dependent fields as gated rather than inventing rules.
 
 **Traceability:** FR-023, FR-024, UX-DR5, AD-4, AD-5, AD-6. **Dependency:** DEP-01/02 for unresolved validations.
 
@@ -695,9 +698,9 @@ So that review highlights only observations CETEM BH has explicitly defined.
 **When** rule evaluation runs for a versioned audit input
 **Then** proposals are deterministic for the same input/rule version and include source/rule provenance
 **And** AI does not author deterministic or authoritative insights; no threshold or proposal rule is inferred from workbook formulas alone
-**And** until DEP-01 defines the applicable proposal rule, the feature is marked blocked/unavailable and no fabricated proposal appears.
+**And** until DEP-01R defines the applicable proposal rule, the feature is marked blocked/unavailable and no fabricated proposal appears.
 
-**Traceability:** FR-028, DR-002, DR-007, DR-008, AD-7. **Dependency:** DEP-01.
+**Traceability:** FR-028, DR-002, DR-007, DR-008, AD-7. **Dependency:** DEP-01R.
 
 ### Story 9.3: Retain or discard proposed insights with provenance
 
@@ -944,7 +947,7 @@ So that the controlled account-to-task path is visible end to end.
 **When** the Responsable hands over the one-time credential and creates/assigns a Graphie Mobile task
 **Then** the Employé can activate the account, enter the new password and see only their assigned task in-app
 **And** evidence shows server-enforced team/assignment access, task attribution, in-app visibility and no email-delivery claim
-**And** any missing field-catalogue behavior is excluded from this scenario and reported under DEP-01.
+**And** any missing field-catalogue behavior is excluded from this scenario and reported under DEP-01R.
 **And** design handoff stays within the four approved mockup scopes; supporting surfaces use the component/behavior specifications without added high-fidelity mockup scope.
 
 **Traceability:** Stories 2.1–4.3; FR-001–FR-016 as applicable; SEC-001–SEC-005, SEC-012, DR-001, AD-3, UX-DR14.
