@@ -23,6 +23,11 @@ function poolFor(account?: Account, fail = false) {
     if (normalized === "BEGIN") { beforeTransaction = { account: account && { ...account }, sessions: new Map([...sessions].map(([key, value]) => [key, { ...value }])) }; return { rows: [], rowCount: 0 }; }
     if (normalized === "ROLLBACK") { if (account && beforeTransaction?.account) Object.assign(account, beforeTransaction.account); sessions.clear(); for (const [key, value] of beforeTransaction?.sessions ?? []) sessions.set(key, value); return { rows: [], rowCount: 0 }; }
     if (normalized === "COMMIT") return { rows: [], rowCount: 0 };
+    if (normalized.startsWith("SELECT EXISTS") && account) {
+      const session = sessions.get(String(values?.[0]));
+      const inactive = Boolean(session && !session.revoked_at && new Date(session.expires_at).getTime() > Date.now() && !account.is_active);
+      return { rows: [{ inactive }], rowCount: 1 };
+    }
     if (normalized.includes("FROM identity_sessions s") && account) {
       const hash = String(values?.[0]);
       const session = sessions.get(hash);
@@ -197,7 +202,9 @@ test("inactive, expired, malformed and logged-out sessions cannot authorize serv
     const { token } = await login.json() as { token: string };
     assert.equal((await sessionRequest(root, "/session", "not-a-valid-token")).status, 401);
     account.is_active = false;
-    assert.equal((await sessionRequest(root, "/session", token)).status, 401);
+    const deactivated = await sessionRequest(root, "/session", token);
+    assert.equal(deactivated.status, 403);
+    assert.equal((await deactivated.json() as { error: { code: string } }).error.code, "ACCOUNT_DEACTIVATED");
     account.is_active = true;
     const expiredLogin = await post(root, "/authenticate", { email: account.email, password: "temporary-secret" });
     const expired = await expiredLogin.json() as { token: string };

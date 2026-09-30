@@ -61,6 +61,7 @@ export const fr = {
     title: "Mes tâches",
     description: "Consultez les tâches qui vous sont attribuées.",
     empty: "Aucune tâche ne vous est attribuée pour le moment.",
+    offlineEmpty: "Aucune tâche synchronisée n'est disponible hors ligne. Les données locales protégées ne sont pas supprimées.",
     loadError: "Vos tâches n'ont pas pu être chargées.",
     detailError: "Cette tâche n'a pas pu être chargée.",
     back: "Retour à Mes tâches",
@@ -93,5 +94,10 @@ export const fr = {
     employeeOnly: "Cet espace est réservé aux Employés.",
     employeeTitle: "Connexion Employé",
     employeeDescription: "Connectez-vous pour consulter les tâches qui vous sont attribuées.",
+    offlineAuthorized: "Accès hors ligne autorisé. Les données locales protégées restent disponibles pendant la période prévue.",
+    offlineExpired: "La période d'accès hors ligne a expiré. Connectez-vous en ligne pour accéder aux données locales protégées.",
+    offlineUnavailable: "Les données locales protégées sont verrouillées. Connectez-vous en ligne pour rétablir l'accès.",
+    reauthenticateOnline: "Une connexion en ligne est nécessaire pour vérifier votre compte. Connectez-vous pour continuer.",
+    accountDeactivated: "Votre compte a été désactivé. Les données locales protégées sont conservées et restent verrouillées.",
   },
 } as const;

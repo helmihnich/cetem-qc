@@ -49,6 +49,19 @@ export async function findActiveSession(pool: Pool, token: string): Promise<Auth
   };
 }
 
+export async function hasLiveDeactivatedSession(pool: Pool, token: string): Promise<boolean> {
+  const result = await pool.query<{ inactive: boolean }>(
+    `SELECT EXISTS (
+       SELECT 1 FROM identity_sessions s
+       JOIN identity_accounts a ON a.id = s.account_id
+       WHERE s.token_hash = $1 AND s.revoked_at IS NULL
+         AND s.expires_at > now() AND a.is_active = false
+     ) AS inactive`,
+    [tokenDigest(token)],
+  );
+  return result.rows[0]?.inactive === true;
+}
+
 export async function revokeSession(pool: Pool, token: string): Promise<void> {
   await pool.query(
     "UPDATE identity_sessions SET revoked_at = now() WHERE token_hash = $1 AND revoked_at IS NULL",

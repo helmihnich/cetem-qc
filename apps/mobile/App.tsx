@@ -1,5 +1,6 @@
-import { useRef, useState } from "react";
-import { ActivityIndicator, Pressable, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from "react-native";
+import { useEffect, useRef, useState } from "react";
+import { ActivityIndicator, AppState, Pressable, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from "react-native";
+import * as Network from "expo-network";
 import { ApiRequestError, createApiClient } from "@cetem-qc/api-client/v1";
 import type { ApiClient, EmployeeTaskListResponse, EmployeeTaskResponse } from "@cetem-qc/api-client/v1";
 import { fr } from "@cetem-qc/i18n";
@@ -7,10 +8,14 @@ import { getEmployeeTaskListState } from "./employee-task-list-state";
 import { EmployeeTaskDetailRequests } from "./employee-task-detail-state";
 import type { EmployeeTaskDetailState } from "./employee-task-detail-state";
 import { getEmployeeTaskContentWidth, getEmployeeTaskPresentation } from "./employee-task-layout";
+import { createOfflineAuthorizationService, offlineAuthorizationWindowFromDays } from "./offline-authorization-state";
+import type { OfflineAuthorizationState } from "./offline-authorization-state";
+import { expoSecureKeyValueStore } from "./offline-authorization-storage";
+import { runOnlyWhenOnlineAuthorized, ServerWorkAuthorizationError } from "./server-work-authorization";
 
-declare const process: { env: { EXPO_PUBLIC_API_URL?: string } };
+declare const process: { env: { EXPO_PUBLIC_API_URL?: string; EXPO_PUBLIC_OFFLINE_AUTHORIZATION_WINDOW_DAYS?: string } };
 
-type AuthenticatedUser = { id: string; email: string; displayName: string; role: "responsable" | "employe"; mustChangePassword: boolean };
+type AuthenticatedUser = { id: string; email: string; displayName: string; role: "employe"; mustChangePassword: boolean };
 type Screen = { kind: "list" } | { kind: "detail"; id: string };
 
 const apiBaseUrl = process.env.EXPO_PUBLIC_API_URL ?? "http://127.0.0.1:3001";
@@ -24,6 +29,11 @@ export default function App() {
     });
   }
   const api = clientRef.current;
+  const authorizationRef = useRef(createOfflineAuthorizationService(
+    expoSecureKeyValueStore,
+    { now: () => Date.now() },
+    offlineAuthorizationWindowFromDays(process.env.EXPO_PUBLIC_OFFLINE_AUTHORIZATION_WINDOW_DAYS),
+  ));
   const detailRequestsRef = useRef(new EmployeeTaskDetailRequests());
   const [user, setUser] = useState<AuthenticatedUser>();
   const [email, setEmail] = useState("");
@@ -35,6 +45,8 @@ export default function App() {
   const [detailState, setDetailState] = useState<EmployeeTaskDetailState>();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string>();
+  const [authorization, setAuthorization] = useState<OfflineAuthorizationState>({ status: "locked-logged-out" });
+  const [isOnline, setIsOnline] = useState(true);
   const listState = getEmployeeTaskListState({ loading, error: Boolean(error), taskCount: tasks.length });
   const presentation = getEmployeeTaskPresentation({
     viewportWidth,
@@ -46,6 +58,112 @@ export default function App() {
   const contentWidth = getEmployeeTaskContentWidth(viewportWidth, layout);
   const presentedTask = presentation.selectedTask;
 
+  async function revalidateServerAuthorization(expectedUser: AuthenticatedUser): Promise<OfflineAuthorizationState> {
+    try {
+      const session = await api.getSession();
+      if (session.user.id !== expectedUser.id || session.user.role !== "employe") {
+        const state = await authorizationRef.current.logout(expectedUser.id);
+        setAuthorization(state);
+        setUser(undefined);
+        setError(fr.auth.reauthenticateOnline);
+        throw new ApiRequestError("Session identity changed.", 401, "AUTHENTICATION_FAILED");
+      }
+      const state = await authorizationRef.current.confirmServerAuthorization(expectedUser.id);
+      setAuthorization(state);
+      if (state.status.startsWith("locked-")) setUser(undefined);
+      return state;
+    } catch (cause) {
+      if (cause instanceof ApiRequestError && cause.status === 403 && cause.code === "ACCOUNT_DEACTIVATED") {
+        const state = await authorizationRef.current.lockDeactivated(expectedUser.id);
+        setAuthorization(state);
+        setUser(undefined);
+        setError(fr.auth.accountDeactivated);
+      } else if (cause instanceof ApiRequestError && cause.status === 401) {
+        const state = await authorizationRef.current.beginRevalidation(expectedUser.id);
+        setAuthorization(state.status === "offline-authorized" ? { ...state, status: "revalidating" } : state);
+        if (state.status !== "offline-authorized" && state.status !== "revalidating") setUser(undefined);
+        setError(fr.auth.reauthenticateOnline);
+      }
+      throw cause;
+    }
+  }
+
+  useEffect(() => {
+    let active = true;
+    const updateConnection = async (connected: boolean) => {
+      if (!active) return;
+      setIsOnline(connected);
+      if (!connected) {
+        try {
+          const current = await authorizationRef.current.hydrate();
+          const state = current.identity ? await authorizationRef.current.authorizeOffline(current.identity.id) : current;
+          if (!active) return;
+          setAuthorization(state);
+          if (state.status === "offline-authorized" && state.identity) {
+            setUser(state.identity);
+            setError(undefined);
+          } else {
+            setUser(undefined);
+            if (state.status === "locked-expired") setError(fr.auth.offlineExpired);
+            else if (state.status === "locked-corrupt-or-clock-invalid") setError(fr.auth.offlineUnavailable);
+          }
+        } catch {
+          if (active) { setAuthorization({ status: "locked-corrupt-or-clock-invalid" }); setUser(undefined); setError(fr.auth.offlineUnavailable); }
+        }
+        return;
+      }
+
+      if (!user) {
+        try {
+          const current = await authorizationRef.current.hydrate();
+          const state = current.identity ? await authorizationRef.current.beginRevalidation(current.identity.id) : current;
+          if (!active) return;
+          if ((state.status === "offline-authorized" || state.status === "revalidating") && state.identity) {
+            setAuthorization({ ...state, status: "revalidating" });
+            setUser(state.identity);
+            setError(fr.auth.reauthenticateOnline);
+          } else {
+            setAuthorization(state);
+            if (state.status === "locked-expired") setError(fr.auth.offlineExpired);
+            else if (state.status === "locked-corrupt-or-clock-invalid") setError(fr.auth.offlineUnavailable);
+          }
+        } catch {
+          if (active) { setAuthorization({ status: "locked-corrupt-or-clock-invalid" }); setError(fr.auth.offlineUnavailable); }
+        }
+        return;
+      }
+
+      setAuthorization({ status: "revalidating", identity: user });
+      try {
+        await revalidateServerAuthorization(user);
+        if (!active) return;
+        setError(undefined);
+      } catch (cause) {
+        if (!active) return;
+        if (cause instanceof ApiRequestError && (cause.status === 401 || cause.status === 403)) return;
+        try {
+          const state = await authorizationRef.current.evaluate(user.id);
+          if (!active) return;
+          setAuthorization(state);
+          if (state.status === "offline-authorized") setError(undefined);
+          else { setUser(undefined); setError(state.status === "locked-expired" ? fr.auth.offlineExpired : fr.auth.offlineUnavailable); }
+        } catch {
+          if (active) { setAuthorization({ status: "locked-corrupt-or-clock-invalid" }); setUser(undefined); setError(fr.auth.offlineUnavailable); }
+        }
+      }
+    };
+
+    const fromNetworkState = (state: Network.NetworkState) => {
+      void updateConnection(state.isConnected === true && state.isInternetReachable !== false);
+    };
+    const networkSubscription = Network.addNetworkStateListener(fromNetworkState);
+    const appSubscription = AppState.addEventListener("change", (state) => {
+      if (state === "active") void Network.getNetworkStateAsync().then(fromNetworkState).catch(() => updateConnection(false));
+    });
+    void Network.getNetworkStateAsync().then(fromNetworkState).catch(() => updateConnection(false));
+    return () => { active = false; networkSubscription.remove(); appSubscription.remove(); };
+  }, [api, user?.id]);
+
   async function signIn() {
     setLoading(true);
     setError(undefined);
@@ -55,9 +173,14 @@ export default function App() {
         await api.logout();
         setError(fr.auth.employeeOnly);
       } else {
-        setUser(session.user);
+        const employee = { ...session.user, role: "employe" as const };
+        const state = employee.mustChangePassword
+          ? await authorizationRef.current.logout(employee.id)
+          : await authorizationRef.current.establishOnlineAuthorization(employee);
+        setAuthorization(state);
+        setUser(employee);
         setPassword("");
-        if (!session.user.mustChangePassword) await loadTasks();
+        if (!employee.mustChangePassword) await loadTasks(employee);
       }
     } catch (cause) {
       setError(cause instanceof ApiRequestError ? cause.message : fr.auth.invalidCredentials);
@@ -71,10 +194,18 @@ export default function App() {
     setError(undefined);
     try {
       const session = await api.replaceTemporaryPassword({ currentPassword: password, newPassword });
-      setUser(session.user);
+      if (session.user.role !== "employe") {
+        await api.logout();
+        setError(fr.auth.employeeOnly);
+        return;
+      }
+      const employee = { ...session.user, role: "employe" as const };
+      const state = await authorizationRef.current.establishOnlineAuthorization(employee);
+      setAuthorization(state);
+      setUser(employee);
       setPassword("");
       setNewPassword("");
-      await loadTasks();
+      await loadTasks(employee);
     } catch (cause) {
       setError(cause instanceof ApiRequestError ? cause.message : fr.auth.activationError);
     } finally {
@@ -82,60 +213,103 @@ export default function App() {
     }
   }
 
-  async function loadTasks() {
+  async function loadTasks(authenticatedUser = user) {
+    if (!isOnline || !authenticatedUser) { setError(fr.auth.offlineUnavailable); return; }
     setLoading(true);
     setError(undefined);
     try {
-      const response = await api.listAssignedEmployeeTasks();
+      const response = await runOnlyWhenOnlineAuthorized(
+        () => revalidateServerAuthorization(authenticatedUser),
+        () => api.listAssignedEmployeeTasks(),
+      );
       setTasks(response.tasks);
       setScreen({ kind: "list" });
       setTask(undefined);
-    } catch {
-      setError(fr.employeeTasks.loadError);
+    } catch (cause) {
+      if (cause instanceof ServerWorkAuthorizationError) {
+        setError(cause.authorization.status === "locked-expired" ? fr.auth.offlineExpired : fr.auth.reauthenticateOnline);
+        return;
+      }
+      if (cause instanceof ApiRequestError && (cause.status === 401 || cause.status === 403)) {
+        return;
+      } else {
+        const state = await authorizationRef.current.evaluate(authenticatedUser.id).catch(() => ({ status: "locked-corrupt-or-clock-invalid" as const }));
+        setAuthorization(state);
+        setError(state.status === "offline-authorized" ? fr.auth.offlineUnavailable : fr.employeeTasks.loadError);
+      }
     } finally {
       setLoading(false);
     }
   }
 
   async function openTask(id: string) {
+    if (!isOnline || !user) { setError(fr.auth.offlineUnavailable); return; }
     detailRequestsRef.current.invalidate();
     setScreen({ kind: "detail", id });
     setTask(undefined);
     setDetailState({ taskId: id, status: "loading" });
     setLoading(true);
     setError(undefined);
-    const result = await detailRequestsRef.current.open(id, async (taskId) => (await api.getAssignedEmployeeTask(taskId)).task);
+    let authorizationError: string | undefined;
+    const result = await detailRequestsRef.current.open(id, async (taskId) => {
+      try {
+        return await runOnlyWhenOnlineAuthorized(
+          () => revalidateServerAuthorization(user),
+          async () => (await api.getAssignedEmployeeTask(taskId)).task,
+        );
+      } catch (cause) {
+        if (cause instanceof ApiRequestError && cause.status === 403 && cause.code === "ACCOUNT_DEACTIVATED") authorizationError = fr.auth.accountDeactivated;
+        else if (cause instanceof ApiRequestError && cause.status === 401) authorizationError = fr.auth.reauthenticateOnline;
+        else if (cause instanceof ServerWorkAuthorizationError) authorizationError = cause.authorization.status === "locked-expired" ? fr.auth.offlineExpired : fr.auth.reauthenticateOnline;
+        throw cause;
+      }
+    });
     if (!result.current) return;
     setDetailState(result.state);
     if (result.state.status === "ready") setTask(result.task);
-    else {
-      setError(fr.employeeTasks.detailError);
-    }
+    else setError(authorizationError ?? fr.employeeTasks.detailError);
     setLoading(false);
   }
 
   async function retryTaskDetail() {
     if (!detailState || detailState.status !== "error") return;
+    if (!isOnline || !user) { setError(fr.auth.offlineUnavailable); return; }
     setLoading(true);
     setError(undefined);
     setTask(undefined);
     setDetailState({ ...detailState, status: "loading" });
-    const result = await detailRequestsRef.current.retry(detailState, async (taskId) => (await api.getAssignedEmployeeTask(taskId)).task);
+    let authorizationError: string | undefined;
+    const result = await detailRequestsRef.current.retry(detailState, async (taskId) => {
+      try {
+        return await runOnlyWhenOnlineAuthorized(
+          () => revalidateServerAuthorization(user),
+          async () => (await api.getAssignedEmployeeTask(taskId)).task,
+        );
+      } catch (cause) {
+        if (cause instanceof ApiRequestError && cause.status === 403 && cause.code === "ACCOUNT_DEACTIVATED") authorizationError = fr.auth.accountDeactivated;
+        else if (cause instanceof ApiRequestError && cause.status === 401) authorizationError = fr.auth.reauthenticateOnline;
+        else if (cause instanceof ServerWorkAuthorizationError) authorizationError = cause.authorization.status === "locked-expired" ? fr.auth.offlineExpired : fr.auth.reauthenticateOnline;
+        throw cause;
+      }
+    });
     if (!result.current) return;
     setDetailState(result.state);
     if (result.state.status === "ready") setTask(result.task);
-    else setError(fr.employeeTasks.detailError);
+    else setError(authorizationError ?? fr.employeeTasks.detailError);
     setLoading(false);
   }
 
   async function signOut() {
     detailRequestsRef.current.invalidate();
+    setAuthorization({ status: "locked-logged-out", identity: user });
+    setUser(undefined);
+    let lockPersisted = true;
+    try { await authorizationRef.current.logout(user?.id); } catch { lockPersisted = false; }
     setLoading(true);
     try { await api.logout(); } catch { /* Expired sessions can still return to sign-in. */ }
-    setUser(undefined);
     setTasks([]);
     setTask(undefined);
-    setError(undefined);
+    setError(lockPersisted ? undefined : fr.auth.offlineUnavailable);
     setEmail("");
     setPassword("");
     setScreen({ kind: "list" });
@@ -164,15 +338,25 @@ export default function App() {
             <Field label={fr.auth.newPassword} value={newPassword} onChangeText={setNewPassword} secureTextEntry />
             {error ? <Text accessibilityRole="alert" style={styles.error}>{error}</Text> : null}
             <Button title={fr.auth.activate} onPress={() => void activate()} disabled={loading || !password || newPassword.length < 12} />
+            <Button title={fr.auth.logout} onPress={() => void signOut()} secondary disabled={loading} />
           </View>
         ) : (
           <View style={[styles.card, layout === "tablet" && styles.tabletCard]}>
+            {authorization.status === "offline-authorized" ? <Text accessibilityRole="summary" style={styles.muted}>{fr.auth.offlineAuthorized}</Text> : null}
+            {authorization.status === "revalidating" ? (
+              <View style={{ gap: 12 }}>
+                <Text accessibilityRole="alert" style={styles.muted}>{fr.auth.reauthenticateOnline}</Text>
+                <Field label={fr.auth.email} value={email} onChangeText={setEmail} autoCapitalize="none" keyboardType="email-address" />
+                <Field label={fr.auth.password} value={password} onChangeText={setPassword} secureTextEntry />
+                <Button title={fr.auth.signIn} onPress={() => void signIn()} disabled={loading || !email || !password} />
+              </View>
+            ) : null}
             {screen.kind === "list" ? (
               <>
                 <Text style={styles.heading}>{fr.employeeTasks.title}</Text>
                 <Text style={styles.muted}>{fr.employeeTasks.description}</Text>
                 {listState === "loading" ? <ActivityIndicator accessibilityLabel={fr.common.loading} color="#135c4c" /> : null}
-                {listState === "empty" ? <Text style={styles.muted}>{fr.employeeTasks.empty}</Text> : null}
+                {listState === "empty" ? <Text style={styles.muted}>{authorization.status === "offline-authorized" ? fr.employeeTasks.offlineEmpty : fr.employeeTasks.empty}</Text> : null}
                 {listState === "ready" ? <View style={layout === "tablet" ? styles.tabletTaskGrid : styles.phoneTaskList}>{tasks.map((item) => (
                   <Pressable key={item.id} accessibilityRole="button" onPress={() => void openTask(item.id)} style={[styles.taskRow, layout === "tablet" && styles.tabletTaskRow]}>
                     <View style={styles.taskCopy}>

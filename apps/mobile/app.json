@@ -4,6 +4,9 @@
     "slug": "cetem-qc",
     "version": "1.0.0",
     "orientation": "default",
-    "userInterfaceStyle": "automatic"
+    "userInterfaceStyle": "automatic",
+    "plugins": [
+      "expo-secure-store"
+    ]
   }
 }

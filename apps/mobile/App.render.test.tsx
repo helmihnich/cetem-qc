@@ -3,16 +3,25 @@ import React from "react";
 import { act, create, type ReactTestInstance, type ReactTestRenderer } from "react-test-renderer";
 import test, { mock } from "node:test";
 import { EMPLOYEE_CONTENT_HORIZONTAL_GUTTER } from "./employee-task-layout.js";
+import { createOfflineAuthorizationService } from "./offline-authorization-state.js";
+import { runOnlyWhenOnlineAuthorized } from "./server-work-authorization.js";
 
 const runtime = globalThis as typeof globalThis & {
   __mobileTestWidth?: number;
   __mobileTestApi?: MockApi;
+  __secureValues?: Map<string, string>;
+  __networkListener?: (state: { isConnected?: boolean; isInternetReachable?: boolean }) => void;
+  __networkOnline?: boolean;
+  __sessionAvailable?: boolean;
+  __sessionFailure?: { status: number; code: string };
+  __testNow?: number;
 };
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 mock.module("react-native", {
   namedExports: {
     ActivityIndicator: "ActivityIndicator",
+    AppState: { addEventListener: () => ({ remove: () => undefined }) },
     Pressable: "Pressable",
     SafeAreaView: "SafeAreaView",
     ScrollView: "ScrollView",
@@ -23,9 +32,27 @@ mock.module("react-native", {
     View: "View",
   },
 });
+mock.module("expo-network", {
+  namedExports: {
+    getNetworkStateAsync: async () => ({ isConnected: runtime.__networkOnline, isInternetReachable: runtime.__networkOnline }),
+    addNetworkStateListener: (listener: (state: { isConnected?: boolean; isInternetReachable?: boolean }) => void) => {
+      runtime.__networkListener = listener;
+      return { remove: () => { runtime.__networkListener = undefined; } };
+    },
+  },
+});
+mock.module("expo-secure-store", {
+  namedExports: {
+    getItemAsync: async (key: string) => runtime.__secureValues?.get(key) ?? null,
+    setItemAsync: async (key: string, value: string) => { runtime.__secureValues?.set(key, value); },
+    deleteItemAsync: async (key: string) => { runtime.__secureValues?.delete(key); },
+  },
+});
 mock.module("@cetem-qc/api-client/v1", {
   namedExports: {
-    ApiRequestError: class ApiRequestError extends Error {},
+    ApiRequestError: class ApiRequestError extends Error {
+      constructor(message: string, readonly status = 401, readonly code = "AUTHENTICATION_FAILED") { super(message); }
+    },
     createApiClient: () => runtime.__mobileTestApi,
   },
 });
@@ -45,8 +72,10 @@ interface MockApi {
   authenticate: () => Promise<{ user: { id: string; email: string; displayName: string; role: "employe"; mustChangePassword: false } }>;
   listAssignedEmployeeTasks: () => Promise<{ tasks: Task[] }>;
   getAssignedEmployeeTask: (id: string) => Promise<{ task: Task }>;
+  getSession: () => Promise<{ user: { id: string; role: "employe" } }>;
   logout: () => Promise<void>;
   listCalls: number;
+  sessionCalls: number;
   detailCalls: string[];
 }
 
@@ -59,12 +88,28 @@ const firstTask: Task = {
 
 function installMocks() {
   runtime.__mobileTestWidth = 390;
+  runtime.__secureValues = new Map();
+  runtime.__networkOnline = true;
+  runtime.__sessionAvailable = true;
   const api: MockApi = {
     authenticate: async () => ({ user: { id: "employee-1", email: "employee@example.test", displayName: "Employée Test", role: "employe", mustChangePassword: false } }),
     listAssignedEmployeeTasks: async () => { api.listCalls++; return { tasks: [firstTask] }; },
     getAssignedEmployeeTask: async (id) => { api.detailCalls.push(id); return { task: firstTask }; },
-    logout: async () => undefined,
+    getSession: async () => {
+      api.sessionCalls++;
+      if (runtime.__sessionFailure) {
+        const { ApiRequestError: MockApiRequestError } = await import("@cetem-qc/api-client/v1");
+        throw new MockApiRequestError("account deactivated", runtime.__sessionFailure.status, runtime.__sessionFailure.code);
+      }
+      if (!runtime.__sessionAvailable) {
+        const { ApiRequestError: MockApiRequestError } = await import("@cetem-qc/api-client/v1");
+        throw new MockApiRequestError("session expired", 401, "AUTHENTICATION_FAILED");
+      }
+      return { user: { id: "employee-1", role: "employe" } };
+    },
+    logout: async () => { runtime.__sessionAvailable = false; },
     listCalls: 0,
+    sessionCalls: 0,
     detailCalls: [],
   };
   runtime.__mobileTestApi = api;
@@ -90,7 +135,11 @@ async function signIn(tree: ReactTestRenderer) {
   const fields = tree.root.findAll((node) => node.type === "TextInput");
   await act(async () => { fields[0]!.props.onChangeText("employee@example.test"); });
   await act(async () => { fields[1]!.props.onChangeText("correct-password"); });
-  await act(async () => { findButton(tree, "Se connecter").props.onPress(); });
+  await act(async () => {
+    runtime.__sessionAvailable = true;
+    findButton(tree, "Se connecter").props.onPress();
+    for (let tick = 0; tick < 4; tick++) await new Promise((resolve) => setTimeout(resolve, 0));
+  });
 }
 
 function getMainCard(tree: ReactTestRenderer) {
@@ -219,5 +268,184 @@ test("empty assigned-task state renders on phone and tablet", async () => {
     await signIn(tree);
     assert.ok(findText(tree, "Aucune tâche ne vous est attribuée pour le moment."));
     await act(async () => { tree.unmount(); });
+  }
+});
+
+test("offline restart restores the same employee's authorization and logout preserves protected payload", async () => {
+  await loadApp();
+  installMocks();
+  const now = Date.now();
+  runtime.__networkOnline = false;
+  runtime.__secureValues!.set("cetem-qc.offline-authorization.v1", JSON.stringify({
+    schemaVersion: 1,
+    status: "grant",
+    identity: { id: "employee-1", email: "employee@example.test", displayName: "Employée Test", role: "employe", mustChangePassword: false },
+    authenticatedAt: now - 60_000,
+    lastTrustedTime: now - 60_000,
+    policyWindowMs: 7 * 24 * 60 * 60 * 1000,
+  }));
+  runtime.__secureValues!.set("cetem-qc.protected-payload.v1.employee-1", "opaque-protected-evidence");
+
+  let tree!: ReactTestRenderer;
+  await act(async () => { tree = create(<App />); });
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+  assert.ok(findText(tree, "Accès hors ligne autorisé. Les données locales protégées restent disponibles pendant la période prévue."));
+  assert.ok(findText(tree, "Aucune tâche synchronisée n'est disponible hors ligne. Les données locales protégées ne sont pas supprimées."));
+  assert.equal(runtime.__mobileTestApi!.listCalls, 0, "offline hydration does not call protected task endpoints");
+
+  const sessionCallsBeforeReconnect = runtime.__mobileTestApi!.sessionCalls;
+  runtime.__networkOnline = true;
+  await act(async () => {
+    runtime.__networkListener?.({ isConnected: true, isInternetReachable: true });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+  assert.ok(runtime.__mobileTestApi!.sessionCalls > sessionCallsBeforeReconnect, "reconnect revalidates the current server session");
+  assert.equal(findText(tree, "Accès hors ligne autorisé. Les données locales protégées restent disponibles pendant la période prévue."), undefined);
+
+  await act(async () => { findButton(tree, "Se déconnecter").props.onPress(); });
+  assert.ok(findText(tree, "Connexion Employé"));
+  assert.equal(runtime.__secureValues!.get("cetem-qc.protected-payload.v1.employee-1"), "opaque-protected-evidence");
+  await act(async () => { tree.unmount(); });
+});
+
+test("App sign-in grant survives remount with no server session and protects server-work boundary", async () => {
+  await loadApp();
+  const api = installMocks();
+  let tree!: ReactTestRenderer;
+  await act(async () => { tree = create(<App />); });
+  await signIn(tree);
+
+  const grantKey = "cetem-qc.offline-authorization.v1";
+  const persistedGrant = JSON.parse(runtime.__secureValues!.get(grantKey) ?? "null") as { status?: string; identity?: { id?: string } } | null;
+  assert.equal(persistedGrant?.status, "grant", "successful App sign-in persists authorization through SecureStore");
+  assert.equal(persistedGrant?.identity?.id, "employee-1");
+
+  const { expoSecureKeyValueStore } = await import("./offline-authorization-storage.js");
+  const localStore = createOfflineAuthorizationService(expoSecureKeyValueStore, { now: () => Date.now() });
+  await localStore.writeProtectedPayload("employee-1", "evidence-created-through-the-App-grant");
+  const listCallsBeforeRestart = api.listCalls;
+  runtime.__sessionAvailable = false;
+  runtime.__networkOnline = true;
+  await act(async () => { tree.unmount(); });
+  await act(async () => {
+    tree = create(<App />);
+    for (let tick = 0; tick < 4; tick++) await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+
+  assert.ok(findText(tree, "Une connexion en ligne est nécessaire pour vérifier votre compte. Connectez-vous pour continuer."));
+  assert.equal(await localStore.readProtectedPayload("employee-1"), "evidence-created-through-the-App-grant");
+  assert.equal(api.listCalls, listCallsBeforeRestart, "remount without a server session does not refetch protected server work");
+
+  let serverTaskCalls = 0;
+  await assert.rejects(runOnlyWhenOnlineAuthorized(async () => {
+    try {
+      await api.getSession();
+      return await localStore.confirmServerAuthorization("employee-1");
+    } catch {
+      return localStore.beginRevalidation("employee-1");
+    }
+  }, async () => { serverTaskCalls++; return "unexpected"; }));
+  assert.equal(serverTaskCalls, 0);
+  await act(async () => { tree.unmount(); });
+});
+
+test("App locks and preserves protected work when reconnect revalidation reports account deactivation", async () => {
+  await loadApp();
+  const api = installMocks();
+  let tree!: ReactTestRenderer;
+  await act(async () => { tree = create(<App />); });
+  await signIn(tree);
+
+  const { expoSecureKeyValueStore } = await import("./offline-authorization-storage.js");
+  const localStore = createOfflineAuthorizationService(expoSecureKeyValueStore, { now: () => Date.now() });
+  await localStore.writeProtectedPayload("employee-1", "preserved-deactivated-evidence");
+  assert.equal(await localStore.readProtectedPayload("employee-1"), "preserved-deactivated-evidence");
+  assert.equal(api.listCalls, 1, "sign-in made one authorized list request before deactivation was reported");
+
+  runtime.__sessionFailure = { status: 403, code: "ACCOUNT_DEACTIVATED" };
+  const callsBeforeRevalidation = api.listCalls;
+  const sessionCallsBeforeRevalidation = api.sessionCalls;
+  assert.ok(runtime.__networkListener, "the rendered App is subscribed to connectivity changes");
+  await act(async () => {
+    runtime.__networkListener?.({ isConnected: true, isInternetReachable: true });
+    for (let tick = 0; tick < 4; tick++) await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+
+  assert.ok(api.sessionCalls > sessionCallsBeforeRevalidation, "reconnect revalidates through the App session call");
+  assert.equal(api.listCalls, callsBeforeRevalidation, "no protected follow-up task request runs after deactivation is known");
+  assert.equal(api.detailCalls.length, 0);
+  assert.ok(findText(tree, "Votre compte a été désactivé. Les données locales protégées sont conservées et restent verrouillées."));
+  assert.ok(findText(tree, "Connexion Employé"), "the App clears the active employee screen and returns to sign-in");
+  assert.equal(findText(tree, "Mes tâches"), undefined, "the authorized task screen is no longer accessible through the App UI");
+  assert.equal(await localStore.readProtectedPayload("employee-1"), null, "the real authorization service denies payload access after deactivation");
+  assert.equal(runtime.__secureValues!.get("cetem-qc.protected-payload.v1.employee-1"), "preserved-deactivated-evidence");
+  const persistedLock = JSON.parse(runtime.__secureValues!.get("cetem-qc.offline-authorization.v1") ?? "null") as { status?: string } | null;
+  assert.equal(persistedLock?.status, "locked-deactivated", "the deactivated lock is persisted through SecureStore");
+
+  runtime.__networkOnline = false;
+  await act(async () => { tree.unmount(); });
+  await act(async () => { tree = create(<App />); await new Promise((resolve) => setTimeout(resolve, 0)); });
+  assert.ok(findText(tree, "Connexion Employé"), "remount does not restore the deactivated employee session");
+  assert.equal(findText(tree, "Mes tâches"), undefined);
+  const restartedStore = createOfflineAuthorizationService(expoSecureKeyValueStore, { now: () => Date.now() });
+  assert.equal((await restartedStore.hydrate()).status, "locked-deactivated", "a fresh service instance restores the persisted deactivation lock");
+  assert.equal(await restartedStore.readProtectedPayload("employee-1"), null);
+  assert.equal(runtime.__secureValues!.get("cetem-qc.protected-payload.v1.employee-1"), "preserved-deactivated-evidence");
+  assert.equal(api.listCalls, callsBeforeRevalidation, "remount after known deactivation issues no protected server request");
+  await act(async () => { tree.unmount(); });
+  delete runtime.__sessionFailure;
+});
+
+test("App sign-in grant expires after remount while its protected payload remains stored", async () => {
+  await loadApp();
+  const api = installMocks();
+  const actualNow = Date.now;
+  runtime.__testNow = actualNow();
+  Date.now = () => runtime.__testNow!;
+  let tree!: ReactTestRenderer;
+  try {
+    await act(async () => { tree = create(<App />); });
+    await signIn(tree);
+    const { expoSecureKeyValueStore } = await import("./offline-authorization-storage.js");
+    const localStore = createOfflineAuthorizationService(expoSecureKeyValueStore, { now: () => Date.now() });
+    await localStore.writeProtectedPayload("employee-1", "expires-but-is-preserved");
+    runtime.__networkOnline = false;
+    runtime.__testNow += 8 * 24 * 60 * 60 * 1000;
+    await act(async () => { tree.unmount(); });
+    await act(async () => { tree = create(<App />); await new Promise((resolve) => setTimeout(resolve, 0)); });
+    assert.ok(findText(tree, "La période d'accès hors ligne a expiré. Connectez-vous en ligne pour accéder aux données locales protégées."));
+    assert.equal(await localStore.readProtectedPayload("employee-1"), null);
+    assert.equal(runtime.__secureValues!.get("cetem-qc.protected-payload.v1.employee-1"), "expires-but-is-preserved");
+    assert.equal(api.listCalls, 1, "the restart did not issue a protected server request");
+    await act(async () => { tree.unmount(); });
+  } finally {
+    Date.now = actualNow;
+    delete runtime.__testNow;
+  }
+});
+
+test("expired local grant blocks task fetch even when the server session remains valid", async () => {
+  await loadApp();
+  const api = installMocks();
+  const actualNow = Date.now;
+  runtime.__testNow = actualNow();
+  Date.now = () => runtime.__testNow!;
+  let tree!: ReactTestRenderer;
+  try {
+    await act(async () => { tree = create(<App />); });
+    await signIn(tree);
+    assert.equal(api.listCalls, 1);
+    const sessionCallsBefore = api.sessionCalls;
+    runtime.__testNow += 8 * 24 * 60 * 60 * 1000;
+    await act(async () => {
+      findTaskRow(tree, firstTask.establishment).props.onPress();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    assert.ok(api.sessionCalls > sessionCallsBefore, "the still-valid server session was revalidated");
+    assert.deepEqual(api.detailCalls, [], "locked local authorization stops before the protected task endpoint");
+  } finally {
+    if (tree) await act(async () => { tree.unmount(); });
+    Date.now = actualNow;
+    delete runtime.__testNow;
   }
 });

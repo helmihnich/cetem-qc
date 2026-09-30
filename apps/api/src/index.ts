@@ -8,7 +8,7 @@ import {
   InvalidCredentialsError,
   replacePasswordAfterAuthentication,
 } from "./modules/identity-auth/authentication.js";
-import { createSession, findActiveSession, revokeSession } from "./modules/identity-auth/sessions.js";
+import { createSession, findActiveSession, hasLiveDeactivatedSession, revokeSession } from "./modules/identity-auth/sessions.js";
 import { listOwnTeamEmployees } from "./modules/team-access/queries/list-own-team-employees.js";
 import { createOwnTeamEmployee, DuplicateEmployeeEmailError, regenerateOwnTeamEmployeeCredential, updateOwnTeamEmployeeStatus } from "./modules/team-access/employee-credentials.js";
 import { createAssignedTask, getAssignedEmployeeTask, listAssignedEmployeeTasks, listEligibleTaskAssignees, listOwnTeamTasks, TaskAssigneeUnavailableError } from "./modules/tasks/tasks.js";
@@ -117,20 +117,33 @@ export function createApp(pool?: Pool) {
     next();
   });
 
+  v1.get("/session", async (request, response) => {
+    const token = bearerToken(request.header("authorization"));
+    if (!token) { unauthorized(response); return; }
+    try {
+      const session = await findActiveSession(getPool(), token);
+      if (!session) {
+        if (await hasLiveDeactivatedSession(getPool(), token)) {
+          response.status(403).json(apiErrorSchema.parse({ error: { code: "ACCOUNT_DEACTIVATED", message: "Ce compte est désactivé." } }));
+          return;
+        }
+        unauthorized(response);
+        return;
+      }
+      response.status(200).json(sessionResponseSchema.parse({
+        sessionExpiresAt: session.expiresAt,
+        user: {
+          id: session.id, email: session.email, displayName: session.displayName,
+          role: session.role, mustChangePassword: session.mustChangePassword,
+        },
+      }));
+    } catch {
+      response.status(500).json(apiErrorSchema.parse({ error: { code: "INTERNAL_ERROR", message: "Une erreur est survenue." } }));
+    }
+  });
+
   // All server operations registered after the public auth flow require a live session.
   v1.use(requireSession);
-
-  v1.get("/session", (request, response) => {
-    const session = response.locals.session as Awaited<ReturnType<typeof findActiveSession>>;
-    if (!session) { unauthorized(response); return; }
-    response.status(200).json(sessionResponseSchema.parse({
-      sessionExpiresAt: session.expiresAt,
-      user: {
-        id: session.id, email: session.email, displayName: session.displayName,
-        role: session.role, mustChangePassword: session.mustChangePassword,
-      },
-    }));
-  });
 
   v1.delete("/session", async (_request, response) => {
     const session = response.locals.session as NonNullable<Awaited<ReturnType<typeof findActiveSession>>>;
