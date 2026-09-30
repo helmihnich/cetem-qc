@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createAuthorizedDrafts } from "./authorized-drafts.js";
-import { createDraftRepository, type DraftDatabase, type LocalDraft } from "./model.js";
+import { createDraftRepository, DraftListCorruptionError, type DraftDatabase, type LocalDraft } from "./model.js";
 import { initializeDraftDatabase } from "./sqlite-draft-schema.js";
 import { createOfflineAuthorizationService } from "../offline-authorization-state.js";
 
@@ -67,6 +67,16 @@ test("failed save preserves previous commit and failed deletion preserves draft"
   f.setFailDelete(true);
   await assert.rejects(drafts.delete("employee-a", "task-a", saved.revision));
   assert.deepEqual(await drafts.read("employee-a", "task-a"), saved);
+});
+
+test("a failed first write is not returned or exposed as a resumable draft", async () => {
+  const f = fixture();
+  const drafts = f.repository();
+  f.setFailSave(true);
+  await assert.rejects(drafts.save("employee-a", "task-a", "not committed"));
+  f.setFailSave(false);
+  assert.equal(await drafts.read("employee-a", "task-a"), null);
+  assert.deepEqual(await drafts.list("employee-a"), []);
 });
 
 test("an explicitly deleted task can start a fresh local draft with a new identity", async () => {
@@ -152,6 +162,27 @@ test("malformed and unsupported payloads fail closed", async () => {
   f.records.set("employee-a/task-a", JSON.stringify({ payloadSchemaVersion: 99, employeeId: "employee-a", taskId: "task-a" }));
   await assert.rejects(f.repository().read("employee-a", "task-a"));
   assert.ok(f.records.has("employee-a/task-a"), "corrupt bytes remain preserved");
+});
+
+test("draft listing distinguishes empty, valid, partial-corrupt, and unavailable storage", async () => {
+  const f = fixture();
+  const drafts = f.repository();
+  assert.deepEqual(await drafts.list("employee-a"), [], "an actual empty result remains an empty list");
+  const saved = await drafts.save("employee-a", "task-a", "valid entry");
+  assert.deepEqual(await drafts.list("employee-a"), [saved], "all-valid entries are returned normally");
+
+  f.records.set("employee-a/task-b", "{not-json");
+  f.database.list = async () => [f.records.get("employee-a/task-a")!, f.records.get("employee-a/task-b")!];
+  await assert.rejects(drafts.list("employee-a"), (error: unknown) => {
+    assert.ok(error instanceof DraftListCorruptionError);
+    assert.deepEqual(error.drafts, [saved], "valid drafts survive alongside a corrupt row");
+    return true;
+  });
+  assert.ok(f.records.has("employee-a/task-b"), "corrupt bytes are not silently deleted");
+
+  f.database.list = async () => { throw new Error("database unavailable"); };
+  await assert.rejects(drafts.list("employee-a"), /database unavailable/, "a complete list failure remains an error");
+  assert.ok(f.records.has("employee-a/task-a"), "a failed list leaves readable records intact");
 });
 
 test("database migration initializes an empty versioned schema and rejects unknown versions without reset", async () => {

@@ -119,14 +119,15 @@ These are implementation proposals for checkpoint approval, not changes to produ
 
 ## Verification
 
-- Mobile test suite: 56/56 passed, zero skipped, including Story 5.2 authorization regressions and local-draft rendered/repository tests.
+- Mobile test suite: 71/71 passed, zero skipped, including Story 5.2 authorization regressions, hydration/delete races, authorization redaction, list corruption, and direct SQLite adapter orchestration tests.
 - Recursive workspace typechecks: passed.
 - Generated contract check: passed; API contract unchanged.
 - Boundary tests: 8/8 passed; boundary checker passed.
-- Android Expo JavaScript export: passed with `--no-bytecode` after Windows denied `hermesc.exe` execution; bundling only.
+- Android Expo JavaScript export: passed with `--no-bytecode`; bundling only.
 - iOS Expo JavaScript export: passed with `--no-bytecode`; bundling only.
 - `git diff --check`: passed.
-- Native Android/iOS builds, runtime SQLCipher encryption, Keychain/Keystore behavior, and physical-device restart were not run and are not established by JS exports.
+- Adapter tests inject a deterministic SQLite driver and verify SecureStore key retrieval/generation, key/PRAGMA ordering, fail-closed open/key/migration errors, no plaintext fallback, and preserved existing data. They do not emulate cryptographic correctness.
+- Native Android/iOS builds, runtime SQLCipher encryption, Keychain/Keystore behavior, and physical-device restart were not run and are not established by JS exports or injected-driver tests.
 
 ## Review Triage Log
 
@@ -163,3 +164,47 @@ These are implementation proposals for checkpoint approval, not changes to produ
 - `_bmad-output/implementation-artifacts/spec-5-2-protect-local-drafts-and-apply-the-resolved-offline-access-window.md` and current mobile authorization/storage modules
 - `_bmad-output/implementation-artifacts/epic-4-retro-2026-09-30.md`
 - `_bmad-output/implementation-artifacts/sprint-status.yaml`
+
+### Review Findings
+
+- [x] [Review][Patch] Keep the task editor unavailable until the persisted draft revision has hydrated [apps/mobile/App.tsx]
+- [x] [Review][Patch] Bind delete confirmation to the original draft and clear it on navigation [apps/mobile/App.tsx]
+- [x] [Review][Patch] Cancel autosave and clear the content ref only after durable delete succeeds [apps/mobile/App.tsx]
+- [x] [Review][Patch] Hide in-memory draft content when offline authorization expires or becomes invalid [apps/mobile/App.tsx]
+- [x] [Review][Patch] Preserve valid resume entries and show storage errors when draft listing fails [apps/mobile/local-drafts/model.ts]
+- [x] [Review][Patch] Add direct adapter tests for SQLCipher key handling and database-open failures [apps/mobile/local-drafts/sqlite-draft-database.test.ts]
+
+#### Review finding details
+
+1. **Medium — Hydration can race the first edit.** `openTask` publishes the fetched task at line 389 before the protected draft read completes at line 392. If the employee edits during that read, the generation guard skips hydration, leaving the revision map at its default `0`; autosave then conflicts with the already committed revision and the edit remains unsaved. Keep editing disabled until hydration completes or reconcile the stored revision before enabling writes.
+2. **Medium — A stale delete confirmation can target another draft.** `leaveTaskDetail` does not reset `deleteDraftConfirmation`, and the confirmation handler reads the current `activeDraft`. Leaving with the dialog open and opening another draft reuses the visible confirmation against the newly active draft. Capture the selected draft ID/revision and clear confirmation on navigation.
+3. **Medium — Autosave can recreate a confirmed-deleted draft.** Delete confirmation does not cancel the scheduled autosave; after deletion it resets the scoped revision to `0` but leaves `draftContentRef` unchanged. A timer firing around the delete can save that content as a new revision after the delete commits. Cancel/serialize pending autosaves and clear the content ref before completing deletion.
+4. **Medium — Expired authorization can leave already hydrated draft text accessible.** A save after the seven-day grant expires is rejected by `withProtectedAccess`, but the save failure path only changes the status to `failed`; it leaves the user and plaintext editor mounted. Lock and redact the editor when a protected operation discovers authorization is no longer valid.
+5. **Medium — Draft-list failures appear as no local drafts.** `createDraftRepository.list` parses all rows in one `map`, so one malformed row rejects the entire listing; `refreshLocalDrafts` then clears the list and only reports an error under one authorization status. Valid drafts become unreachable from the resume list and storage failure can look like an empty state. Preserve valid rows where possible and always render a distinct list/storage error.
+6. **Low — Production SQLite adapter key/open failure paths lack direct tests.** Current repository tests use an in-memory adapter and the rendered test supplies a SQLite mock; no test imports `createSqliteDraftDatabase`. Add injected-driver tests for SecureStore key retrieval/generation, PRAGMA ordering, inaccessible existing DB/key loss, and failure propagation/preservation. This is a verification gap; native SQLCipher execution remains a separate platform-evidence limitation.
+
+#### Rejected
+
+#### Applied resolutions
+
+- Hydration uses an explicit loading/ready/failed state and blocks editing and saving until the selected account/task read completes; selected-scope generations reject stale results.
+- Delete confirmation captures account, task, draft ID, and revision. Navigation clears the capture. Debounced autosave is cancelled at confirmation, queued saves serialize before deletion, and plaintext state clears only after durable deletion succeeds.
+- A protected-operation authorization failure re-evaluates Story 5.2 state, redacts editor plaintext, locks the screen with the safe French message, and preserves encrypted draft data. Reauthentication restores normal hydration.
+- Listing retains valid records while surfacing corruption; complete list failures produce a distinct retryable storage error. Malformed records are preserved.
+- Production-adapter orchestration tests cover SecureStore, key generation, SQLCipher setup order, migration/open/key failures, no plaintext fallback, and data preservation. Native SQLCipher/device behavior remains unverified.
+
+### Final Closure Review (2026-10-01)
+
+- Verdict: accepted and closed. All six remediation findings are resolved; no blocking or medium product findings remain.
+- Hydration/edit gating, draft-bound delete confirmation, delete/autosave serialization, authorization-loss redaction, partial-corruption reporting, and SQLite adapter orchestration were checked against the implementation and rendered/domain tests.
+- Persistence review reconfirmed one draft per employee/task, exclusive SQLite save/delete transactions, revision guards, commit-dependent save acknowledgement, failed initial writes remaining absent, failed replacements preserving the prior commit, restart resume, and account/task isolation.
+- Scope check found no Story 5.4/5.5 editing, sync/outbox, submission, pending snapshots, conflict handling, calculations, insights, AI, conformity, or reports. Local save remains distinct from synchronization and submission.
+- Verification rerun: mobile suite 72/72 with zero skipped; recursive workspace typechecks; generated contract check; boundary tests 8/8; boundary checker; Android and iOS Expo JavaScript exports; and `git diff --check` all passed.
+- Platform evidence remains limited: Expo exports prove JavaScript bundling. Injected SQLite tests prove adapter orchestration and failure propagation, not native SQLCipher encryption. Native builds/install/launch, physical-device restart, and Keychain/Keystore behavior remain unverified.
+- Story 5.3 is `done`; Epic 5 remains `in-progress`; Stories 5.4–5.5 remain `backlog`. Product code did not change during this closure review; the adapter failure test was strengthened and a failed-first-write test was added.
+
+- Blind Hunter: delayed list results can expose employee A's task IDs to employee B — authorization operations and identity establishment are serialized through the same transition queue, and sign-out clears the list before another identity completes authentication.
+- Blind Hunter: resuming a different draft can show stale task metadata — local-draft resume is initiated from the list screen, and the detail-to-list transition clears `task` before another draft can be opened.
+- Blind Hunter: omitting `expectedRevision` can overwrite an existing draft — current App save calls always pass the account/task revision (defaulting to `0` only when no draft was hydrated); the SQLite adapter rejects a mismatched existing revision.
+- Blind Hunter: a version-1 database with an incomplete table is silently accepted — initialization checks the table name and all subsequent SQLite operations fail closed; no reset or data deletion occurs.
+- Edge Case Hunter: no additional unhandled paths were returned.

@@ -18,6 +18,9 @@ const runtime = globalThis as typeof globalThis & {
   __draftRows?: Map<string, string>;
   __holdDraftWrite?: Promise<void>;
   __draftWriteStarted?: () => void;
+  __holdDraftRead?: Promise<void>;
+  __draftReadStarted?: () => void;
+  __failDraftList?: boolean;
 };
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -65,12 +68,16 @@ mock.module("expo-sqlite", { namedExports: {
       getFirstAsync: async (sql: string, ...params: string[]) => {
         if (sql.includes("user_version")) return { user_version: 1 };
         if (sql.includes("sqlite_master")) return { name: "local_drafts" };
+        if (sql.includes("payload_json") && runtime.__holdDraftRead) { runtime.__draftReadStarted?.(); await runtime.__holdDraftRead; }
         const row = rows.get(key(params[0]!, params[1]!));
         if (!row) return null;
         const parsed = JSON.parse(row) as { payload_json?: string; revision?: number };
         return sql.includes("payload_json") ? { payload_json: parsed.payload_json ?? row } : { revision: parsed.revision ?? (JSON.parse(parsed.payload_json ?? row) as { revision: number }).revision };
       },
-      getAllAsync: async (_sql: string, employeeId: string) => [...rows.values()].filter((raw) => (JSON.parse(raw) as { employeeId: string }).employeeId === employeeId).map((payload_json) => ({ payload_json })),
+      getAllAsync: async (_sql: string, employeeId: string) => {
+        if (runtime.__failDraftList) throw new Error("list failed");
+        return [...rows.values()].filter((raw) => (JSON.parse(raw) as { employeeId: string }).employeeId === employeeId).map((payload_json) => ({ payload_json }));
+      },
       runAsync: async (sql: string, ...params: (string | number)[]) => {
         if (sql.includes("INSERT INTO local_drafts")) {
           const writeGate = runtime.__holdDraftWrite;
@@ -87,7 +94,8 @@ mock.module("expo-sqlite", { namedExports: {
         } else if (sql.includes("DELETE FROM local_drafts")) {
           const [employeeId, taskId, revision] = params;
           const current = rows.get(key(String(employeeId), String(taskId)));
-          if (current && (JSON.parse(current) as { revision: number }).revision === revision) rows.delete(key(String(employeeId), String(taskId)));
+          if (current && (JSON.parse(current) as { revision: number }).revision === revision) { rows.delete(key(String(employeeId), String(taskId))); return { changes: 1, lastInsertRowId: 1 }; }
+          return { changes: 0, lastInsertRowId: 0 };
         }
         return { changes: 1, lastInsertRowId: 1 };
       },
@@ -137,17 +145,28 @@ const firstTask: Task = {
   service: "Radiologie",
   createdAt: "2026-09-30T10:00:00.000Z",
 };
+const secondTask: Task = {
+  id: "00000000-0000-4000-8000-000000000052",
+  establishment: "Centre hospitalier Sud",
+  service: "Urgences",
+  createdAt: "2026-09-30T11:00:00.000Z",
+};
 
 function installMocks() {
   runtime.__mobileTestWidth = 390;
   runtime.__secureValues = new Map();
   runtime.__draftRows = new Map();
+  runtime.__holdDraftRead = undefined;
+  runtime.__holdDraftWrite = undefined;
+  runtime.__draftReadStarted = undefined;
+  runtime.__draftWriteStarted = undefined;
+  runtime.__failDraftList = false;
   runtime.__networkOnline = true;
   runtime.__sessionAvailable = true;
   const api: MockApi = {
     authenticate: async () => ({ user: { id: "employee-1", email: "employee@example.test", displayName: "Employée Test", role: "employe", mustChangePassword: false } }),
-    listAssignedEmployeeTasks: async () => { api.listCalls++; return { tasks: [firstTask] }; },
-    getAssignedEmployeeTask: async (id) => { api.detailCalls.push(id); return { task: firstTask }; },
+    listAssignedEmployeeTasks: async () => { api.listCalls++; return { tasks: [firstTask, secondTask] }; },
+    getAssignedEmployeeTask: async (id) => { api.detailCalls.push(id); return { task: id === secondTask.id ? secondTask : firstTask }; },
     getSession: async () => {
       api.sessionCalls++;
       if (runtime.__sessionFailure) {
@@ -280,6 +299,190 @@ test("employee saves locally, remounts offline to resume, and confirms or cancel
   assert.equal(runtime.__draftRows?.size, 0);
   assert.ok(findText(tree, "Brouillon local supprimé."));
   await act(async () => { tree.unmount(); });
+});
+
+test("hydration keeps an existing draft read-only until its committed revision is known", async () => {
+  await loadApp();
+  installMocks();
+  runtime.__draftRows!.set(`employee-1/${firstTask.id}`, JSON.stringify({
+    id: "committed-draft", employeeId: "employee-1", taskId: firstTask.id,
+    payloadSchemaVersion: 1, revision: 7, payload: { content: "durable content" }, createdAt: 10, savedAt: 20,
+  }));
+  let beginRead!: () => void;
+  let releaseRead!: () => void;
+  const readStarted = new Promise<void>((resolve) => { beginRead = resolve; });
+  runtime.__holdDraftRead = new Promise<void>((resolve) => { releaseRead = resolve; });
+  runtime.__draftReadStarted = beginRead;
+  let tree!: ReactTestRenderer;
+  await act(async () => { tree = create(<App />); });
+  await signIn(tree);
+  await act(async () => { findTaskRow(tree, firstTask.establishment).props.onPress(); await readStarted; });
+  const editor = () => tree.root.findAll((node) => node.type === "TextInput").find((node) => node.props.accessibilityLabel === "Contenu du brouillon local")!;
+  assert.equal(editor().props.editable, false);
+  assert.equal(editor().props.value, "");
+  assert.equal(findButton(tree, "Enregistrer").props.disabled, true);
+  await act(async () => { editor().props.onChangeText("too early"); });
+  releaseRead();
+  runtime.__holdDraftRead = undefined;
+  runtime.__draftReadStarted = undefined;
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+  assert.equal(editor().props.editable, true);
+  assert.equal(editor().props.value, "durable content");
+  await act(async () => { editor().props.onChangeText("revision seven updated"); await findButton(tree, "Enregistrer").props.onPress(); });
+  const committed = JSON.parse(runtime.__draftRows!.get(`employee-1/${firstTask.id}`)!) as { revision: number; payload: { content: string } };
+  assert.equal(committed.revision, 8, "the hydrated revision is used as the save base");
+  assert.equal(committed.payload.content, "revision seven updated");
+  await act(async () => { tree.unmount(); });
+});
+
+test("late hydration from a previous task cannot replace the newer selected draft", async () => {
+  await loadApp();
+  installMocks();
+  for (const [taskId, id, content] of [[firstTask.id, "draft-a", "content A"], [secondTask.id, "draft-b", "content B"]]) {
+    runtime.__draftRows!.set(`employee-1/${taskId}`, JSON.stringify({ id, employeeId: "employee-1", taskId, payloadSchemaVersion: 1, revision: 1, payload: { content }, createdAt: 10, savedAt: 20 }));
+  }
+  let beginRead!: () => void;
+  let releaseRead!: () => void;
+  const readStarted = new Promise<void>((resolve) => { beginRead = resolve; });
+  runtime.__holdDraftRead = new Promise<void>((resolve) => { releaseRead = resolve; });
+  runtime.__draftReadStarted = beginRead;
+  let tree!: ReactTestRenderer;
+  await act(async () => { tree = create(<App />); });
+  await signIn(tree);
+  await act(async () => { findTaskRow(tree, firstTask.establishment).props.onPress(); await readStarted; });
+  await act(async () => { findButton(tree, "Retour à Mes tâches").props.onPress(); });
+  runtime.__holdDraftRead = undefined;
+  runtime.__draftReadStarted = undefined;
+  await act(async () => { findButton(tree, secondTask.id).props.onPress(); for (let tick = 0; tick < 6; tick++) await new Promise((resolve) => setTimeout(resolve, 0)); });
+  assert.equal(tree.root.findAll((node) => node.type === "TextInput").some((node) => node.props.accessibilityLabel === "Contenu du brouillon local"), false, "the next selection stays unavailable while the earlier serialized read is pending");
+  releaseRead();
+  await act(async () => { for (let tick = 0; tick < 8; tick++) await new Promise((resolve) => setTimeout(resolve, 0)); });
+  const editor = tree.root.findAll((node) => node.type === "TextInput").find((node) => node.props.accessibilityLabel === "Contenu du brouillon local");
+  assert.equal(editor?.props.value, "content B");
+  await act(async () => { tree.unmount(); });
+});
+
+test("delete confirmation is cleared on navigation and cannot target the next draft", async () => {
+  await loadApp();
+  installMocks();
+  for (const [taskId, id, content] of [[firstTask.id, "draft-a", "content A"], [secondTask.id, "draft-b", "content B"]]) {
+    runtime.__draftRows!.set(`employee-1/${taskId}`, JSON.stringify({ id, employeeId: "employee-1", taskId, payloadSchemaVersion: 1, revision: 1, payload: { content }, createdAt: 10, savedAt: 20 }));
+  }
+  let tree!: ReactTestRenderer;
+  await act(async () => { tree = create(<App />); });
+  await signIn(tree);
+  await act(async () => { findButton(tree, firstTask.id).props.onPress(); await new Promise((resolve) => setTimeout(resolve, 0)); });
+  await act(async () => { findButton(tree, "Supprimer le brouillon local").props.onPress(); });
+  assert.ok(findText(tree, "Supprimer ce brouillon local ? Cette action est définitive."));
+  await act(async () => { findButton(tree, "Retour à Mes tâches").props.onPress(); });
+  await act(async () => { findButton(tree, secondTask.id).props.onPress(); await new Promise((resolve) => setTimeout(resolve, 0)); });
+  assert.equal(findText(tree, "Supprimer ce brouillon local ? Cette action est définitive."), undefined);
+  assert.ok(runtime.__draftRows!.has(`employee-1/${firstTask.id}`));
+  assert.ok(runtime.__draftRows!.has(`employee-1/${secondTask.id}`));
+  await act(async () => { tree.unmount(); });
+});
+
+test("confirmed delete cancels a scheduled autosave so deleted content stays deleted", async () => {
+  await loadApp();
+  installMocks();
+  runtime.__draftRows!.set(`employee-1/${firstTask.id}`, JSON.stringify({ id: "draft-a", employeeId: "employee-1", taskId: firstTask.id, payloadSchemaVersion: 1, revision: 1, payload: { content: "old content" }, createdAt: 10, savedAt: 20 }));
+  let tree!: ReactTestRenderer;
+  await act(async () => { tree = create(<App />); });
+  await signIn(tree);
+  await act(async () => { findTaskRow(tree, firstTask.establishment).props.onPress(); });
+  const editor = tree.root.findAll((node) => node.type === "TextInput").find((node) => node.props.accessibilityLabel === "Contenu du brouillon local")!;
+  await act(async () => { editor.props.onChangeText("pending autosave content"); });
+  await act(async () => { findButton(tree, "Supprimer le brouillon local").props.onPress(); });
+  await act(async () => { findButton(tree, "Confirmer").props.onPress(); await new Promise((resolve) => setTimeout(resolve, 0)); });
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 550)); });
+  assert.equal(runtime.__draftRows!.has(`employee-1/${firstTask.id}`), false);
+  await act(async () => { tree.unmount(); });
+});
+
+test("delete serializes behind an in-flight explicit save and preserves the newer revision", async () => {
+  await loadApp();
+  installMocks();
+  runtime.__draftRows!.set(`employee-1/${firstTask.id}`, JSON.stringify({ id: "draft-a", employeeId: "employee-1", taskId: firstTask.id, payloadSchemaVersion: 1, revision: 1, payload: { content: "old content" }, createdAt: 10, savedAt: 20 }));
+  let beginWrite!: () => void;
+  let releaseWrite!: () => void;
+  const writeStarted = new Promise<void>((resolve) => { beginWrite = resolve; });
+  runtime.__holdDraftWrite = new Promise<void>((resolve) => { releaseWrite = resolve; });
+  runtime.__draftWriteStarted = beginWrite;
+  let tree!: ReactTestRenderer;
+  await act(async () => { tree = create(<App />); });
+  await signIn(tree);
+  await act(async () => { findTaskRow(tree, firstTask.establishment).props.onPress(); });
+  const editor = tree.root.findAll((node) => node.type === "TextInput").find((node) => node.props.accessibilityLabel === "Contenu du brouillon local")!;
+  await act(async () => { editor.props.onChangeText("explicitly saved version"); });
+  let saving!: Promise<boolean>;
+  await act(async () => { saving = findButton(tree, "Enregistrer").props.onPress() as Promise<boolean>; await writeStarted; });
+  await act(async () => { findButton(tree, "Supprimer le brouillon local").props.onPress(); });
+  await act(async () => { findButton(tree, "Confirmer").props.onPress(); });
+  releaseWrite();
+  runtime.__holdDraftWrite = undefined;
+  runtime.__draftWriteStarted = undefined;
+  await act(async () => { assert.equal(await saving, true); await new Promise((resolve) => setTimeout(resolve, 0)); });
+  const stillCommitted = JSON.parse(runtime.__draftRows!.get(`employee-1/${firstTask.id}`)!) as { revision: number; payload: { content: string } };
+  assert.equal(stillCommitted.revision, 2);
+  assert.equal(stillCommitted.payload.content, "explicitly saved version");
+  assert.ok(findText(tree, "Le brouillon local n’a pas pu être supprimé. Il est conservé."));
+  await act(async () => { tree.unmount(); });
+});
+
+test("corrupt draft rows preserve valid resume entries and show a storage error", async () => {
+  await loadApp();
+  installMocks();
+  runtime.__draftRows!.set(`employee-1/${firstTask.id}`, JSON.stringify({ id: "good", employeeId: "employee-1", taskId: firstTask.id, payloadSchemaVersion: 1, revision: 1, payload: { content: "valid" }, createdAt: 10, savedAt: 20 }));
+  runtime.__draftRows!.set("employee-1/corrupt", JSON.stringify({ employeeId: "employee-1", taskId: "corrupt", payloadSchemaVersion: 999 }));
+  let tree!: ReactTestRenderer;
+  await act(async () => { tree = create(<App />); });
+  await signIn(tree);
+  assert.ok(findButton(tree, firstTask.id), "the valid draft remains available for resume");
+  assert.ok(findText(tree, "Le brouillon local est indisponible. Vos données protégées sont conservées."));
+  assert.ok(runtime.__draftRows!.has("employee-1/corrupt"), "the malformed encrypted record is preserved");
+  await act(async () => { tree.unmount(); });
+});
+
+test("complete draft list failure renders storage error distinctly from an empty list", async () => {
+  await loadApp();
+  installMocks();
+  runtime.__failDraftList = true;
+  let tree!: ReactTestRenderer;
+  await act(async () => { tree = create(<App />); });
+  await signIn(tree);
+  assert.ok(findText(tree, "Le brouillon local est indisponible. Vos données protégées sont conservées."));
+  assert.ok(findButton(tree, "Réessayer"), "the failed list offers an explicit retry");
+  await act(async () => { tree.unmount(); });
+});
+
+test("authorization expiry during save locks the editor, redacts text and preserves the encrypted row", async () => {
+  await loadApp();
+  installMocks();
+  runtime.__draftRows!.set(`employee-1/${firstTask.id}`, JSON.stringify({ id: "draft-a", employeeId: "employee-1", taskId: firstTask.id, payloadSchemaVersion: 1, revision: 1, payload: { content: "protected hydrated text" }, createdAt: 10, savedAt: 20 }));
+  const actualNow = Date.now;
+  runtime.__testNow = actualNow();
+  Date.now = () => runtime.__testNow!;
+  let tree!: ReactTestRenderer;
+  try {
+    await act(async () => { tree = create(<App />); });
+    await signIn(tree);
+    await act(async () => { findTaskRow(tree, firstTask.establishment).props.onPress(); });
+    assert.ok(tree.root.findAll((node) => node.type === "TextInput").some((node) => node.props.value === "protected hydrated text"));
+    const editor = tree.root.findAll((node) => node.type === "TextInput").find((node) => node.props.accessibilityLabel === "Contenu du brouillon local")!;
+    await act(async () => { editor.props.onChangeText("new plaintext edit"); });
+    runtime.__testNow += 8 * 24 * 60 * 60 * 1000;
+    await act(async () => { await findButton(tree, "Enregistrer").props.onPress(); await new Promise((resolve) => setTimeout(resolve, 0)); });
+    assert.ok(findText(tree, "La période d'accès hors ligne a expiré. Connectez-vous en ligne pour accéder aux données locales protégées."));
+    assert.equal(tree.root.findAll((node) => node.type === "TextInput").some((node) => node.props.value === "protected hydrated text" || node.props.value === "new plaintext edit"), false);
+    assert.equal(JSON.parse(runtime.__draftRows!.get(`employee-1/${firstTask.id}`)!).payload.content, "protected hydrated text");
+    await signIn(tree);
+    await act(async () => { findTaskRow(tree, firstTask.establishment).props.onPress(); });
+    assert.ok(tree.root.findAll((node) => node.type === "TextInput").some((node) => node.props.value === "protected hydrated text"), "a fresh grant restores authorized resume");
+    await act(async () => { tree.unmount(); });
+  } finally {
+    Date.now = actualNow;
+    delete runtime.__testNow;
+  }
 });
 
 test("phone App keeps loading, error and retry states actionable", async () => {

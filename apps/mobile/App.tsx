@@ -15,7 +15,7 @@ import { expoSecureKeyValueStore } from "./offline-authorization-storage";
 import { createDraftRepository } from "./local-drafts/model";
 import { createSqliteDraftDatabase } from "./local-drafts/sqlite-draft-database";
 import { createAuthorizedDrafts } from "./local-drafts/authorized-drafts";
-import type { LocalDraft } from "./local-drafts/model";
+import { DraftListCorruptionError, type LocalDraft } from "./local-drafts/model";
 import { runOnlyWhenOnlineAuthorized, ServerWorkAuthorizationError } from "./server-work-authorization";
 
 declare const process: { env: { EXPO_PUBLIC_API_URL?: string; EXPO_PUBLIC_OFFLINE_AUTHORIZATION_WINDOW_DAYS?: string } };
@@ -45,6 +45,8 @@ export default function App() {
     (identityId, operation) => authorizationRef.current.withProtectedAccess(identityId, operation),
   ));
   const draftGenerationRef = useRef(0);
+  const draftOperationGenerationRef = useRef(0);
+  const draftDeletingRef = useRef(false);
   const draftRevisionRef = useRef(0);
   const draftRevisionByScopeRef = useRef(new Map<string, number>());
   const draftContentRef = useRef("");
@@ -64,10 +66,12 @@ export default function App() {
   const [authorization, setAuthorization] = useState<OfflineAuthorizationState>({ status: "locked-logged-out" });
   const [isOnline, setIsOnline] = useState(true);
   const [localDrafts, setLocalDrafts] = useState<LocalDraft[]>([]);
+  const [draftListError, setDraftListError] = useState(false);
   const [activeDraft, setActiveDraft] = useState<LocalDraft>();
   const [draftContent, setDraftContent] = useState("");
   const [draftSaveState, setDraftSaveState] = useState<"idle" | "saving" | "saved" | "failed">("idle");
-  const [deleteDraftConfirmation, setDeleteDraftConfirmation] = useState(false);
+  const [draftHydration, setDraftHydration] = useState<"idle" | "loading" | "ready" | "failed">("idle");
+  const [deleteDraftConfirmation, setDeleteDraftConfirmation] = useState<{ employeeId: string; taskId: string; draftId: string; revision: number }>();
   const [draftNotice, setDraftNotice] = useState<string>();
   const listState = getEmployeeTaskListState({ loading, error: Boolean(error), taskCount: tasks.length });
   const presentation = getEmployeeTaskPresentation({
@@ -83,14 +87,55 @@ export default function App() {
 
   async function refreshLocalDrafts(identityId = user?.id) {
     if (!identityId) { setLocalDrafts([]); return; }
-    try { setLocalDrafts(await draftsRef.current.list(identityId)); }
-    catch { setLocalDrafts([]); if (authorization.status === "offline-authorized") setError(fr.employeeTasks.draftStorageUnavailable); }
+    try { setLocalDrafts(await draftsRef.current.list(identityId)); setDraftListError(false); }
+    catch (cause) {
+      if (cause instanceof DraftListCorruptionError) setLocalDrafts(cause.drafts);
+      else setLocalDrafts([]);
+      setDraftListError(true);
+      await redactDraftIfAuthorizationLost(identityId);
+    }
+  }
+
+  async function redactDraftIfAuthorizationLost(identityId: string) {
+    const state = await authorizationRef.current.evaluate(identityId).catch(() => ({ status: "locked-corrupt-or-clock-invalid" as const }));
+    if (state.status === "offline-authorized" || state.status === "online-authorized") return false;
+    setAuthorization(state);
+    draftGenerationRef.current++;
+    draftOperationGenerationRef.current++;
+    if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
+    draftContentRef.current = "";
+    setDraftContent("");
+    setActiveDraft(undefined);
+    setDraftHydration("failed");
+    setDraftSaveState("idle");
+    setDeleteDraftConfirmation(undefined);
+    setLocalDrafts([]);
+    setUser(undefined);
+    setError(state.status === "locked-expired" ? fr.auth.offlineExpired
+      : state.status === "locked-deactivated" ? fr.auth.accountDeactivated
+        : state.status === "locked-logged-out" ? fr.auth.reauthenticateOnline : fr.auth.offlineUnavailable);
+    return true;
+  }
+
+  function changeDraftContent(value: string) {
+    if (draftHydration !== "ready" || draftDeletingRef.current || deleteDraftConfirmation || !user) return;
+    draftGenerationRef.current++;
+    draftContentRef.current = value;
+    setDraftContent(value);
+    setDraftSaveState("saving");
   }
 
   async function openLocalDraft(taskId: string) {
     if (!user) return;
     setDraftNotice(undefined);
     const generation = ++draftGenerationRef.current;
+    draftOperationGenerationRef.current++;
+    setDeleteDraftConfirmation(undefined);
+    setDraftHydration("loading");
+    setDraftContent("");
+    draftContentRef.current = "";
+    setActiveDraft(undefined);
+    setScreen({ kind: "detail", id: taskId });
     setLoading(true);
     try {
       const draft = await draftsRef.current.read(user.id, taskId);
@@ -101,7 +146,7 @@ export default function App() {
       setDraftContent(draft?.payload.content ?? "");
       draftContentRef.current = draft?.payload.content ?? "";
       setDraftSaveState(draft ? "saved" : "idle");
-      setScreen({ kind: "detail", id: taskId });
+      setDraftHydration("ready");
       if (!task && isOnline) {
         const response = await runOnlyWhenOnlineAuthorized(
           () => revalidateServerAuthorization(user),
@@ -111,19 +156,25 @@ export default function App() {
       }
       setError(undefined);
     } catch {
-      if (generation === draftGenerationRef.current) setError(fr.employeeTasks.draftStorageUnavailable);
+      if (generation === draftGenerationRef.current) {
+        setDraftHydration("failed");
+        setError(fr.employeeTasks.draftStorageUnavailable);
+        await redactDraftIfAuthorizationLost(user.id);
+      }
     } finally { if (generation === draftGenerationRef.current) setLoading(false); }
   }
 
   function saveDraft(content = draftContent): Promise<boolean> {
-    if (!user || screen.kind !== "detail") return Promise.resolve(false);
+    if (!user || screen.kind !== "detail" || draftHydration !== "ready" || draftDeletingRef.current) return Promise.resolve(false);
     if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
     const employeeId = user.id;
     const taskId = screen.id;
     const scopeKey = `${employeeId}\u0000${taskId}`;
     const generation = draftGenerationRef.current;
+    const operationGeneration = draftOperationGenerationRef.current;
     setDraftSaveState("saving");
     const completion = draftSaveQueueRef.current.then(async () => {
+      if (operationGeneration !== draftOperationGenerationRef.current || draftDeletingRef.current) return false;
       let saveGeneration = draftGenerationRef.current;
       let commitContent = content;
       let saved!: LocalDraft;
@@ -142,7 +193,10 @@ export default function App() {
       }
       return true;
     }).catch(() => {
-      if (generation === draftGenerationRef.current) setDraftSaveState("failed");
+      if (generation === draftGenerationRef.current) {
+        setDraftSaveState("failed");
+      }
+      void redactDraftIfAuthorizationLost(employeeId);
       return false;
     });
     draftSaveQueueRef.current = completion.then(() => undefined);
@@ -155,16 +209,20 @@ export default function App() {
       return;
     }
     draftGenerationRef.current++;
+    draftOperationGenerationRef.current++;
+    setDeleteDraftConfirmation(undefined);
+    setDraftHydration("idle");
+    if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
     detailRequestsRef.current.invalidate();
     setScreen({ kind: "list" }); setTask(undefined); setDetailState(undefined); setActiveDraft(undefined); setError(undefined); setLoading(false);
   }
 
   useEffect(() => {
-    if (screen.kind !== "detail" || draftSaveState === "idle" || !user) return;
+    if (screen.kind !== "detail" || draftHydration !== "ready" || draftSaveState === "idle" || !user || draftDeletingRef.current) return;
     const generation = draftGenerationRef.current;
     autosaveTimerRef.current = setTimeout(() => { if (generation === draftGenerationRef.current) saveDraft(draftContent); }, 500);
     return () => { if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current); };
-  }, [draftContent, screen, user?.id]);
+  }, [draftContent, draftHydration, screen, user?.id]);
 
   useEffect(() => {
     if (!user) { setLocalDrafts([]); return; }
@@ -361,6 +419,10 @@ export default function App() {
     setDraftNotice(undefined);
     detailRequestsRef.current.invalidate();
     draftGenerationRef.current++;
+    draftOperationGenerationRef.current++;
+    setDeleteDraftConfirmation(undefined);
+    setDraftHydration("loading");
+    draftDeletingRef.current = false;
     setActiveDraft(undefined);
     setDraftContent("");
     setDraftSaveState("idle");
@@ -397,11 +459,65 @@ export default function App() {
           setDraftContent(draft?.payload.content ?? "");
           draftContentRef.current = draft?.payload.content ?? "";
           setDraftSaveState(draft ? "saved" : "idle");
+          setDraftHydration("ready");
         }
-      } catch { if (generation === draftGenerationRef.current) setError(fr.employeeTasks.draftStorageUnavailable); }
+      } catch {
+        if (generation === draftGenerationRef.current) {
+          setDraftHydration("failed");
+          setError(fr.employeeTasks.draftStorageUnavailable);
+          await redactDraftIfAuthorizationLost(user.id);
+        }
+      }
     }
-    else setError(authorizationError ?? fr.employeeTasks.detailError);
+    else { setDraftHydration("failed"); setError(authorizationError ?? fr.employeeTasks.detailError); }
     setLoading(false);
+  }
+
+  function beginDraftDelete() {
+    if (!user || !activeDraft || draftHydration !== "ready") return;
+    if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
+    setDeleteDraftConfirmation({ employeeId: user.id, taskId: activeDraft.taskId, draftId: activeDraft.id, revision: activeDraft.revision });
+  }
+
+  function cancelDraftDelete() {
+    setDeleteDraftConfirmation(undefined);
+    if (draftSaveState === "saving") void saveDraft();
+  }
+
+  function confirmDraftDelete() {
+    const captured = deleteDraftConfirmation;
+    if (!captured || !user || user.id !== captured.employeeId || draftDeletingRef.current) return;
+    const current = activeDraft;
+    if (!current || current.id !== captured.draftId || current.taskId !== captured.taskId || current.revision !== captured.revision) {
+      setDeleteDraftConfirmation(undefined);
+      return;
+    }
+    if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
+    draftOperationGenerationRef.current++;
+    draftDeletingRef.current = true;
+    setDeleteDraftConfirmation(undefined);
+    const employeeId = captured.employeeId;
+    const scopeKey = `${employeeId}\u0000${captured.taskId}`;
+    const deletion = draftSaveQueueRef.current.then(async () => {
+      await draftsRef.current.delete(employeeId, captured.taskId, captured.revision);
+      if (activeDraftScopeRef.current === scopeKey) {
+        draftContentRef.current = "";
+        setActiveDraft(undefined);
+        draftRevisionRef.current = 0;
+        draftRevisionByScopeRef.current.set(scopeKey, 0);
+        setDraftContent("");
+        setDraftSaveState("idle");
+        setDraftHydration("ready");
+        setDraftNotice(fr.employeeTasks.draftDeleted);
+      }
+      await refreshLocalDrafts(employeeId);
+      return true;
+    }).catch(async () => {
+      setError(fr.employeeTasks.draftDeleteFailed);
+      await redactDraftIfAuthorizationLost(employeeId);
+      return false;
+    }).finally(() => { draftDeletingRef.current = false; });
+    draftSaveQueueRef.current = deletion.then(() => undefined);
   }
 
   async function retryTaskDetail() {
@@ -510,6 +626,10 @@ export default function App() {
                 {listState === "error" ? <Text accessibilityRole="alert" style={styles.error}>{error}</Text> : null}
                 {listState === "error" ? <Button title={fr.common.retry} onPress={() => void loadTasks()} disabled={loading} /> : null}
                 {draftNotice ? <Text accessibilityRole="summary" style={styles.muted}>{draftNotice}</Text> : null}
+                {draftListError ? <View style={{ gap: 8 }}>
+                  <Text accessibilityRole="alert" style={styles.error}>{fr.employeeTasks.draftStorageUnavailable}</Text>
+                  <Button title={fr.common.retry} onPress={() => void refreshLocalDrafts()} />
+                </View> : null}
                 {localDrafts.length > 0 ? <View style={{ gap: 10 }}>
                   <Text style={styles.heading}>{fr.employeeTasks.resumeDraft}</Text>
                   {localDrafts.map((draft) => <Pressable key={draft.id} accessibilityRole="button" onPress={() => void openLocalDraft(draft.taskId)} style={styles.taskRow}>
@@ -530,50 +650,34 @@ export default function App() {
                   <Detail label={fr.employeeTasks.state} value={fr.employeeTasks.draft} />
                   <Detail label={fr.employeeTasks.createdAt} value={new Date(presentedTask.createdAt).toLocaleDateString("fr-FR")} />
                   <View style={{ width: "100%", gap: 10, paddingTop: 12 }}>
-                    <Field label={fr.employeeTasks.draftContent} value={draftContent} onChangeText={(value) => { draftGenerationRef.current++; draftContentRef.current = value; setDraftContent(value); setDraftSaveState("saving"); }} />
+                    {draftHydration === "loading" ? <Text accessibilityRole="summary" style={styles.muted}>{fr.common.loading}</Text> : null}
+                    <Field label={fr.employeeTasks.draftContent} value={draftContent} onChangeText={changeDraftContent} editable={draftHydration === "ready" && !draftDeletingRef.current && !deleteDraftConfirmation} />
                     <Text accessibilityRole={draftSaveState === "failed" ? "alert" : "summary"} style={draftSaveState === "failed" ? styles.error : styles.muted}>
                       {draftSaveState === "failed" ? fr.employeeTasks.saveFailed : draftSaveState === "saving" ? fr.employeeTasks.savingDraft : draftSaveState === "saved" ? fr.employeeTasks.savedLocally : fr.workflow.draft}
                     </Text>
-                    <Button title={fr.employeeTasks.saveDraft} onPress={() => saveDraft()} />
-                    {activeDraft ? <Button title={fr.employeeTasks.deleteDraft} secondary onPress={() => setDeleteDraftConfirmation(true)} /> : null}
-                    {deleteDraftConfirmation ? <View style={styles.confirmation}>
+                    <Button title={fr.employeeTasks.saveDraft} onPress={() => saveDraft()} disabled={draftHydration !== "ready" || draftDeletingRef.current} />
+                    {activeDraft ? <Button title={fr.employeeTasks.deleteDraft} secondary onPress={beginDraftDelete} disabled={draftHydration !== "ready" || draftDeletingRef.current} /> : null}
+                    {deleteDraftConfirmation && activeDraft?.id === deleteDraftConfirmation.draftId ? <View style={styles.confirmation}>
                       <Text accessibilityRole="alert" style={styles.muted}>{fr.employeeTasks.confirmDeleteDraft}</Text>
-                      <Button title={fr.common.cancel} secondary onPress={() => setDeleteDraftConfirmation(false)} />
-                      <Button title={fr.common.confirm} onPress={() => {
-                        const selected = activeDraft;
-                        if (!user || !selected) return;
-                        void draftsRef.current.delete(user.id, selected.taskId, selected.revision).then(async () => {
-                          setActiveDraft(undefined); draftRevisionRef.current = 0; setDraftContent(""); setDraftSaveState("idle"); setDeleteDraftConfirmation(false);
-                          draftRevisionByScopeRef.current.set(`${user.id}\u0000${selected.taskId}`, 0);
-                          setDraftNotice(fr.employeeTasks.draftDeleted);
-                          await refreshLocalDrafts(user.id);
-                        }).catch(() => { setError(fr.employeeTasks.draftDeleteFailed); setDeleteDraftConfirmation(false); });
-                      }} />
+                      <Button title={fr.common.cancel} secondary onPress={cancelDraftDelete} />
+                      <Button title={fr.common.confirm} onPress={confirmDraftDelete} />
                     </View> : null}
                   </View>
                 </View> : null}
                 {!presentedTask && activeDraft ? <View style={{ gap: 10, paddingTop: 12 }}>
                   <Text style={styles.heading}>{fr.employeeTasks.resumeDraft}</Text>
                   <Detail label={fr.employeeTasks.taskId} value={activeDraft.taskId} />
-                  <Field label={fr.employeeTasks.draftContent} value={draftContent} onChangeText={(value) => { draftGenerationRef.current++; draftContentRef.current = value; setDraftContent(value); setDraftSaveState("saving"); }} />
+                  {draftHydration === "loading" ? <Text accessibilityRole="summary" style={styles.muted}>{fr.common.loading}</Text> : null}
+                  <Field label={fr.employeeTasks.draftContent} value={draftContent} onChangeText={changeDraftContent} editable={draftHydration === "ready" && !draftDeletingRef.current && !deleteDraftConfirmation} />
                   <Text accessibilityRole={draftSaveState === "failed" ? "alert" : "summary"} style={draftSaveState === "failed" ? styles.error : styles.muted}>
                     {draftSaveState === "failed" ? fr.employeeTasks.saveFailed : draftSaveState === "saving" ? fr.employeeTasks.savingDraft : fr.employeeTasks.savedLocally}
                   </Text>
-                  <Button title={fr.employeeTasks.saveDraft} onPress={() => saveDraft()} />
-                  <Button title={fr.employeeTasks.deleteDraft} secondary onPress={() => setDeleteDraftConfirmation(true)} />
-                  {deleteDraftConfirmation ? <View style={styles.confirmation}>
+                  <Button title={fr.employeeTasks.saveDraft} onPress={() => saveDraft()} disabled={draftHydration !== "ready" || draftDeletingRef.current} />
+                  <Button title={fr.employeeTasks.deleteDraft} secondary onPress={beginDraftDelete} disabled={draftHydration !== "ready" || draftDeletingRef.current} />
+                  {deleteDraftConfirmation && activeDraft.id === deleteDraftConfirmation.draftId ? <View style={styles.confirmation}>
                     <Text accessibilityRole="alert" style={styles.muted}>{fr.employeeTasks.confirmDeleteDraft}</Text>
-                    <Button title={fr.common.cancel} secondary onPress={() => setDeleteDraftConfirmation(false)} />
-                    <Button title={fr.common.confirm} onPress={() => {
-                      const selected = activeDraft;
-                      if (!user || !selected) return;
-                      void draftsRef.current.delete(user.id, selected.taskId, selected.revision).then(async () => {
-                        setActiveDraft(undefined); draftRevisionRef.current = 0; setDraftContent(""); setDraftSaveState("idle"); setDeleteDraftConfirmation(false);
-                        draftRevisionByScopeRef.current.set(`${user.id}\u0000${selected.taskId}`, 0);
-                        setDraftNotice(fr.employeeTasks.draftDeleted);
-                        setScreen({ kind: "list" }); await refreshLocalDrafts(user.id);
-                      }).catch(() => { setError(fr.employeeTasks.draftDeleteFailed); setDeleteDraftConfirmation(false); });
-                    }} />
+                    <Button title={fr.common.cancel} secondary onPress={cancelDraftDelete} />
+                    <Button title={fr.common.confirm} onPress={confirmDraftDelete} />
                   </View> : null}
                 </View> : null}
                 {draftNotice ? <Text accessibilityRole="summary" style={styles.muted}>{draftNotice}</Text> : null}
@@ -590,8 +694,8 @@ export default function App() {
   );
 }
 
-function Field(props: { label: string; value: string; onChangeText: (value: string) => void; secureTextEntry?: boolean; autoCapitalize?: "none" | "sentences"; keyboardType?: "email-address" }) {
-  return <View style={styles.field}><Text style={styles.label}>{props.label}</Text><TextInput accessibilityLabel={props.label} style={styles.input} value={props.value} onChangeText={props.onChangeText} secureTextEntry={props.secureTextEntry} autoCapitalize={props.autoCapitalize} keyboardType={props.keyboardType} autoCorrect={false} /></View>;
+function Field(props: { label: string; value: string; onChangeText: (value: string) => void; secureTextEntry?: boolean; autoCapitalize?: "none" | "sentences"; keyboardType?: "email-address"; editable?: boolean }) {
+  return <View style={styles.field}><Text style={styles.label}>{props.label}</Text><TextInput accessibilityLabel={props.label} style={styles.input} value={props.value} onChangeText={props.onChangeText} editable={props.editable} secureTextEntry={props.secureTextEntry} autoCapitalize={props.autoCapitalize} keyboardType={props.keyboardType} autoCorrect={false} /></View>;
 }
 
 function Button(props: { title: string; onPress: () => void; disabled?: boolean; secondary?: boolean }) {

@@ -43,6 +43,13 @@ export interface DraftDatabase {
   delete(employeeId: string, taskId: string, expectedRevision: number): Promise<void>;
 }
 
+export class DraftListCorruptionError extends Error {
+  constructor(readonly drafts: LocalDraft[]) {
+    super("One or more local drafts are corrupt or unsupported.");
+    this.name = "DraftListCorruptionError";
+  }
+}
+
 export function createDraftRepository(database: DraftDatabase, now: () => number, createId: () => string): DraftRepository {
   const queues = new Map<string, Promise<void>>();
   function serialize<T>(key: string, operation: () => Promise<T>): Promise<T> {
@@ -61,8 +68,16 @@ export function createDraftRepository(database: DraftDatabase, now: () => number
       return draft;
     },
     async list(employeeId) {
-      const drafts = (await database.list(employeeId)).map(parseLocalDraft);
-      if (drafts.some((draft) => draft.employeeId !== employeeId)) throw new Error("Local draft scope mismatch.");
+      const drafts: LocalDraft[] = [];
+      let corrupt = false;
+      for (const raw of await database.list(employeeId)) {
+        try {
+          const draft = parseLocalDraft(raw);
+          if (draft.employeeId !== employeeId) { corrupt = true; continue; }
+          drafts.push(draft);
+        } catch { corrupt = true; }
+      }
+      if (corrupt) throw new DraftListCorruptionError(drafts.sort((a, b) => b.savedAt - a.savedAt));
       return drafts.sort((a, b) => b.savedAt - a.savedAt);
     },
     async save(employeeId, taskId, content, expectedRevision) {
