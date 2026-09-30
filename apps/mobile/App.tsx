@@ -1,11 +1,12 @@
 import { useRef, useState } from "react";
-import { ActivityIndicator, Pressable, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Pressable, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from "react-native";
 import { ApiRequestError, createApiClient } from "@cetem-qc/api-client/v1";
 import type { ApiClient, EmployeeTaskListResponse, EmployeeTaskResponse } from "@cetem-qc/api-client/v1";
 import { fr } from "@cetem-qc/i18n";
 import { getEmployeeTaskListState } from "./employee-task-list-state";
 import { EmployeeTaskDetailRequests } from "./employee-task-detail-state";
 import type { EmployeeTaskDetailState } from "./employee-task-detail-state";
+import { getEmployeeTaskContentWidth, getEmployeeTaskPresentation } from "./employee-task-layout";
 
 declare const process: { env: { EXPO_PUBLIC_API_URL?: string } };
 
@@ -15,6 +16,7 @@ type Screen = { kind: "list" } | { kind: "detail"; id: string };
 const apiBaseUrl = process.env.EXPO_PUBLIC_API_URL ?? "http://127.0.0.1:3001";
 
 export default function App() {
+  const { width: viewportWidth } = useWindowDimensions();
   const clientRef = useRef<ApiClient | undefined>(undefined);
   if (!clientRef.current) {
     clientRef.current = createApiClient({
@@ -34,6 +36,15 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string>();
   const listState = getEmployeeTaskListState({ loading, error: Boolean(error), taskCount: tasks.length });
+  const presentation = getEmployeeTaskPresentation({
+    viewportWidth,
+    screen: screen.kind,
+    tasks,
+    selectedTask: task,
+  });
+  const { layout } = presentation;
+  const contentWidth = getEmployeeTaskContentWidth(viewportWidth, layout);
+  const presentedTask = presentation.selectedTask;
 
   async function signIn() {
     setLoading(true);
@@ -133,10 +144,11 @@ export default function App() {
 
   return (
     <SafeAreaView style={styles.safe}>
-      <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
-        <Text style={styles.brand}>CETEM-QC</Text>
+      <ScrollView contentContainerStyle={[styles.container, { alignItems: "center" }]} keyboardShouldPersistTaps="handled">
+        <View style={{ width: contentWidth, maxWidth: "100%", gap: 18 }}>
+          <Text style={styles.brand}>CETEM-QC</Text>
         {!user ? (
-          <View style={styles.card}>
+          <View style={[styles.card, layout === "tablet" && styles.tabletCard]}>
             <Text style={styles.heading}>{fr.auth.employeeTitle}</Text>
             <Text style={styles.muted}>{fr.auth.employeeDescription}</Text>
             <Field label={fr.auth.email} value={email} onChangeText={setEmail} autoCapitalize="none" keyboardType="email-address" />
@@ -145,7 +157,7 @@ export default function App() {
             <Button title={fr.auth.signIn} onPress={() => void signIn()} disabled={loading || !email || !password} />
           </View>
         ) : user.mustChangePassword ? (
-          <View style={styles.card}>
+          <View style={[styles.card, layout === "tablet" && styles.tabletCard]}>
             <Text style={styles.heading}>{fr.auth.activationTitle}</Text>
             <Text style={styles.muted}>{fr.auth.activationDescription}</Text>
             <Field label={fr.auth.currentPassword} value={password} onChangeText={setPassword} secureTextEntry />
@@ -154,22 +166,22 @@ export default function App() {
             <Button title={fr.auth.activate} onPress={() => void activate()} disabled={loading || !password || newPassword.length < 12} />
           </View>
         ) : (
-          <View style={styles.card}>
+          <View style={[styles.card, layout === "tablet" && styles.tabletCard]}>
             {screen.kind === "list" ? (
               <>
                 <Text style={styles.heading}>{fr.employeeTasks.title}</Text>
                 <Text style={styles.muted}>{fr.employeeTasks.description}</Text>
                 {listState === "loading" ? <ActivityIndicator accessibilityLabel={fr.common.loading} color="#135c4c" /> : null}
                 {listState === "empty" ? <Text style={styles.muted}>{fr.employeeTasks.empty}</Text> : null}
-                {listState === "ready" ? tasks.map((item) => (
-                  <Pressable key={item.id} accessibilityRole="button" onPress={() => void openTask(item.id)} style={styles.taskRow}>
+                {listState === "ready" ? <View style={layout === "tablet" ? styles.tabletTaskGrid : styles.phoneTaskList}>{tasks.map((item) => (
+                  <Pressable key={item.id} accessibilityRole="button" onPress={() => void openTask(item.id)} style={[styles.taskRow, layout === "tablet" && styles.tabletTaskRow]}>
                     <View style={styles.taskCopy}>
                       <Text style={styles.taskTitle}>{item.establishment}</Text>
                       <Text style={styles.muted}>{item.service} · {fr.employeeTasks.draft}</Text>
                     </View>
                     <Text style={styles.chevron}>›</Text>
                   </Pressable>
-                )) : null}
+                ))}</View> : null}
                 {listState === "error" ? <Text accessibilityRole="alert" style={styles.error}>{error}</Text> : null}
                 {listState === "error" ? <Button title={fr.common.retry} onPress={() => void loadTasks()} disabled={loading} /> : null}
               </>
@@ -177,15 +189,15 @@ export default function App() {
               <>
                 <Button title={fr.employeeTasks.back} onPress={() => { detailRequestsRef.current.invalidate(); setScreen({ kind: "list" }); setTask(undefined); setDetailState(undefined); setError(undefined); setLoading(false); }} secondary />
                 {loading ? <ActivityIndicator accessibilityLabel={fr.common.loading} color="#135c4c" /> : null}
-                {task ? <>
-                  <Text style={styles.heading}>{task.establishment}</Text>
-                  <Detail label={fr.employeeTasks.taskId} value={task.id} />
+                {presentedTask ? <View style={layout === "tablet" ? styles.tabletDetails : styles.phoneDetails}>
+                  <Text style={styles.heading}>{presentedTask.establishment}</Text>
+                  <Detail label={fr.employeeTasks.taskId} value={presentedTask.id} />
                   <Detail label={fr.employeeTasks.type} value={fr.employeeTasks.graphieMobile} />
-                  <Detail label={fr.employeeTasks.establishment} value={task.establishment} />
-                  <Detail label={fr.employeeTasks.service} value={task.service || "—"} />
+                  <Detail label={fr.employeeTasks.establishment} value={presentedTask.establishment} />
+                  <Detail label={fr.employeeTasks.service} value={presentedTask.service || "—"} />
                   <Detail label={fr.employeeTasks.state} value={fr.employeeTasks.draft} />
-                  <Detail label={fr.employeeTasks.createdAt} value={new Date(task.createdAt).toLocaleDateString("fr-FR")} />
-                </> : null}
+                  <Detail label={fr.employeeTasks.createdAt} value={new Date(presentedTask.createdAt).toLocaleDateString("fr-FR")} />
+                </View> : null}
                 {error ? <Text accessibilityRole="alert" style={styles.error}>{error}</Text> : null}
                 {detailState?.status === "error" ? <Button title={fr.common.retry} onPress={() => void retryTaskDetail()} disabled={loading} /> : null}
               </>
@@ -193,6 +205,7 @@ export default function App() {
             <Button title={fr.auth.logout} onPress={() => void signOut()} secondary disabled={loading} />
           </View>
         )}
+        </View>
       </ScrollView>
     </SafeAreaView>
   );
@@ -212,9 +225,10 @@ function Detail({ label, value }: { label: string; value: string }) {
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: "#f4f7f5" },
-  container: { flexGrow: 1, justifyContent: "center", padding: 20, gap: 18 },
+  container: { flexGrow: 1, justifyContent: "center", paddingHorizontal: 20, paddingVertical: 20 },
   brand: { color: "#135c4c", fontSize: 17, fontWeight: "800", letterSpacing: 1.4 },
   card: { backgroundColor: "#fff", borderRadius: 18, padding: 22, gap: 16, borderWidth: 1, borderColor: "#e1e9e4" },
+  tabletCard: { padding: 28, gap: 20 },
   heading: { color: "#17352c", fontSize: 25, fontWeight: "700" },
   muted: { color: "#5b6e65", fontSize: 15, lineHeight: 22 },
   field: { gap: 7 },
@@ -226,10 +240,15 @@ const styles = StyleSheet.create({
   secondaryButtonText: { color: "#135c4c" },
   disabled: { opacity: 0.55 },
   error: { color: "#a32424", fontSize: 14, lineHeight: 20 },
-  taskRow: { flexDirection: "row", alignItems: "center", gap: 12, borderWidth: 1, borderColor: "#e1e9e4", borderRadius: 12, padding: 14 },
+  phoneTaskList: { gap: 12 },
+  tabletTaskGrid: { flexDirection: "row", flexWrap: "wrap", gap: 12 },
+  taskRow: { minHeight: 56, flexDirection: "row", alignItems: "center", gap: 12, borderWidth: 1, borderColor: "#e1e9e4", borderRadius: 12, padding: 14 },
+  tabletTaskRow: { flexGrow: 1, flexBasis: "46%" },
   taskCopy: { flex: 1, gap: 5 },
   taskTitle: { color: "#17352c", fontSize: 17, fontWeight: "700" },
   chevron: { color: "#135c4c", fontSize: 27 },
-  detail: { gap: 4, paddingBottom: 11, borderBottomWidth: 1, borderBottomColor: "#edf1ee" },
+  phoneDetails: { gap: 0 },
+  tabletDetails: { flexDirection: "row", flexWrap: "wrap", columnGap: 20 },
+  detail: { flexGrow: 1, flexBasis: "44%", gap: 4, paddingBottom: 11, borderBottomWidth: 1, borderBottomColor: "#edf1ee" },
   detailValue: { color: "#17352c", fontSize: 16, lineHeight: 22 },
 });

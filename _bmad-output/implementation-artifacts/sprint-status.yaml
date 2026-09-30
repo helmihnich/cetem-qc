@@ -1,4 +1,4 @@
-# STATUS DEFINITIONS:
+﻿# STATUS DEFINITIONS:
 # ==================
 # Epic Status:
 #   - backlog: Epic not yet started
@@ -59,8 +59,8 @@ development_status:
   4-3-make-assigned-work-visible-in-app: done
   epic-4-retrospective: done
 
-  epic-5: backlog
-  5-1-open-assigned-work-across-supported-phone-and-tablet-form-fa: backlog
+  epic-5: in-progress
+  5-1-open-assigned-work-across-supported-phone-and-tablet-form-fa: done
   5-2-protect-local-drafts-and-apply-the-resolved-offline-access-w: backlog
   5-3-save-resume-and-explicitly-delete-a-local-draft: backlog
   5-4-capture-the-confirmed-graphie-mobile-form-structure: backlog
