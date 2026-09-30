@@ -15,6 +15,9 @@ const runtime = globalThis as typeof globalThis & {
   __sessionAvailable?: boolean;
   __sessionFailure?: { status: number; code: string };
   __testNow?: number;
+  __draftRows?: Map<string, string>;
+  __holdDraftWrite?: Promise<void>;
+  __draftWriteStarted?: () => void;
 };
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -48,6 +51,55 @@ mock.module("expo-secure-store", {
     deleteItemAsync: async (key: string) => { runtime.__secureValues?.delete(key); },
   },
 });
+mock.module("expo-crypto", { namedExports: {
+  getRandomBytesAsync: async (size: number) => new Uint8Array(size).fill(7),
+  randomUUID: () => "test-draft-id",
+} });
+mock.module("expo-sqlite", { namedExports: {
+  openDatabaseAsync: async () => {
+    runtime.__draftRows ??= new Map();
+    const rows = runtime.__draftRows;
+    const key = (employeeId: string, taskId: string) => `${employeeId}/${taskId}`;
+    const db = {
+      execAsync: async () => undefined,
+      getFirstAsync: async (sql: string, ...params: string[]) => {
+        if (sql.includes("user_version")) return { user_version: 1 };
+        if (sql.includes("sqlite_master")) return { name: "local_drafts" };
+        const row = rows.get(key(params[0]!, params[1]!));
+        if (!row) return null;
+        const parsed = JSON.parse(row) as { payload_json?: string; revision?: number };
+        return sql.includes("payload_json") ? { payload_json: parsed.payload_json ?? row } : { revision: parsed.revision ?? (JSON.parse(parsed.payload_json ?? row) as { revision: number }).revision };
+      },
+      getAllAsync: async (_sql: string, employeeId: string) => [...rows.values()].filter((raw) => (JSON.parse(raw) as { employeeId: string }).employeeId === employeeId).map((payload_json) => ({ payload_json })),
+      runAsync: async (sql: string, ...params: (string | number)[]) => {
+        if (sql.includes("INSERT INTO local_drafts")) {
+          const writeGate = runtime.__holdDraftWrite;
+          if (writeGate) { runtime.__draftWriteStarted?.(); await writeGate; }
+          const [employeeId, taskId, id, payloadSchemaVersion, revision, createdAt, savedAt, payloadJson] = params;
+          const expectedRevision = params[8];
+          const previous = rows.get(key(String(employeeId), String(taskId)));
+          if (previous) {
+            const currentRevision = (JSON.parse(previous) as { revision: number }).revision;
+            if (currentRevision !== expectedRevision) return { changes: 0, lastInsertRowId: 0 };
+          } else if (expectedRevision !== 0) return { changes: 0, lastInsertRowId: 0 };
+          const record = JSON.parse(String(payloadJson));
+          rows.set(key(String(employeeId), String(taskId)), JSON.stringify({ ...record, id, employeeId, taskId, payloadSchemaVersion, revision, createdAt, savedAt }));
+        } else if (sql.includes("DELETE FROM local_drafts")) {
+          const [employeeId, taskId, revision] = params;
+          const current = rows.get(key(String(employeeId), String(taskId)));
+          if (current && (JSON.parse(current) as { revision: number }).revision === revision) rows.delete(key(String(employeeId), String(taskId)));
+        }
+        return { changes: 1, lastInsertRowId: 1 };
+      },
+      withExclusiveTransactionAsync: async (operation: (tx: unknown) => Promise<void>) => {
+        const before = new Map(rows);
+        try { await operation(db); } catch (error) { rows.clear(); for (const [id, value] of before) rows.set(id, value); throw error; }
+      },
+      closeAsync: async () => undefined,
+    };
+    return db;
+  },
+} });
 mock.module("@cetem-qc/api-client/v1", {
   namedExports: {
     ApiRequestError: class ApiRequestError extends Error {
@@ -89,6 +141,7 @@ const firstTask: Task = {
 function installMocks() {
   runtime.__mobileTestWidth = 390;
   runtime.__secureValues = new Map();
+  runtime.__draftRows = new Map();
   runtime.__networkOnline = true;
   runtime.__sessionAvailable = true;
   const api: MockApi = {
@@ -176,6 +229,56 @@ test("phone App renders task list, opens read-only detail, retries failures and 
   assert.ok(findButton(tree, "Retour à Mes tâches"));
   await act(async () => { findButton(tree, "Retour à Mes tâches").props.onPress(); });
   assert.ok(findText(tree, "Mes tâches"));
+  await act(async () => { tree.unmount(); });
+});
+
+test("employee saves locally, remounts offline to resume, and confirms or cancels local draft deletion", async () => {
+  await loadApp();
+  installMocks();
+  let tree!: ReactTestRenderer;
+  await act(async () => { tree = create(<App />); });
+  await signIn(tree);
+  await act(async () => { findTaskRow(tree, firstTask.establishment).props.onPress(); });
+  const content = tree.root.findAll((node) => node.type === "TextInput").find((node) => node.props.accessibilityLabel === "Contenu du brouillon local");
+  assert.ok(content);
+  await act(async () => { content!.props.onChangeText("opaque local work"); });
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 550)); });
+  assert.ok(findText(tree, "Enregistré localement"), "autosave acknowledges after commit");
+  await act(async () => { content!.props.onChangeText("explicit save captured version"); });
+  let startWrite!: () => void;
+  let releaseWrite!: () => void;
+  const writeStarted = new Promise<void>((resolve) => { startWrite = resolve; });
+  runtime.__holdDraftWrite = new Promise<void>((resolve) => { releaseWrite = resolve; });
+  runtime.__draftWriteStarted = startWrite;
+  await act(async () => {
+    const saving = findButton(tree, "Enregistrer").props.onPress() as Promise<boolean>;
+    await writeStarted;
+    content!.props.onChangeText("newer edit while save is pending");
+    releaseWrite();
+    assert.equal(await saving, true);
+  });
+  runtime.__holdDraftWrite = undefined;
+  runtime.__draftWriteStarted = undefined;
+  assert.ok(findText(tree, "Enregistré localement"));
+  assert.equal(runtime.__draftRows?.size, 1);
+  assert.match([...runtime.__draftRows!.values()][0]!, /newer edit while save is pending/);
+  assert.match(runtime.__secureValues?.get("cetem-qc.local-drafts.database-key.v1") ?? "", /^[0-9a-f]{64}$/);
+  await act(async () => { tree.unmount(); });
+
+  runtime.__networkOnline = false;
+  await act(async () => { tree = create(<App />); await new Promise((resolve) => setTimeout(resolve, 0)); });
+  assert.ok(findText(tree, "Reprendre le brouillon local"));
+  await act(async () => { findButton(tree, firstTask.id).props.onPress(); await new Promise((resolve) => setTimeout(resolve, 0)); });
+  const resumed = tree.root.findAll((node) => node.type === "TextInput").find((node) => node.props.accessibilityLabel === "Contenu du brouillon local");
+  assert.equal(resumed?.props.value, "newer edit while save is pending");
+  await act(async () => { findButton(tree, "Supprimer le brouillon local").props.onPress(); });
+  assert.ok(findText(tree, "Supprimer ce brouillon local ? Cette action est définitive."));
+  await act(async () => { findButton(tree, "Annuler").props.onPress(); });
+  assert.equal(runtime.__draftRows?.size, 1);
+  await act(async () => { findButton(tree, "Supprimer le brouillon local").props.onPress(); });
+  await act(async () => { findButton(tree, "Confirmer").props.onPress(); await new Promise((resolve) => setTimeout(resolve, 0)); });
+  assert.equal(runtime.__draftRows?.size, 0);
+  assert.ok(findText(tree, "Brouillon local supprimé."));
   await act(async () => { tree.unmount(); });
 });
 

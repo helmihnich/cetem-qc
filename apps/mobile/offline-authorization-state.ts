@@ -188,6 +188,16 @@ export function createOfflineAuthorizationService(store: SecureKeyValueStore, cl
 
     evaluate,
 
+    async withProtectedAccess<T>(identityId: string, operation: () => Promise<T>): Promise<T> {
+      return serialized(async () => {
+        const state = await evaluateUnlocked(identityId);
+        if (state.status !== "offline-authorized" || state.identity?.id !== identityId) {
+          throw new Error("Protected local data is locked.");
+        }
+        return operation();
+      });
+    },
+
     async hydrate(): Promise<OfflineAuthorizationState> {
       return evaluate();
     },
