@@ -1,15 +1,30 @@
 export const LOCAL_DRAFT_SCHEMA_VERSION = 1;
 
+export type GraphieDraftPayload = { catalogueId: string; catalogueVersion: string; schemaVersion: number; values: Record<string, string>; legacyContent?: string };
+
 export type LocalDraft = {
   id: string;
   employeeId: string;
   taskId: string;
   payloadSchemaVersion: number;
   revision: number;
-  payload: { content: string };
+  payload: { content: string } | GraphieDraftPayload;
   createdAt: number;
   savedAt: number;
 };
+
+export class LocalDraftPayloadCompatibilityError extends Error {
+  constructor() {
+    super("Saved local draft payload metadata is unsupported.");
+    this.name = "LocalDraftPayloadCompatibilityError";
+  }
+}
+
+function isPlainStringRecord(value: unknown): value is Record<string, string> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    && [Object.prototype, null].includes(Object.getPrototypeOf(value))
+    && Object.values(value).every((item) => typeof item === "string");
+}
 
 export function parseLocalDraft(raw: string): LocalDraft {
   const value: unknown = JSON.parse(raw);
@@ -22,9 +37,19 @@ export function parseLocalDraft(raw: string): LocalDraft {
     || !Number.isSafeInteger(draft.revision) || Number(draft.revision) < 1
     || !Number.isSafeInteger(draft.createdAt) || !Number.isSafeInteger(draft.savedAt)
     || Number(draft.createdAt) < 0 || Number(draft.savedAt) < Number(draft.createdAt)
-    || !draft.payload || typeof draft.payload !== "object"
-    || typeof (draft.payload as Record<string, unknown>).content !== "string") {
+    || !draft.payload || typeof draft.payload !== "object" || Array.isArray(draft.payload)) {
     throw new Error("Corrupt or unsupported local draft.");
+  }
+  const payload = draft.payload as Record<string, unknown>;
+  const isLegacy = typeof payload.content === "string" && Object.keys(payload).length === 1;
+  if (!isLegacy && (typeof payload.catalogueId !== "string" || !payload.catalogueId
+    || typeof payload.catalogueVersion !== "string"
+    || !payload.catalogueVersion
+    || !Number.isSafeInteger(payload.schemaVersion)
+    || Object.keys(payload).some((key) => !["catalogueId", "catalogueVersion", "schemaVersion", "values", "legacyContent"].includes(key))
+    || !isPlainStringRecord(payload.values)
+    || (payload.legacyContent !== undefined && typeof payload.legacyContent !== "string"))) {
+    throw new LocalDraftPayloadCompatibilityError();
   }
   return draft as unknown as LocalDraft;
 }
@@ -32,7 +57,7 @@ export function parseLocalDraft(raw: string): LocalDraft {
 export interface DraftRepository {
   read(employeeId: string, taskId: string): Promise<LocalDraft | null>;
   list(employeeId: string): Promise<LocalDraft[]>;
-  save(employeeId: string, taskId: string, content: string, expectedRevision?: number): Promise<LocalDraft>;
+  save(employeeId: string, taskId: string, content: string | GraphieDraftPayload, expectedRevision?: number): Promise<LocalDraft>;
   delete(employeeId: string, taskId: string, expectedRevision: number): Promise<void>;
 }
 
@@ -86,13 +111,14 @@ export function createDraftRepository(database: DraftDatabase, now: () => number
         const previous = raw === null ? null : parseLocalDraft(raw);
         if (previous && (previous.employeeId !== employeeId || previous.taskId !== taskId)) throw new Error("Local draft scope mismatch.");
         if (expectedRevision !== undefined && (previous?.revision ?? 0) !== expectedRevision) throw new Error("Local draft changed. Reload before saving.");
-        if (previous?.payload.content === content) return previous;
+        const payload = typeof content === "string" ? { content } : content;
+        if (JSON.stringify(previous?.payload) === JSON.stringify(payload)) return previous!;
         const savedAt = Math.max(now(), previous?.savedAt ?? 0);
         const record: LocalDraft = {
           id: previous?.id ?? createId(), employeeId, taskId,
           payloadSchemaVersion: LOCAL_DRAFT_SCHEMA_VERSION,
           revision: (previous?.revision ?? 0) + 1,
-          payload: { content }, createdAt: previous?.createdAt ?? savedAt, savedAt,
+          payload, createdAt: previous?.createdAt ?? savedAt, savedAt,
         };
         await database.save(record, previous?.revision);
         return record;

@@ -5,6 +5,7 @@ import test, { mock } from "node:test";
 import { EMPLOYEE_CONTENT_HORIZONTAL_GUTTER } from "./employee-task-layout.js";
 import { createOfflineAuthorizationService } from "./offline-authorization-state.js";
 import { runOnlyWhenOnlineAuthorized } from "./server-work-authorization.js";
+import { GRAPHIE_MOBILE_POV_CATALOGUE } from "./graphie-pov-catalogue.js";
 
 const runtime = globalThis as typeof globalThis & {
   __mobileTestWidth?: number;
@@ -203,6 +204,14 @@ function findButton(tree: ReactTestRenderer, title: string): ReactTestInstance {
   return button;
 }
 
+function findInput(tree: ReactTestRenderer, label: string): ReactTestInstance | undefined {
+  return tree.root.findAll((node) => node.type === "TextInput" && node.props.accessibilityLabel === label)[0];
+}
+
+function findChoice(tree: ReactTestRenderer, accessibleLabel: string): ReactTestInstance | undefined {
+  return tree.root.findAll((node) => node.type === "Pressable" && node.props.accessibilityLabel === accessibleLabel)[0];
+}
+
 async function signIn(tree: ReactTestRenderer) {
   const fields = tree.root.findAll((node) => node.type === "TextInput");
   await act(async () => { fields[0]!.props.onChangeText("employee@example.test"); });
@@ -251,6 +260,77 @@ test("phone App renders task list, opens read-only detail, retries failures and 
   await act(async () => { tree.unmount(); });
 });
 
+test("legacy notes and structured context survive save and restart independently; choice options are selectable", async () => {
+  await loadApp();
+  installMocks();
+  const key = `employee-1/${firstTask.id}`;
+  runtime.__draftRows!.set(key, JSON.stringify({
+    id: "legacy-form", employeeId: "employee-1", taskId: firstTask.id,
+    payloadSchemaVersion: 1, revision: 1, createdAt: 10, savedAt: 20,
+    payload: { content: "old legacy notes" },
+  }));
+  let tree!: ReactTestRenderer;
+  await act(async () => { tree = create(<App />); });
+  await signIn(tree);
+  await act(async () => { findTaskRow(tree, firstTask.establishment).props.onPress(); });
+  const legacy = findInput(tree, "Contenu conservé du brouillon précédent");
+  const context = findInput(tree, "Contexte du contrôle");
+  assert.equal(legacy?.props.value, "old legacy notes");
+  assert.equal(context?.props.value, "");
+  const choiceField = GRAPHIE_MOBILE_POV_CATALOGUE.sections.find((section) => section.id === "qualitative")!.fields[0]!;
+  const optionButtons = tree.root.findAll((node) => node.type === "Pressable" && String(node.props.accessibilityLabel ?? "").startsWith(`${choiceField.labelFr}: `));
+  assert.deepEqual(optionButtons.map((node) => node.props.accessibilityLabel), choiceField.options!.map((option) => `${choiceField.labelFr}: ${option}`));
+  assert.equal(findInput(tree, choiceField.labelFr), undefined, "choice fields do not expose arbitrary text input");
+  const selectedOption = choiceField.options![1]!;
+  const selectedButton = findChoice(tree, `${choiceField.labelFr}: ${selectedOption}`)!;
+  await act(async () => { selectedButton.props.onPress(); });
+  const selectedAfterTap = findChoice(tree, `${choiceField.labelFr}: ${selectedOption}, sélectionné`)!;
+  assert.equal(selectedAfterTap.props.accessibilityState.selected, true);
+  assert.ok(selectedAfterTap.findAll((node) => node.type === "Text" && node.children.join("").includes("sélectionné")).length > 0);
+  await act(async () => { legacy!.props.onChangeText("edited legacy notes"); context!.props.onChangeText("current structured context"); });
+  await act(async () => { assert.equal(await findButton(tree, "Enregistrer").props.onPress(), true); });
+  const saved = JSON.parse(runtime.__draftRows!.get(key)!) as { payload: { values: Record<string, string>; legacyContent?: string } };
+  assert.equal(saved.payload.legacyContent, "edited legacy notes");
+  assert.equal(saved.payload.values["intervention.contexte"], "current structured context");
+  assert.equal(saved.payload.values[choiceField.id], selectedOption);
+  await act(async () => { tree.unmount(); });
+
+  runtime.__secureValues = new Map();
+  runtime.__draftRows = new Map([[key, JSON.stringify({
+    id: "legacy-form", employeeId: "employee-1", taskId: firstTask.id,
+    payloadSchemaVersion: 1, revision: 2, createdAt: 10, savedAt: 20,
+    payload: { catalogueId: "graphie-mobile-pov", catalogueVersion: "1.0.0", schemaVersion: 2, values: { "intervention.contexte": "current structured context", [choiceField.id]: selectedOption }, legacyContent: "edited legacy notes" },
+  })]]);
+  await act(async () => { tree = create(<App />); });
+  await signIn(tree);
+  await act(async () => { findTaskRow(tree, firstTask.establishment).props.onPress(); });
+  assert.equal(findInput(tree, "Contenu conservé du brouillon précédent")?.props.value, "edited legacy notes");
+  assert.equal(findInput(tree, "Contexte du contrôle")?.props.value, "current structured context");
+  assert.equal(findChoice(tree, `${choiceField.labelFr}: ${selectedOption}, sélectionné`)?.props.accessibilityState.selected, true);
+  await act(async () => { tree.unmount(); });
+});
+
+test("malformed saved form metadata shows compatibility state and retains stored bytes", async () => {
+  await loadApp();
+  installMocks();
+  const key = `employee-1/${firstTask.id}`;
+  const encryptedRow = JSON.stringify({
+    id: "future-form", employeeId: "employee-1", taskId: firstTask.id,
+    payloadSchemaVersion: 1, revision: 2, createdAt: 10, savedAt: 20,
+    payload: { content: "do not reinterpret malformed metadata", catalogueId: "graphie-mobile-pov", catalogueVersion: "1.0.0", schemaVersion: 2, values: {} },
+  });
+  let tree!: ReactTestRenderer;
+  await act(async () => { tree = create(<App />); });
+  await signIn(tree);
+  runtime.__draftRows!.set(key, encryptedRow);
+  await act(async () => { findTaskRow(tree, firstTask.establishment).props.onPress(); });
+  assert.ok(findText(tree, "Ce brouillon utilise une version de formulaire non prise en charge. Il est conservé sans modification."));
+  assert.equal(tree.root.findAll((node) => node.type === "TextInput").some((node) => String(node.props.value ?? "").includes("do not reinterpret")), false);
+  assert.equal(findButton(tree, "Enregistrer").props.disabled, true);
+  assert.equal(runtime.__draftRows.get(key), encryptedRow);
+  await act(async () => { tree.unmount(); });
+});
+
 test("employee saves locally, remounts offline to resume, and confirms or cancels local draft deletion", async () => {
   await loadApp();
   installMocks();
@@ -258,7 +338,7 @@ test("employee saves locally, remounts offline to resume, and confirms or cancel
   await act(async () => { tree = create(<App />); });
   await signIn(tree);
   await act(async () => { findTaskRow(tree, firstTask.establishment).props.onPress(); });
-  const content = tree.root.findAll((node) => node.type === "TextInput").find((node) => node.props.accessibilityLabel === "Contenu du brouillon local");
+  const content = findInput(tree, "Contexte du contrôle");
   assert.ok(content);
   await act(async () => { content!.props.onChangeText("opaque local work"); });
   await act(async () => { await new Promise((resolve) => setTimeout(resolve, 550)); });
@@ -288,7 +368,7 @@ test("employee saves locally, remounts offline to resume, and confirms or cancel
   await act(async () => { tree = create(<App />); await new Promise((resolve) => setTimeout(resolve, 0)); });
   assert.ok(findText(tree, "Reprendre le brouillon local"));
   await act(async () => { findButton(tree, firstTask.id).props.onPress(); await new Promise((resolve) => setTimeout(resolve, 0)); });
-  const resumed = tree.root.findAll((node) => node.type === "TextInput").find((node) => node.props.accessibilityLabel === "Contenu du brouillon local");
+  const resumed = findInput(tree, "Contexte du contrôle");
   assert.equal(resumed?.props.value, "newer edit while save is pending");
   await act(async () => { findButton(tree, "Supprimer le brouillon local").props.onPress(); });
   assert.ok(findText(tree, "Supprimer ce brouillon local ? Cette action est définitive."));
@@ -306,7 +386,9 @@ test("hydration keeps an existing draft read-only until its committed revision i
   installMocks();
   runtime.__draftRows!.set(`employee-1/${firstTask.id}`, JSON.stringify({
     id: "committed-draft", employeeId: "employee-1", taskId: firstTask.id,
-    payloadSchemaVersion: 1, revision: 7, payload: { content: "durable content" }, createdAt: 10, savedAt: 20,
+    payloadSchemaVersion: 1, revision: 7,
+    payload: { catalogueId: "graphie-mobile-pov", catalogueVersion: "1.0.0", schemaVersion: 2, values: { "intervention.contexte": "durable content" } },
+    createdAt: 10, savedAt: 20,
   }));
   let beginRead!: () => void;
   let releaseRead!: () => void;
@@ -317,7 +399,7 @@ test("hydration keeps an existing draft read-only until its committed revision i
   await act(async () => { tree = create(<App />); });
   await signIn(tree);
   await act(async () => { findTaskRow(tree, firstTask.establishment).props.onPress(); await readStarted; });
-  const editor = () => tree.root.findAll((node) => node.type === "TextInput").find((node) => node.props.accessibilityLabel === "Contenu du brouillon local")!;
+  const editor = () => findInput(tree, "Contexte du contrôle")!;
   assert.equal(editor().props.editable, false);
   assert.equal(editor().props.value, "");
   assert.equal(findButton(tree, "Enregistrer").props.disabled, true);
@@ -329,9 +411,9 @@ test("hydration keeps an existing draft read-only until its committed revision i
   assert.equal(editor().props.editable, true);
   assert.equal(editor().props.value, "durable content");
   await act(async () => { editor().props.onChangeText("revision seven updated"); await findButton(tree, "Enregistrer").props.onPress(); });
-  const committed = JSON.parse(runtime.__draftRows!.get(`employee-1/${firstTask.id}`)!) as { revision: number; payload: { content: string } };
+  const committed = JSON.parse(runtime.__draftRows!.get(`employee-1/${firstTask.id}`)!) as { revision: number; payload: { values: Record<string, string> } };
   assert.equal(committed.revision, 8, "the hydrated revision is used as the save base");
-  assert.equal(committed.payload.content, "revision seven updated");
+  assert.equal(committed.payload.values["intervention.contexte"], "revision seven updated");
   await act(async () => { tree.unmount(); });
 });
 
@@ -357,7 +439,7 @@ test("late hydration from a previous task cannot replace the newer selected draf
   assert.equal(tree.root.findAll((node) => node.type === "TextInput").some((node) => node.props.accessibilityLabel === "Contenu du brouillon local"), false, "the next selection stays unavailable while the earlier serialized read is pending");
   releaseRead();
   await act(async () => { for (let tick = 0; tick < 8; tick++) await new Promise((resolve) => setTimeout(resolve, 0)); });
-  const editor = tree.root.findAll((node) => node.type === "TextInput").find((node) => node.props.accessibilityLabel === "Contenu du brouillon local");
+  const editor = findInput(tree, "Contenu conservé du brouillon précédent");
   assert.equal(editor?.props.value, "content B");
   await act(async () => { tree.unmount(); });
 });
@@ -390,7 +472,7 @@ test("confirmed delete cancels a scheduled autosave so deleted content stays del
   await act(async () => { tree = create(<App />); });
   await signIn(tree);
   await act(async () => { findTaskRow(tree, firstTask.establishment).props.onPress(); });
-  const editor = tree.root.findAll((node) => node.type === "TextInput").find((node) => node.props.accessibilityLabel === "Contenu du brouillon local")!;
+  const editor = findInput(tree, "Contenu conservé du brouillon précédent")!;
   await act(async () => { editor.props.onChangeText("pending autosave content"); });
   await act(async () => { findButton(tree, "Supprimer le brouillon local").props.onPress(); });
   await act(async () => { findButton(tree, "Confirmer").props.onPress(); await new Promise((resolve) => setTimeout(resolve, 0)); });
@@ -412,7 +494,7 @@ test("delete serializes behind an in-flight explicit save and preserves the newe
   await act(async () => { tree = create(<App />); });
   await signIn(tree);
   await act(async () => { findTaskRow(tree, firstTask.establishment).props.onPress(); });
-  const editor = tree.root.findAll((node) => node.type === "TextInput").find((node) => node.props.accessibilityLabel === "Contenu du brouillon local")!;
+  const editor = findInput(tree, "Contenu conservé du brouillon précédent")!;
   await act(async () => { editor.props.onChangeText("explicitly saved version"); });
   let saving!: Promise<boolean>;
   await act(async () => { saving = findButton(tree, "Enregistrer").props.onPress() as Promise<boolean>; await writeStarted; });
@@ -422,9 +504,9 @@ test("delete serializes behind an in-flight explicit save and preserves the newe
   runtime.__holdDraftWrite = undefined;
   runtime.__draftWriteStarted = undefined;
   await act(async () => { assert.equal(await saving, true); await new Promise((resolve) => setTimeout(resolve, 0)); });
-  const stillCommitted = JSON.parse(runtime.__draftRows!.get(`employee-1/${firstTask.id}`)!) as { revision: number; payload: { content: string } };
+  const stillCommitted = JSON.parse(runtime.__draftRows!.get(`employee-1/${firstTask.id}`)!) as { revision: number; payload: { values: Record<string, string> } };
   assert.equal(stillCommitted.revision, 2);
-  assert.equal(stillCommitted.payload.content, "explicitly saved version");
+  assert.equal(stillCommitted.payload.legacyContent, "explicitly saved version");
   assert.ok(findText(tree, "Le brouillon local n’a pas pu être supprimé. Il est conservé."));
   await act(async () => { tree.unmount(); });
 });
@@ -468,7 +550,7 @@ test("authorization expiry during save locks the editor, redacts text and preser
     await signIn(tree);
     await act(async () => { findTaskRow(tree, firstTask.establishment).props.onPress(); });
     assert.ok(tree.root.findAll((node) => node.type === "TextInput").some((node) => node.props.value === "protected hydrated text"));
-    const editor = tree.root.findAll((node) => node.type === "TextInput").find((node) => node.props.accessibilityLabel === "Contenu du brouillon local")!;
+    const editor = findInput(tree, "Contenu conservé du brouillon précédent")!;
     await act(async () => { editor.props.onChangeText("new plaintext edit"); });
     runtime.__testNow += 8 * 24 * 60 * 60 * 1000;
     await act(async () => { await findButton(tree, "Enregistrer").props.onPress(); await new Promise((resolve) => setTimeout(resolve, 0)); });

@@ -6,7 +6,7 @@
     "start": "expo start --localhost",
     "android": "expo start --android",
     "ios": "expo start --ios",
-    "test": "node --experimental-test-module-mocks --import tsx --test offline-authorization-state.test.ts server-work-authorization.test.ts employee-task-layout.test.ts employee-task-list-state.test.ts employee-task-detail-state.test.ts local-drafts/local-drafts.test.ts local-drafts/sqlite-draft-database.test.ts App.render.test.tsx",
+    "test": "node --experimental-test-module-mocks --import tsx --test offline-authorization-state.test.ts server-work-authorization.test.ts employee-task-layout.test.ts employee-task-list-state.test.ts employee-task-detail-state.test.ts graphie-pov-catalogue.test.ts local-drafts/local-drafts.test.ts local-drafts/sqlite-draft-database.test.ts App.render.test.tsx",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

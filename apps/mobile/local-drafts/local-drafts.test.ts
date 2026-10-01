@@ -45,6 +45,16 @@ test("creates, explicitly saves, revises and resumes latest committed draft afte
   assert.equal((await remounted.list("employee-a")).length, 1);
 });
 
+test("preserves Story 5.3 opaque content and persists versioned form payloads without resetting the draft", async () => {
+  const f = fixture();
+  const drafts = f.repository();
+  const legacy = await drafts.save("employee-a", "task-a", "opaque first content");
+  const form = { catalogueId: "graphie-mobile-pov", catalogueVersion: "1.0.0", schemaVersion: 2, values: { "intervention.date": "2026-10-01" } };
+  const revised = await drafts.save("employee-a", "task-a", form, legacy.revision);
+  assert.equal(revised.revision, legacy.revision + 1);
+  assert.deepEqual((await f.repository().read("employee-a", "task-a"))?.payload, form);
+});
+
 test("enforces one draft per employee/task and isolates employees and tasks", async () => {
   const drafts = fixture().repository();
   const a = await drafts.save("employee-a", "task-a", "A");

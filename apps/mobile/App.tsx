@@ -15,8 +15,9 @@ import { expoSecureKeyValueStore } from "./offline-authorization-storage";
 import { createDraftRepository } from "./local-drafts/model";
 import { createSqliteDraftDatabase } from "./local-drafts/sqlite-draft-database";
 import { createAuthorizedDrafts } from "./local-drafts/authorized-drafts";
-import { DraftListCorruptionError, type LocalDraft } from "./local-drafts/model";
+import { DraftListCorruptionError, LocalDraftPayloadCompatibilityError, type LocalDraft } from "./local-drafts/model";
 import { runOnlyWhenOnlineAuthorized, ServerWorkAuthorizationError } from "./server-work-authorization";
+import { GRAPHIE_MOBILE_POV_CATALOGUE, GraphiePayloadCompatibilityError, parseGraphiePayload, type CatalogueField, type GraphieFormValues } from "./graphie-pov-catalogue";
 
 declare const process: { env: { EXPO_PUBLIC_API_URL?: string; EXPO_PUBLIC_OFFLINE_AUTHORIZATION_WINDOW_DAYS?: string } };
 
@@ -50,6 +51,7 @@ export default function App() {
   const draftRevisionRef = useRef(0);
   const draftRevisionByScopeRef = useRef(new Map<string, number>());
   const draftContentRef = useRef("");
+  const legacyContentModeRef = useRef(false);
   const activeDraftScopeRef = useRef<string | null>(null);
   const draftSaveQueueRef = useRef<Promise<void>>(Promise.resolve());
   const autosaveTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -69,6 +71,9 @@ export default function App() {
   const [draftListError, setDraftListError] = useState(false);
   const [activeDraft, setActiveDraft] = useState<LocalDraft>();
   const [draftContent, setDraftContent] = useState("");
+  const [legacyContentMode, setLegacyContentMode] = useState(false);
+  const [formValues, setFormValues] = useState<GraphieFormValues>({});
+  const formValuesRef = useRef<GraphieFormValues>({});
   const [draftSaveState, setDraftSaveState] = useState<"idle" | "saving" | "saved" | "failed">("idle");
   const [draftHydration, setDraftHydration] = useState<"idle" | "loading" | "ready" | "failed">("idle");
   const [deleteDraftConfirmation, setDeleteDraftConfirmation] = useState<{ employeeId: string; taskId: string; draftId: string; revision: number }>();
@@ -105,6 +110,8 @@ export default function App() {
     if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
     draftContentRef.current = "";
     setDraftContent("");
+    legacyContentModeRef.current = false;
+    setLegacyContentMode(false);
     setActiveDraft(undefined);
     setDraftHydration("failed");
     setDraftSaveState("idle");
@@ -125,6 +132,15 @@ export default function App() {
     setDraftSaveState("saving");
   }
 
+  function changeFormField(fieldId: string, value: string) {
+    if (draftHydration !== "ready" || draftDeletingRef.current || deleteDraftConfirmation || !user) return;
+    const next = { ...formValuesRef.current, [fieldId]: value };
+    formValuesRef.current = next;
+    setFormValues(next);
+    draftGenerationRef.current++;
+    setDraftSaveState("saving");
+  }
+
   async function openLocalDraft(taskId: string) {
     if (!user) return;
     setDraftNotice(undefined);
@@ -134,6 +150,11 @@ export default function App() {
     setDraftHydration("loading");
     setDraftContent("");
     draftContentRef.current = "";
+    formValuesRef.current = {};
+    setFormValues({});
+    legacyContentModeRef.current = false;
+    setLegacyContentMode(false);
+    setDraftNotice(undefined);
     setActiveDraft(undefined);
     setScreen({ kind: "detail", id: taskId });
     setLoading(true);
@@ -143,8 +164,13 @@ export default function App() {
       setActiveDraft(draft ?? undefined);
       draftRevisionRef.current = draft?.revision ?? 0;
       draftRevisionByScopeRef.current.set(`${user.id}\u0000${taskId}`, draft?.revision ?? 0);
-      setDraftContent(draft?.payload.content ?? "");
-      draftContentRef.current = draft?.payload.content ?? "";
+      const parsed = draft ? parseGraphiePayload(draft.payload) : { values: {} as GraphieFormValues, legacyContent: undefined as string | undefined };
+      setDraftContent(parsed.legacyContent ?? "");
+      draftContentRef.current = parsed.legacyContent ?? "";
+      legacyContentModeRef.current = parsed.legacyContent !== undefined;
+      setLegacyContentMode(parsed.legacyContent !== undefined);
+      setFormValues(parsed.values);
+      formValuesRef.current = parsed.values;
       setDraftSaveState(draft ? "saved" : "idle");
       setDraftHydration("ready");
       if (!task && isOnline) {
@@ -155,16 +181,17 @@ export default function App() {
         if (generation === draftGenerationRef.current) setTask(response);
       }
       setError(undefined);
-    } catch {
+    } catch (cause) {
       if (generation === draftGenerationRef.current) {
         setDraftHydration("failed");
-        setError(fr.employeeTasks.draftStorageUnavailable);
+        if (cause instanceof GraphiePayloadCompatibilityError || cause instanceof LocalDraftPayloadCompatibilityError) setDraftNotice(fr.employeeTasks.draftCompatibilityUnavailable);
+        else setError(fr.employeeTasks.draftStorageUnavailable);
         await redactDraftIfAuthorizationLost(user.id);
       }
     } finally { if (generation === draftGenerationRef.current) setLoading(false); }
   }
 
-  function saveDraft(content = draftContent): Promise<boolean> {
+  function saveDraft(): Promise<boolean> {
     if (!user || screen.kind !== "detail" || draftHydration !== "ready" || draftDeletingRef.current) return Promise.resolve(false);
     if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
     const employeeId = user.id;
@@ -176,11 +203,15 @@ export default function App() {
     const completion = draftSaveQueueRef.current.then(async () => {
       if (operationGeneration !== draftOperationGenerationRef.current || draftDeletingRef.current) return false;
       let saveGeneration = draftGenerationRef.current;
-      let commitContent = content;
       let saved!: LocalDraft;
       do {
-        if (activeDraftScopeRef.current === scopeKey) commitContent = draftContentRef.current;
-        saved = await draftsRef.current.save(employeeId, taskId, commitContent, draftRevisionByScopeRef.current.get(scopeKey) ?? 0);
+        saved = await draftsRef.current.save(employeeId, taskId, {
+          catalogueId: GRAPHIE_MOBILE_POV_CATALOGUE.id,
+          catalogueVersion: GRAPHIE_MOBILE_POV_CATALOGUE.version,
+          schemaVersion: GRAPHIE_MOBILE_POV_CATALOGUE.schemaVersion,
+          values: { ...formValuesRef.current },
+          ...(legacyContentModeRef.current ? { legacyContent: draftContentRef.current } : {}),
+        }, draftRevisionByScopeRef.current.get(scopeKey) ?? 0);
         draftRevisionByScopeRef.current.set(scopeKey, saved.revision);
         if (activeDraftScopeRef.current === scopeKey) draftRevisionRef.current = saved.revision;
         if (activeDraftScopeRef.current !== scopeKey || saveGeneration === draftGenerationRef.current) break;
@@ -220,9 +251,9 @@ export default function App() {
   useEffect(() => {
     if (screen.kind !== "detail" || draftHydration !== "ready" || draftSaveState === "idle" || !user || draftDeletingRef.current) return;
     const generation = draftGenerationRef.current;
-    autosaveTimerRef.current = setTimeout(() => { if (generation === draftGenerationRef.current) saveDraft(draftContent); }, 500);
+    autosaveTimerRef.current = setTimeout(() => { if (generation === draftGenerationRef.current) saveDraft(); }, 500);
     return () => { if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current); };
-  }, [draftContent, draftHydration, screen, user?.id]);
+  }, [draftContent, formValues, draftHydration, screen, user?.id]);
 
   useEffect(() => {
     if (!user) { setLocalDrafts([]); return; }
@@ -425,6 +456,11 @@ export default function App() {
     draftDeletingRef.current = false;
     setActiveDraft(undefined);
     setDraftContent("");
+    formValuesRef.current = {};
+    setFormValues({});
+    draftContentRef.current = "";
+    legacyContentModeRef.current = false;
+    setLegacyContentMode(false);
     setDraftSaveState("idle");
     setScreen({ kind: "detail", id });
     setTask(undefined);
@@ -456,15 +492,21 @@ export default function App() {
           setActiveDraft(draft ?? undefined);
           draftRevisionRef.current = draft?.revision ?? 0;
           draftRevisionByScopeRef.current.set(`${user.id}\u0000${id}`, draft?.revision ?? 0);
-          setDraftContent(draft?.payload.content ?? "");
-          draftContentRef.current = draft?.payload.content ?? "";
+          const parsed = draft ? parseGraphiePayload(draft.payload) : { values: {} as GraphieFormValues, legacyContent: undefined as string | undefined };
+          setDraftContent(parsed.legacyContent ?? "");
+          draftContentRef.current = parsed.legacyContent ?? "";
+          legacyContentModeRef.current = parsed.legacyContent !== undefined;
+          setLegacyContentMode(parsed.legacyContent !== undefined);
+          setFormValues(parsed.values);
+          formValuesRef.current = parsed.values;
           setDraftSaveState(draft ? "saved" : "idle");
           setDraftHydration("ready");
         }
-      } catch {
+      } catch (cause) {
         if (generation === draftGenerationRef.current) {
           setDraftHydration("failed");
-          setError(fr.employeeTasks.draftStorageUnavailable);
+          if (cause instanceof GraphiePayloadCompatibilityError || cause instanceof LocalDraftPayloadCompatibilityError) setDraftNotice(fr.employeeTasks.draftCompatibilityUnavailable);
+          else setError(fr.employeeTasks.draftStorageUnavailable);
           await redactDraftIfAuthorizationLost(user.id);
         }
       }
@@ -651,7 +693,13 @@ export default function App() {
                   <Detail label={fr.employeeTasks.createdAt} value={new Date(presentedTask.createdAt).toLocaleDateString("fr-FR")} />
                   <View style={{ width: "100%", gap: 10, paddingTop: 12 }}>
                     {draftHydration === "loading" ? <Text accessibilityRole="summary" style={styles.muted}>{fr.common.loading}</Text> : null}
-                    <Field label={fr.employeeTasks.draftContent} value={draftContent} onChangeText={changeDraftContent} editable={draftHydration === "ready" && !draftDeletingRef.current && !deleteDraftConfirmation} />
+                    {legacyContentMode ? <Field label={fr.employeeTasks.legacyDraftContent} value={draftContent} onChangeText={changeDraftContent} editable={draftHydration === "ready" && !draftDeletingRef.current && !deleteDraftConfirmation} multiline /> : null}
+                    {GRAPHIE_MOBILE_POV_CATALOGUE.sections.map((section) => <View key={section.id} style={{ gap: 10, paddingTop: 8 }}>
+                      <Text style={styles.heading}>{section.labelFr}</Text>
+                      {section.fields.map((field) => field.type === "choice"
+                        ? <ChoiceField key={field.id} field={field} value={formValues[field.id] ?? ""} onSelect={(value) => changeFormField(field.id, value)} editable={draftHydration === "ready" && !draftDeletingRef.current && !deleteDraftConfirmation} />
+                        : <Field key={field.id} label={`${field.labelFr}${field.unit ? ` (${field.unit})` : ""}`} value={formValues[field.id] ?? ""} onChangeText={(value) => changeFormField(field.id, value)} editable={draftHydration === "ready" && !draftDeletingRef.current && !deleteDraftConfirmation} keyboardType={field.type === "number" ? "decimal-pad" : undefined} multiline={field.type === "textarea"} />)}
+                    </View>)}
                     <Text accessibilityRole={draftSaveState === "failed" ? "alert" : "summary"} style={draftSaveState === "failed" ? styles.error : styles.muted}>
                       {draftSaveState === "failed" ? fr.employeeTasks.saveFailed : draftSaveState === "saving" ? fr.employeeTasks.savingDraft : draftSaveState === "saved" ? fr.employeeTasks.savedLocally : fr.workflow.draft}
                     </Text>
@@ -668,7 +716,13 @@ export default function App() {
                   <Text style={styles.heading}>{fr.employeeTasks.resumeDraft}</Text>
                   <Detail label={fr.employeeTasks.taskId} value={activeDraft.taskId} />
                   {draftHydration === "loading" ? <Text accessibilityRole="summary" style={styles.muted}>{fr.common.loading}</Text> : null}
-                  <Field label={fr.employeeTasks.draftContent} value={draftContent} onChangeText={changeDraftContent} editable={draftHydration === "ready" && !draftDeletingRef.current && !deleteDraftConfirmation} />
+                  {legacyContentMode ? <Field label={fr.employeeTasks.legacyDraftContent} value={draftContent} onChangeText={changeDraftContent} editable={draftHydration === "ready" && !draftDeletingRef.current && !deleteDraftConfirmation} multiline /> : null}
+                  {GRAPHIE_MOBILE_POV_CATALOGUE.sections.map((section) => <View key={section.id} style={{ gap: 10, paddingTop: 8 }}>
+                    <Text style={styles.heading}>{section.labelFr}</Text>
+                    {section.fields.map((field) => field.type === "choice"
+                      ? <ChoiceField key={field.id} field={field} value={formValues[field.id] ?? ""} onSelect={(value) => changeFormField(field.id, value)} editable={draftHydration === "ready" && !draftDeletingRef.current && !deleteDraftConfirmation} />
+                      : <Field key={field.id} label={`${field.labelFr}${field.unit ? ` (${field.unit})` : ""}`} value={formValues[field.id] ?? ""} onChangeText={(value) => changeFormField(field.id, value)} editable={draftHydration === "ready" && !draftDeletingRef.current && !deleteDraftConfirmation} keyboardType={field.type === "number" ? "decimal-pad" : undefined} multiline={field.type === "textarea"} />)}
+                  </View>)}
                   <Text accessibilityRole={draftSaveState === "failed" ? "alert" : "summary"} style={draftSaveState === "failed" ? styles.error : styles.muted}>
                     {draftSaveState === "failed" ? fr.employeeTasks.saveFailed : draftSaveState === "saving" ? fr.employeeTasks.savingDraft : fr.employeeTasks.savedLocally}
                   </Text>
@@ -694,8 +748,23 @@ export default function App() {
   );
 }
 
-function Field(props: { label: string; value: string; onChangeText: (value: string) => void; secureTextEntry?: boolean; autoCapitalize?: "none" | "sentences"; keyboardType?: "email-address"; editable?: boolean }) {
-  return <View style={styles.field}><Text style={styles.label}>{props.label}</Text><TextInput accessibilityLabel={props.label} style={styles.input} value={props.value} onChangeText={props.onChangeText} editable={props.editable} secureTextEntry={props.secureTextEntry} autoCapitalize={props.autoCapitalize} keyboardType={props.keyboardType} autoCorrect={false} /></View>;
+function Field(props: { label: string; value: string; onChangeText: (value: string) => void; secureTextEntry?: boolean; autoCapitalize?: "none" | "sentences"; keyboardType?: "email-address" | "decimal-pad"; editable?: boolean; multiline?: boolean }) {
+  return <View style={styles.field}><Text style={styles.label}>{props.label}</Text><TextInput accessibilityLabel={props.label} style={[styles.input, props.multiline && { minHeight: 84, textAlignVertical: "top" }]} value={props.value} onChangeText={props.onChangeText} editable={props.editable} secureTextEntry={props.secureTextEntry} autoCapitalize={props.autoCapitalize} keyboardType={props.keyboardType} multiline={props.multiline} autoCorrect={false} /></View>;
+}
+
+function ChoiceField(props: { field: CatalogueField; value: string; onSelect: (value: string) => void; editable?: boolean }) {
+  const label = `${props.field.labelFr}${props.field.unit ? ` (${props.field.unit})` : ""}`;
+  return <View style={styles.field}>
+    <Text style={styles.label}>{label}</Text>
+    <View style={{ gap: 8 }}>
+      {(props.field.options ?? []).map((option) => {
+        const selected = props.value === option;
+        return <Pressable key={option} accessibilityRole="button" accessibilityLabel={`${label}: ${option}${selected ? ", sélectionné" : ""}`} accessibilityState={{ selected, disabled: !props.editable }} disabled={!props.editable} onPress={() => props.onSelect(option)} style={[styles.choiceOption, selected && styles.choiceOptionSelected, !props.editable && styles.disabled]}>
+          <Text style={[styles.buttonText, selected && styles.choiceOptionSelectedText]}>{option}{selected ? " · sélectionné" : ""}</Text>
+        </Pressable>;
+      })}
+    </View>
+  </View>;
 }
 
 function Button(props: { title: string; onPress: () => void; disabled?: boolean; secondary?: boolean }) {
@@ -717,6 +786,9 @@ const styles = StyleSheet.create({
   field: { gap: 7 },
   label: { color: "#3e554b", fontSize: 13, fontWeight: "700" },
   input: { minHeight: 48, borderColor: "#cbd8d0", borderWidth: 1, borderRadius: 10, paddingHorizontal: 12, color: "#17352c", fontSize: 16 },
+  choiceOption: { minHeight: 44, justifyContent: "center", borderColor: "#cbd8d0", borderWidth: 1, borderRadius: 10, paddingHorizontal: 12, backgroundColor: "#fff" },
+  choiceOptionSelected: { borderColor: "#135c4c", backgroundColor: "#dceee8" },
+  choiceOptionSelectedText: { color: "#135c4c" },
   button: { minHeight: 48, justifyContent: "center", alignItems: "center", borderRadius: 10, backgroundColor: "#135c4c", paddingHorizontal: 16 },
   buttonText: { color: "#fff", fontSize: 15, fontWeight: "700" },
   secondaryButton: { backgroundColor: "#edf3ef", borderWidth: 1, borderColor: "#d5e1d9" },
