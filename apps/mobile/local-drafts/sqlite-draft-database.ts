@@ -1,7 +1,7 @@
 import * as Crypto from "expo-crypto";
 import * as SQLite from "expo-sqlite";
 import type { SecureKeyValueStore } from "../offline-authorization-state";
-import type { DraftDatabase, LocalDraft } from "./model";
+import type { CachedSynchronizedTask, DraftDatabase, LocalDraft } from "./model";
 import { initializeDraftDatabase } from "./sqlite-draft-schema";
 
 const DATABASE_NAME = "cetem-qc-local-drafts.db";
@@ -66,6 +66,44 @@ export function createSqliteDraftDatabase(
         const db = await open();
         const rows = await db.getAllAsync<{ payload_json: string }>("SELECT payload_json FROM local_drafts WHERE employee_id = ? ORDER BY saved_at DESC", employeeId);
         return rows.map((row) => row.payload_json);
+      });
+    },
+    async cacheSynchronizedTask(record: CachedSynchronizedTask) {
+      return serialize(async () => {
+        const db = await open();
+        await db.withExclusiveTransactionAsync(async (tx) => {
+          await tx.runAsync(`INSERT INTO synchronized_tasks (employee_id, task_id, task_json, synchronized_at)
+            VALUES (?, ?, ?, ?) ON CONFLICT(employee_id, task_id) DO UPDATE SET
+            task_json = excluded.task_json, synchronized_at = excluded.synchronized_at`,
+          record.employeeId, record.task.id, JSON.stringify(record.task), record.synchronizedAt);
+        });
+      });
+    },
+    async replaceCachedSynchronizedTasks(employeeId, records) {
+      return serialize(async () => {
+        const db = await open();
+        await db.withExclusiveTransactionAsync(async (tx) => {
+          await tx.runAsync("DELETE FROM synchronized_tasks WHERE employee_id = ?", employeeId);
+          for (const record of records) {
+            if (record.employeeId !== employeeId) throw new Error("Cached task scope mismatch.");
+            await tx.runAsync(`INSERT INTO synchronized_tasks (employee_id, task_id, task_json, synchronized_at)
+              VALUES (?, ?, ?, ?)`, record.employeeId, record.task.id, JSON.stringify(record.task), record.synchronizedAt);
+          }
+        });
+      });
+    },
+    async revokeCachedSynchronizedTask(employeeId, taskId) {
+      return serialize(async () => {
+        const db = await open();
+        await db.runAsync("DELETE FROM synchronized_tasks WHERE employee_id = ? AND task_id = ?", employeeId, taskId);
+      });
+    },
+    async listCachedSynchronizedTasks(employeeId) {
+      return serialize(async () => {
+        const db = await open();
+        const rows = await db.getAllAsync<{ task_json: string; synchronized_at: number }>(
+          "SELECT task_json, synchronized_at FROM synchronized_tasks WHERE employee_id = ? ORDER BY synchronized_at DESC", employeeId);
+        return rows.map((row) => JSON.stringify({ employeeId, task: JSON.parse(row.task_json), synchronizedAt: row.synchronized_at }));
       });
     },
     async save(record: LocalDraft, expectedRevision?: number) {

@@ -13,6 +13,12 @@ export type LocalDraft = {
   savedAt: number;
 };
 
+export type CachedSynchronizedTask = {
+  employeeId: string;
+  task: { id: string; establishment: string; service: string; createdAt: string };
+  synchronizedAt: number;
+};
+
 export class LocalDraftPayloadCompatibilityError extends Error {
   constructor() {
     super("Saved local draft payload metadata is unsupported.");
@@ -59,6 +65,10 @@ export interface DraftRepository {
   list(employeeId: string): Promise<LocalDraft[]>;
   save(employeeId: string, taskId: string, content: string | GraphieDraftPayload, expectedRevision?: number): Promise<LocalDraft>;
   delete(employeeId: string, taskId: string, expectedRevision: number): Promise<void>;
+  cacheSynchronizedTask(employeeId: string, task: CachedSynchronizedTask["task"]): Promise<void>;
+  replaceCachedSynchronizedTasks(employeeId: string, tasks: CachedSynchronizedTask["task"][]): Promise<void>;
+  revokeCachedSynchronizedTask(employeeId: string, taskId: string): Promise<void>;
+  listCachedSynchronizedTasks(employeeId: string): Promise<CachedSynchronizedTask[]>;
 }
 
 export interface DraftDatabase {
@@ -66,6 +76,10 @@ export interface DraftDatabase {
   list(employeeId: string): Promise<string[]>;
   save(record: LocalDraft, expectedRevision?: number): Promise<void>;
   delete(employeeId: string, taskId: string, expectedRevision: number): Promise<void>;
+  cacheSynchronizedTask(record: CachedSynchronizedTask): Promise<void>;
+  replaceCachedSynchronizedTasks(employeeId: string, records: CachedSynchronizedTask[]): Promise<void>;
+  revokeCachedSynchronizedTask(employeeId: string, taskId: string): Promise<void>;
+  listCachedSynchronizedTasks(employeeId: string): Promise<string[]>;
 }
 
 export class DraftListCorruptionError extends Error {
@@ -126,6 +140,34 @@ export function createDraftRepository(database: DraftDatabase, now: () => number
     },
     async delete(employeeId, taskId, expectedRevision) {
       return serialize(scope(employeeId, taskId), () => database.delete(employeeId, taskId, expectedRevision));
+    },
+    async cacheSynchronizedTask(employeeId, task) {
+      const record: CachedSynchronizedTask = { employeeId, task: { ...task }, synchronizedAt: now() };
+      await database.cacheSynchronizedTask(record);
+    },
+    async replaceCachedSynchronizedTasks(employeeId, tasks) {
+      const synchronizedAt = now();
+      await database.replaceCachedSynchronizedTasks(employeeId, tasks.map((task) => ({
+        employeeId, task: { ...task }, synchronizedAt,
+      })));
+    },
+    async revokeCachedSynchronizedTask(employeeId, taskId) {
+      await database.revokeCachedSynchronizedTask(employeeId, taskId);
+    },
+    async listCachedSynchronizedTasks(employeeId) {
+      const records: CachedSynchronizedTask[] = [];
+      for (const raw of await database.listCachedSynchronizedTasks(employeeId)) {
+        const value: unknown = JSON.parse(raw);
+        if (!value || typeof value !== "object") throw new Error("Corrupt cached task metadata.");
+        const record = value as CachedSynchronizedTask;
+        if (record.employeeId !== employeeId || !record.task || typeof record.task.id !== "string"
+          || typeof record.task.establishment !== "string" || typeof record.task.service !== "string"
+          || typeof record.task.createdAt !== "string" || !Number.isSafeInteger(record.synchronizedAt)) {
+          throw new Error("Corrupt cached task metadata.");
+        }
+        records.push(record);
+      }
+      return records;
     },
   };
 }

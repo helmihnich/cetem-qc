@@ -26,6 +26,13 @@ function fixture() {
       if (failDelete) throw new Error("delete failure");
       records.delete(key(employeeId, taskId));
     },
+    async cacheSynchronizedTask(record) { records.set(`cache/${record.employeeId}/${record.task.id}`, JSON.stringify(record)); },
+    async replaceCachedSynchronizedTasks(employeeId, replacements) {
+      for (const key of records.keys()) if (key.startsWith(`cache/${employeeId}/`)) records.delete(key);
+      for (const record of replacements) records.set(`cache/${employeeId}/${record.task.id}`, JSON.stringify(record));
+    },
+    async revokeCachedSynchronizedTask(employeeId, taskId) { records.delete(`cache/${employeeId}/${taskId}`); },
+    async listCachedSynchronizedTasks(employeeId) { return [...records.entries()].filter(([id]) => id.startsWith(`cache/${employeeId}/`)).map(([, raw]) => raw); },
   };
   let time = 100;
   let id = 0;
@@ -43,6 +50,41 @@ test("creates, explicitly saves, revises and resumes latest committed draft afte
   const remounted = f.repository();
   assert.deepEqual(await remounted.read("employee-a", "task-a"), saved);
   assert.equal((await remounted.list("employee-a")).length, 1);
+});
+
+test("stores synchronized task availability with account isolation and durable repository remount", async () => {
+  const f = fixture();
+  const task = { id: "task-a", establishment: "Centre A", service: "Radiologie", createdAt: "2026-10-01T00:00:00.000Z" };
+  await f.repository().cacheSynchronizedTask("employee-a", task);
+  assert.deepEqual((await f.repository().listCachedSynchronizedTasks("employee-a")).map((entry) => entry.task), [task]);
+  assert.deepEqual(await f.repository().listCachedSynchronizedTasks("employee-b"), []);
+});
+
+test("authoritative cached-task replacement revokes omitted context without touching draft evidence", async () => {
+  const f = fixture();
+  const drafts = f.repository();
+  const taskA = { id: "task-a", establishment: "Centre A", service: "Radiologie", createdAt: "2026-10-01T00:00:00.000Z" };
+  const taskB = { id: "task-b", establishment: "Centre B", service: "Urgences", createdAt: "2026-10-02T00:00:00.000Z" };
+  await drafts.cacheSynchronizedTask("employee-a", taskA);
+  await drafts.cacheSynchronizedTask("employee-b", taskB);
+  const preserved = await drafts.save("employee-a", "task-a", "protected evidence");
+  await drafts.replaceCachedSynchronizedTasks("employee-a", []);
+  assert.deepEqual(await drafts.listCachedSynchronizedTasks("employee-a"), []);
+  assert.deepEqual(await drafts.listCachedSynchronizedTasks("employee-b").then((entries) => entries.map((entry) => entry.task)), [taskB]);
+  assert.deepEqual(await drafts.read("employee-a", "task-a"), preserved, "removing task-context eligibility preserves the encrypted local draft");
+});
+
+test("cached-task removal is scoped to context and never deletes the associated draft", async () => {
+  const f = fixture();
+  const drafts = f.repository();
+  const task = { id: "task-a", establishment: "Centre A", service: "Radiologie", createdAt: "2026-10-01T00:00:00.000Z" };
+  await drafts.cacheSynchronizedTask("employee-a", task);
+  await drafts.cacheSynchronizedTask("employee-b", { ...task, id: "task-a" });
+  const saved = await drafts.save("employee-a", task.id, "preserved local data");
+  await drafts.revokeCachedSynchronizedTask("employee-a", task.id);
+  assert.deepEqual(await drafts.listCachedSynchronizedTasks("employee-a"), []);
+  assert.equal((await drafts.listCachedSynchronizedTasks("employee-b")).length, 1);
+  assert.deepEqual(await drafts.read("employee-a", task.id), saved);
 });
 
 test("preserves Story 5.3 opaque content and persists versioned form payloads without resetting the draft", async () => {
@@ -212,13 +254,13 @@ test("database migration initializes an empty versioned schema and rejects unkno
     },
   };
   await initializeDraftDatabase(database);
-  assert.equal(version, 1);
+  assert.equal(version, 2);
   assert.match(statements[0] ?? "", /CREATE TABLE local_drafts/);
   version = 0;
   failMigration = true;
   await assert.rejects(initializeDraftDatabase(database));
   assert.equal(version, 0, "failed schema migration rolls back its version change");
-  assert.equal(statements.length, 1, "failed schema migration leaves prior schema statements intact");
+  assert.equal(statements.length, 2, "failed schema migration leaves prior schema statements intact");
   failMigration = false;
   version = 77;
   await assert.rejects(initializeDraftDatabase(database));

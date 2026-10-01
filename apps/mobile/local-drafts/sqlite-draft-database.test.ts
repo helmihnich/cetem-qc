@@ -11,7 +11,8 @@ async function fixture(options: { key?: string; existing?: boolean; userVersion?
   if (options.key !== undefined) values.set(keyName, options.key);
   const events: string[] = [];
   const existingRows = new Map([["prior", "preserved encrypted bytes"]]);
-  let version = options.userVersion ?? (options.existing ? 1 : 0);
+  const cachedRows = new Map<string, { task_json: string; synchronized_at: number }>();
+  let version = options.userVersion ?? (options.existing ? 2 : 0);
   let generated = 0;
   const store: SecureKeyValueStore = {
     async get(key) { events.push(`secure-get:${key}`); return values.get(key) ?? null; },
@@ -31,19 +32,41 @@ async function fixture(options: { key?: string; existing?: boolean; userVersion?
       events.push(sql.includes("user_version") ? "read-user-version" : "read-schema");
       if (sql.includes("user_version") && options.databaseReadFailure) throw new Error("file is not a database");
       if (sql.includes("user_version")) return { user_version: version } as T;
+      if (sql.includes("synchronized_tasks")) return options.existing ? { name: "synchronized_tasks" } as T : null;
       return options.existing ? { name: "local_drafts" } as T : null;
     },
-    async getAllAsync<T>(): Promise<T[]> { events.push("read-data"); return [...existingRows.values()].map((payload_json) => ({ payload_json }) as T); },
-    async runAsync(sql: string) {
+    async getAllAsync<T>(sql: string, employeeId: string): Promise<T[]> {
+      events.push("read-data");
+      if (sql.includes("synchronized_tasks")) return [...cachedRows.entries()].filter(([key]) => key.startsWith(`${employeeId}/`)).map(([, row]) => row as T);
+      return [...existingRows.values()].map((payload_json) => ({ payload_json }) as T);
+    },
+    async runAsync(sql: string, ...params: (string | number)[]) {
       events.push("write-data");
       if (/^\s*DELETE\s+FROM\s+local_drafts\b/i.test(sql)) existingRows.clear();
+      if (sql.includes("DELETE FROM synchronized_tasks")) {
+        const [employeeId, taskId] = params;
+        for (const key of cachedRows.keys()) {
+          if (key.startsWith(`${employeeId}/`) && (taskId === undefined || key === `${employeeId}/${taskId}`)) cachedRows.delete(key);
+        }
+      }
+      if (sql.includes("INSERT INTO synchronized_tasks")) {
+        const [employeeId, taskId, task_json, synchronized_at] = params;
+        cachedRows.set(`${employeeId}/${taskId}`, { task_json: String(task_json), synchronized_at: Number(synchronized_at) });
+      }
       return { changes: 1, lastInsertRowId: 1 };
     },
     async withExclusiveTransactionAsync(operation: (tx: typeof db) => Promise<void>) {
       events.push("begin-transaction");
       const before = version;
+      const draftsBefore = new Map(existingRows);
+      const cacheBefore = new Map(cachedRows);
       try { await operation(db); events.push("commit-transaction"); }
-      catch (error) { version = before; events.push("rollback-transaction"); throw error; }
+      catch (error) {
+        version = before;
+        existingRows.clear(); for (const [key, value] of draftsBefore) existingRows.set(key, value);
+        cachedRows.clear(); for (const [key, value] of cacheBefore) cachedRows.set(key, value);
+        events.push("rollback-transaction"); throw error;
+      }
     },
     async closeAsync() { events.push("close"); },
   };
@@ -59,7 +82,7 @@ async function fixture(options: { key?: string; existing?: boolean; userVersion?
     generated++;
     return new Uint8Array(length).fill(0xab);
   });
-  return { database, values, events, existingRows, generated: () => generated };
+  return { database, values, events, existingRows, cachedRows, generated: () => generated };
 }
 
 test("retrieves an existing SecureStore key and configures SQLCipher before schema access", async () => {
@@ -119,4 +142,26 @@ test("migration failure rolls back initialization, propagates, and preserves exi
   assert.equal(f.existingRows.get("prior"), "preserved encrypted bytes");
   assert.ok(f.events.includes("rollback-transaction"));
   assert.ok(!f.events.includes("read-data"));
+});
+
+test("version 1 migration adds the synchronized-task cache without rewriting existing draft data", async () => {
+  const f = await fixture({ key: "e".repeat(64), existing: true, userVersion: 1 });
+  await f.database.read("employee", "task");
+  assert.equal(f.existingRows.get("prior"), "preserved encrypted bytes");
+  assert.ok(f.events.includes("begin-transaction"));
+  assert.ok(f.events.includes("commit-transaction"));
+  assert.ok(f.events.includes("migration"), "the v2 cache table is added transactionally");
+  assert.ok(!f.events.some((event) => event.includes("DROP TABLE") || event.includes("DELETE FROM local_drafts")));
+});
+
+test("authoritative cache replacement is employee-scoped and task revocation preserves draft rows", async () => {
+  const f = await fixture({ key: "f".repeat(64), existing: true });
+  const task = (id: string) => ({ id, establishment: `Centre ${id}`, service: "Radiologie", createdAt: "2026-10-01T00:00:00.000Z" });
+  await f.database.cacheSynchronizedTask({ employeeId: "employee-a", task: task("task-a"), synchronizedAt: 10 });
+  await f.database.cacheSynchronizedTask({ employeeId: "employee-b", task: task("task-b"), synchronizedAt: 11 });
+  await f.database.replaceCachedSynchronizedTasks("employee-a", [{ employeeId: "employee-a", task: task("task-c"), synchronizedAt: 12 }]);
+  assert.deepEqual([...f.cachedRows.keys()], ["employee-b/task-b", "employee-a/task-c"]);
+  await f.database.revokeCachedSynchronizedTask("employee-a", "task-c");
+  assert.deepEqual([...f.cachedRows.keys()], ["employee-b/task-b"]);
+  assert.equal(f.existingRows.get("prior"), "preserved encrypted bytes");
 });

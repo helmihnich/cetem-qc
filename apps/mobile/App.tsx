@@ -46,6 +46,9 @@ export default function App() {
     (identityId, operation) => authorizationRef.current.withProtectedAccess(identityId, operation),
   ));
   const draftGenerationRef = useRef(0);
+  const openRequestGenerationRef = useRef(0);
+  const localRefreshGenerationRef = useRef(0);
+  const taskListGenerationRef = useRef(0);
   const draftOperationGenerationRef = useRef(0);
   const draftDeletingRef = useRef(false);
   const draftRevisionRef = useRef(0);
@@ -67,18 +70,29 @@ export default function App() {
   const [error, setError] = useState<string>();
   const [authorization, setAuthorization] = useState<OfflineAuthorizationState>({ status: "locked-logged-out" });
   const [isOnline, setIsOnline] = useState(true);
+  const isOnlineRef = useRef(isOnline);
+  isOnlineRef.current = isOnline;
   const [localDrafts, setLocalDrafts] = useState<LocalDraft[]>([]);
+  const [cachedTaskContext, setCachedTaskContext] = useState<{ employeeId: string; tasks: EmployeeTaskResponse["task"][] }>();
   const [draftListError, setDraftListError] = useState(false);
+  const [taskCacheWarning, setTaskCacheWarning] = useState<string>();
   const [activeDraft, setActiveDraft] = useState<LocalDraft>();
   const [draftContent, setDraftContent] = useState("");
   const [legacyContentMode, setLegacyContentMode] = useState(false);
   const [formValues, setFormValues] = useState<GraphieFormValues>({});
+  const [activeSectionId, setActiveSectionId] = useState(GRAPHIE_MOBILE_POV_CATALOGUE.sections[0]!.id);
   const formValuesRef = useRef<GraphieFormValues>({});
   const [draftSaveState, setDraftSaveState] = useState<"idle" | "saving" | "saved" | "failed">("idle");
   const [draftHydration, setDraftHydration] = useState<"idle" | "loading" | "ready" | "failed">("idle");
   const [deleteDraftConfirmation, setDeleteDraftConfirmation] = useState<{ employeeId: string; taskId: string; draftId: string; revision: number }>();
   const [draftNotice, setDraftNotice] = useState<string>();
   const listState = getEmployeeTaskListState({ loading, error: Boolean(error), taskCount: tasks.length });
+  const activeIdentityRef = useRef<string | null>(null);
+  const activeScreenRef = useRef<Screen>(screen);
+  const pendingCachedOpenRef = useRef<{ employeeId: string; taskId: string; generation: number } | undefined>(undefined);
+  activeScreenRef.current = screen;
+  if (user) activeIdentityRef.current = user.id;
+  const cachedTasks = cachedTaskContext && user?.id === cachedTaskContext.employeeId ? cachedTaskContext.tasks : [];
   const presentation = getEmployeeTaskPresentation({
     viewportWidth,
     screen: screen.kind,
@@ -88,21 +102,70 @@ export default function App() {
   const { layout } = presentation;
   const contentWidth = getEmployeeTaskContentWidth(viewportWidth, layout);
   const presentedTask = presentation.selectedTask;
+  const pendingCachedOpen = pendingCachedOpenRef.current;
+  const pendingOnlineAuthorization = isOnline && screen.kind === "detail"
+    && pendingCachedOpen?.employeeId === user?.id && pendingCachedOpen?.taskId === screen.id;
+  const displayedTask = pendingOnlineAuthorization ? undefined
+    : task ?? (!isOnline && screen.kind === "detail" ? (cachedTasks.find((item) => item.id === screen.id) ?? presentedTask) : undefined);
+  const resumableDrafts = localDrafts.filter((draft) => isOnline || cachedTasks.some((item) => item.id === draft.taskId));
+  const unavailableOfflineDrafts = !isOnline && localDrafts.length > resumableDrafts.length;
   activeDraftScopeRef.current = user && screen.kind === "detail" ? `${user.id}\u0000${screen.id}` : null;
 
-  async function refreshLocalDrafts(identityId = user?.id) {
-    if (!identityId) { setLocalDrafts([]); return; }
-    try { setLocalDrafts(await draftsRef.current.list(identityId)); setDraftListError(false); }
-    catch (cause) {
-      if (cause instanceof DraftListCorruptionError) setLocalDrafts(cause.drafts);
-      else setLocalDrafts([]);
-      setDraftListError(true);
-      await redactDraftIfAuthorizationLost(identityId);
+  function isCurrentOpen(generation: number, employeeId: string, taskId: string) {
+    const selected = activeScreenRef.current;
+    return openRequestGenerationRef.current === generation
+      && activeIdentityRef.current === employeeId
+      && selected.kind === "detail" && selected.id === taskId;
+  }
+
+  function selectScreen(next: Screen) {
+    activeScreenRef.current = next;
+    setScreen(next);
+  }
+
+  function updateCachedTasks(employeeId: string, update: (previous: EmployeeTaskResponse["task"][]) => EmployeeTaskResponse["task"][]) {
+    setCachedTaskContext((current) => ({
+      employeeId,
+      tasks: update(current?.employeeId === employeeId ? current.tasks : []),
+    }));
+  }
+
+  async function revokeCachedTaskContext(employeeId: string, taskId: string, isCurrentOpen: () => boolean) {
+    if (activeIdentityRef.current === employeeId) {
+      updateCachedTasks(employeeId, (previous) => previous.filter((item) => item.id !== taskId));
+      setTasks((previous) => previous.filter((item) => item.id !== taskId));
     }
+    try {
+      await draftsRef.current.revokeCachedSynchronizedTask(employeeId, taskId);
+    } catch {
+      if (isCurrentOpen()) setTaskCacheWarning(fr.employeeTasks.taskCacheFailed);
+    }
+  }
+
+  async function refreshLocalDrafts(identityId = user?.id) {
+    const generation = ++localRefreshGenerationRef.current;
+    if (!identityId) { setLocalDrafts([]); setCachedTaskContext(undefined); return; }
+    const [draftResult, cacheResult] = await Promise.allSettled([
+      draftsRef.current.list(identityId),
+      draftsRef.current.listCachedSynchronizedTasks(identityId),
+    ]);
+    if (generation !== localRefreshGenerationRef.current || activeIdentityRef.current !== identityId) return;
+    if (draftResult.status === "fulfilled") setLocalDrafts(draftResult.value);
+    else if (draftResult.reason instanceof DraftListCorruptionError) setLocalDrafts(draftResult.reason.drafts);
+    else setLocalDrafts([]);
+    setCachedTaskContext({
+      employeeId: identityId,
+      tasks: cacheResult.status === "fulfilled"
+        ? cacheResult.value.map((entry) => entry.task as EmployeeTaskResponse["task"])
+        : [],
+    });
+    setDraftListError(draftResult.status === "rejected" || cacheResult.status === "rejected");
+    if (draftResult.status === "rejected" || cacheResult.status === "rejected") await redactDraftIfAuthorizationLost(identityId);
   }
 
   async function redactDraftIfAuthorizationLost(identityId: string) {
     const state = await authorizationRef.current.evaluate(identityId).catch(() => ({ status: "locked-corrupt-or-clock-invalid" as const }));
+    if (activeIdentityRef.current !== identityId) return false;
     if (state.status === "offline-authorized" || state.status === "online-authorized") return false;
     setAuthorization(state);
     draftGenerationRef.current++;
@@ -117,6 +180,8 @@ export default function App() {
     setDraftSaveState("idle");
     setDeleteDraftConfirmation(undefined);
     setLocalDrafts([]);
+    setCachedTaskContext(undefined);
+    activeIdentityRef.current = null;
     setUser(undefined);
     setError(state.status === "locked-expired" ? fr.auth.offlineExpired
       : state.status === "locked-deactivated" ? fr.auth.accountDeactivated
@@ -143,11 +208,20 @@ export default function App() {
 
   async function openLocalDraft(taskId: string) {
     if (!user) return;
+    if (!isOnlineRef.current) {
+      const cached = cachedTasks.find((item) => item.id === taskId);
+      if (!cached) { setDraftNotice(fr.employeeTasks.taskUnavailableOffline); return; }
+      await openCachedTask(cached);
+      return;
+    }
+    const employeeId = user.id;
+    const requestGeneration = ++openRequestGenerationRef.current;
     setDraftNotice(undefined);
     const generation = ++draftGenerationRef.current;
     draftOperationGenerationRef.current++;
     setDeleteDraftConfirmation(undefined);
     setDraftHydration("loading");
+    setActiveSectionId(GRAPHIE_MOBILE_POV_CATALOGUE.sections[0]!.id);
     setDraftContent("");
     draftContentRef.current = "";
     formValuesRef.current = {};
@@ -156,11 +230,62 @@ export default function App() {
     setLegacyContentMode(false);
     setDraftNotice(undefined);
     setActiveDraft(undefined);
-    setScreen({ kind: "detail", id: taskId });
+    selectScreen({ kind: "detail", id: taskId });
+    setTask(undefined);
+    setDetailState(isOnline ? { taskId, status: "loading" } : undefined);
+    setDraftSaveState("idle");
+    setTaskCacheWarning(undefined);
+    setError(undefined);
     setLoading(true);
     try {
+      const cachedTask = cachedTasks.find((item) => item.id === taskId);
+      if (isOnline) {
+        let authorizationError: string | undefined;
+        const result = await detailRequestsRef.current.open(taskId, async (id) => {
+          try {
+            return await runOnlyWhenOnlineAuthorized(
+              () => revalidateServerAuthorization(user),
+              async () => (await api.getAssignedEmployeeTask(id)).task,
+            );
+          } catch (cause) {
+            if (cause instanceof ApiRequestError && cause.status === 403 && cause.code === "ACCOUNT_DEACTIVATED") authorizationError = fr.auth.accountDeactivated;
+            else if (cause instanceof ApiRequestError && cause.status === 403 && cause.code === "TASK_NOT_ASSIGNED") {
+              authorizationError = fr.employeeTasks.taskNoLongerAssigned;
+              await revokeCachedTaskContext(employeeId, id, () => openRequestGenerationRef.current === requestGeneration
+                && activeIdentityRef.current === employeeId && activeScreenRef.current.kind === "detail" && activeScreenRef.current.id === id);
+            }
+            else if (cause instanceof ApiRequestError && cause.status === 401) authorizationError = fr.auth.reauthenticateOnline;
+            else if (cause instanceof ServerWorkAuthorizationError) authorizationError = cause.authorization.status === "locked-expired" ? fr.auth.offlineExpired : fr.auth.reauthenticateOnline;
+            throw cause;
+          }
+        });
+        if (openRequestGenerationRef.current !== requestGeneration || activeIdentityRef.current !== employeeId || !result.current) return;
+        setDetailState(result.state);
+        if (result.state.status !== "ready" || !result.task) {
+          setDraftHydration("failed");
+          setError(authorizationError ?? fr.employeeTasks.detailError);
+          return;
+        }
+        const authorizedTask = result.task;
+        setTask(authorizedTask);
+        try {
+          await draftsRef.current.cacheSynchronizedTask(employeeId, authorizedTask);
+          if (openRequestGenerationRef.current !== requestGeneration || activeIdentityRef.current !== employeeId) return;
+          updateCachedTasks(employeeId, (previous) => previous.some((item) => item.id === authorizedTask.id)
+            ? previous.map((item) => item.id === authorizedTask.id ? authorizedTask : item)
+            : [...previous, authorizedTask]);
+          setTaskCacheWarning(undefined);
+        } catch {
+          if (openRequestGenerationRef.current !== requestGeneration || activeIdentityRef.current !== employeeId) return;
+          setTaskCacheWarning(fr.employeeTasks.taskCacheFailed);
+        }
+      } else if (cachedTask) {
+        setTask(cachedTask);
+        setDetailState({ taskId, status: "ready" });
+      }
+      if (openRequestGenerationRef.current !== requestGeneration || activeIdentityRef.current !== employeeId) return;
       const draft = await draftsRef.current.read(user.id, taskId);
-      if (generation !== draftGenerationRef.current) return;
+      if (generation !== draftGenerationRef.current || openRequestGenerationRef.current !== requestGeneration || activeIdentityRef.current !== employeeId) return;
       setActiveDraft(draft ?? undefined);
       draftRevisionRef.current = draft?.revision ?? 0;
       draftRevisionByScopeRef.current.set(`${user.id}\u0000${taskId}`, draft?.revision ?? 0);
@@ -173,22 +298,15 @@ export default function App() {
       formValuesRef.current = parsed.values;
       setDraftSaveState(draft ? "saved" : "idle");
       setDraftHydration("ready");
-      if (!task && isOnline) {
-        const response = await runOnlyWhenOnlineAuthorized(
-          () => revalidateServerAuthorization(user),
-          async () => (await api.getAssignedEmployeeTask(taskId)).task,
-        );
-        if (generation === draftGenerationRef.current) setTask(response);
-      }
       setError(undefined);
     } catch (cause) {
-      if (generation === draftGenerationRef.current) {
+      if (generation === draftGenerationRef.current && openRequestGenerationRef.current === requestGeneration && activeIdentityRef.current === employeeId) {
         setDraftHydration("failed");
         if (cause instanceof GraphiePayloadCompatibilityError || cause instanceof LocalDraftPayloadCompatibilityError) setDraftNotice(fr.employeeTasks.draftCompatibilityUnavailable);
         else setError(fr.employeeTasks.draftStorageUnavailable);
-        await redactDraftIfAuthorizationLost(user.id);
+        await redactDraftIfAuthorizationLost(employeeId);
       }
-    } finally { if (generation === draftGenerationRef.current) setLoading(false); }
+    } finally { if (generation === draftGenerationRef.current && openRequestGenerationRef.current === requestGeneration && activeIdentityRef.current === employeeId) setLoading(false); }
   }
 
   function saveDraft(): Promise<boolean> {
@@ -235,6 +353,7 @@ export default function App() {
   }
 
   async function leaveTaskDetail() {
+    openRequestGenerationRef.current++;
     if (draftSaveState === "saving" && !(await saveDraft())) {
       setError(fr.employeeTasks.saveFailed);
       return;
@@ -245,7 +364,8 @@ export default function App() {
     setDraftHydration("idle");
     if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
     detailRequestsRef.current.invalidate();
-    setScreen({ kind: "list" }); setTask(undefined); setDetailState(undefined); setActiveDraft(undefined); setError(undefined); setLoading(false);
+    selectScreen({ kind: "list" }); setTask(undefined); setDetailState(undefined); setActiveDraft(undefined); setError(undefined); setLoading(false);
+    await refreshLocalDrafts(user?.id);
   }
 
   useEffect(() => {
@@ -256,7 +376,7 @@ export default function App() {
   }, [draftContent, formValues, draftHydration, screen, user?.id]);
 
   useEffect(() => {
-    if (!user) { setLocalDrafts([]); return; }
+    if (!user) { localRefreshGenerationRef.current++; setLocalDrafts([]); setCachedTaskContext(undefined); return; }
     void refreshLocalDrafts(user.id);
   }, [user?.id, authorization.status]);
 
@@ -265,26 +385,36 @@ export default function App() {
       const session = await api.getSession();
       if (session.user.id !== expectedUser.id || session.user.role !== "employe") {
         const state = await authorizationRef.current.logout(expectedUser.id);
-        setAuthorization(state);
-        setUser(undefined);
-        setError(fr.auth.reauthenticateOnline);
+        if (activeIdentityRef.current === expectedUser.id) {
+          setAuthorization(state);
+            activeIdentityRef.current = null;
+          setUser(undefined);
+          setError(fr.auth.reauthenticateOnline);
+        }
         throw new ApiRequestError("Session identity changed.", 401, "AUTHENTICATION_FAILED");
       }
       const state = await authorizationRef.current.confirmServerAuthorization(expectedUser.id);
-      setAuthorization(state);
-      if (state.status.startsWith("locked-")) setUser(undefined);
+      if (activeIdentityRef.current === expectedUser.id) {
+        setAuthorization(state);
+        if (state.status.startsWith("locked-")) { activeIdentityRef.current = null; setUser(undefined); }
+      }
       return state;
     } catch (cause) {
       if (cause instanceof ApiRequestError && cause.status === 403 && cause.code === "ACCOUNT_DEACTIVATED") {
         const state = await authorizationRef.current.lockDeactivated(expectedUser.id);
-        setAuthorization(state);
-        setUser(undefined);
-        setError(fr.auth.accountDeactivated);
+        if (activeIdentityRef.current === expectedUser.id) {
+          setAuthorization(state);
+          activeIdentityRef.current = null;
+          setUser(undefined);
+          setError(fr.auth.accountDeactivated);
+        }
       } else if (cause instanceof ApiRequestError && cause.status === 401) {
         const state = await authorizationRef.current.beginRevalidation(expectedUser.id);
-        setAuthorization(state.status === "offline-authorized" ? { ...state, status: "revalidating" } : state);
-        if (state.status !== "offline-authorized" && state.status !== "revalidating") setUser(undefined);
-        setError(fr.auth.reauthenticateOnline);
+        if (activeIdentityRef.current === expectedUser.id) {
+          setAuthorization(state.status === "offline-authorized" ? { ...state, status: "revalidating" } : state);
+          if (state.status !== "offline-authorized" && state.status !== "revalidating") { activeIdentityRef.current = null; setUser(undefined); }
+          setError(fr.auth.reauthenticateOnline);
+        }
       }
       throw cause;
     }
@@ -294,7 +424,9 @@ export default function App() {
     let active = true;
     const updateConnection = async (connected: boolean) => {
       if (!active) return;
+      isOnlineRef.current = connected;
       setIsOnline(connected);
+      if (user && activeIdentityRef.current !== user.id) activeIdentityRef.current = user.id;
       if (!connected) {
         try {
           const current = await authorizationRef.current.hydrate();
@@ -302,15 +434,17 @@ export default function App() {
           if (!active) return;
           setAuthorization(state);
           if (state.status === "offline-authorized" && state.identity) {
+            activeIdentityRef.current = state.identity.id;
             setUser(state.identity);
             setError(undefined);
           } else {
+            activeIdentityRef.current = null;
             setUser(undefined);
             if (state.status === "locked-expired") setError(fr.auth.offlineExpired);
             else if (state.status === "locked-corrupt-or-clock-invalid") setError(fr.auth.offlineUnavailable);
           }
         } catch {
-          if (active) { setAuthorization({ status: "locked-corrupt-or-clock-invalid" }); setUser(undefined); setError(fr.auth.offlineUnavailable); }
+          if (active) { setAuthorization({ status: "locked-corrupt-or-clock-invalid" }); activeIdentityRef.current = null; setUser(undefined); setError(fr.auth.offlineUnavailable); }
         }
         return;
       }
@@ -321,6 +455,7 @@ export default function App() {
           const state = current.identity ? await authorizationRef.current.beginRevalidation(current.identity.id) : current;
           if (!active) return;
           if ((state.status === "offline-authorized" || state.status === "revalidating") && state.identity) {
+            activeIdentityRef.current = state.identity.id;
             setAuthorization({ ...state, status: "revalidating" });
             setUser(state.identity);
             setError(fr.auth.reauthenticateOnline);
@@ -348,9 +483,9 @@ export default function App() {
           if (!active) return;
           setAuthorization(state);
           if (state.status === "offline-authorized") setError(undefined);
-          else { setUser(undefined); setError(state.status === "locked-expired" ? fr.auth.offlineExpired : fr.auth.offlineUnavailable); }
+        else { activeIdentityRef.current = null; setUser(undefined); setError(state.status === "locked-expired" ? fr.auth.offlineExpired : fr.auth.offlineUnavailable); }
         } catch {
-          if (active) { setAuthorization({ status: "locked-corrupt-or-clock-invalid" }); setUser(undefined); setError(fr.auth.offlineUnavailable); }
+          if (active) { setAuthorization({ status: "locked-corrupt-or-clock-invalid" }); activeIdentityRef.current = null; setUser(undefined); setError(fr.auth.offlineUnavailable); }
         }
       }
     };
@@ -380,6 +515,7 @@ export default function App() {
           ? await authorizationRef.current.logout(employee.id)
           : await authorizationRef.current.establishOnlineAuthorization(employee);
         setAuthorization(state);
+        activeIdentityRef.current = employee.id;
         setUser(employee);
         setPassword("");
       if (!employee.mustChangePassword) { await loadTasks(employee); await refreshLocalDrafts(employee.id); }
@@ -404,6 +540,7 @@ export default function App() {
       const employee = { ...session.user, role: "employe" as const };
       const state = await authorizationRef.current.establishOnlineAuthorization(employee);
       setAuthorization(state);
+      activeIdentityRef.current = employee.id;
       setUser(employee);
       setPassword("");
       setNewPassword("");
@@ -417,7 +554,9 @@ export default function App() {
   }
 
   async function loadTasks(authenticatedUser = user) {
-    if (!isOnline || !authenticatedUser) { setError(fr.auth.offlineUnavailable); return; }
+    if (!isOnlineRef.current || !authenticatedUser) { setError(fr.auth.offlineUnavailable); return; }
+    const employeeId = authenticatedUser.id;
+    const generation = ++taskListGenerationRef.current;
     setLoading(true);
     setError(undefined);
     try {
@@ -425,10 +564,22 @@ export default function App() {
         () => revalidateServerAuthorization(authenticatedUser),
         () => api.listAssignedEmployeeTasks(),
       );
+      if (generation !== taskListGenerationRef.current || activeIdentityRef.current !== employeeId) return;
+      let cacheRefreshed = false;
+      try {
+        await draftsRef.current.replaceCachedSynchronizedTasks(employeeId, response.tasks);
+        cacheRefreshed = true;
+      } catch {
+        // The server list is authoritative for this session even if local persistence fails.
+      }
+      if (generation !== taskListGenerationRef.current || activeIdentityRef.current !== employeeId) return;
+      setCachedTaskContext({ employeeId, tasks: cacheRefreshed ? response.tasks : [] });
+      setTaskCacheWarning(cacheRefreshed ? undefined : fr.employeeTasks.taskCacheFailed);
       setTasks(response.tasks);
-      setScreen({ kind: "list" });
+      selectScreen({ kind: "list" });
       setTask(undefined);
     } catch (cause) {
+      if (generation !== taskListGenerationRef.current || activeIdentityRef.current !== employeeId) return;
       if (cause instanceof ServerWorkAuthorizationError) {
         setError(cause.authorization.status === "locked-expired" ? fr.auth.offlineExpired : fr.auth.reauthenticateOnline);
         return;
@@ -441,18 +592,23 @@ export default function App() {
         setError(state.status === "offline-authorized" ? fr.auth.offlineUnavailable : fr.employeeTasks.loadError);
       }
     } finally {
-      setLoading(false);
+      if (generation === taskListGenerationRef.current && activeIdentityRef.current === employeeId) setLoading(false);
     }
   }
 
   async function openTask(id: string) {
-    if (!isOnline || !user) { setError(fr.auth.offlineUnavailable); return; }
+    if (!isOnlineRef.current || !user) { setError(fr.auth.offlineUnavailable); return; }
+    const employeeId = user.id;
+    const requestGeneration = ++openRequestGenerationRef.current;
+    pendingCachedOpenRef.current = undefined;
     setDraftNotice(undefined);
     detailRequestsRef.current.invalidate();
     draftGenerationRef.current++;
     draftOperationGenerationRef.current++;
     setDeleteDraftConfirmation(undefined);
     setDraftHydration("loading");
+    setTaskCacheWarning(undefined);
+    setActiveSectionId(GRAPHIE_MOBILE_POV_CATALOGUE.sections[0]!.id);
     draftDeletingRef.current = false;
     setActiveDraft(undefined);
     setDraftContent("");
@@ -462,7 +618,7 @@ export default function App() {
     legacyContentModeRef.current = false;
     setLegacyContentMode(false);
     setDraftSaveState("idle");
-    setScreen({ kind: "detail", id });
+    selectScreen({ kind: "detail", id });
     setTask(undefined);
     setDetailState({ taskId: id, status: "loading" });
     setLoading(true);
@@ -476,19 +632,37 @@ export default function App() {
         );
       } catch (cause) {
         if (cause instanceof ApiRequestError && cause.status === 403 && cause.code === "ACCOUNT_DEACTIVATED") authorizationError = fr.auth.accountDeactivated;
+        else if (cause instanceof ApiRequestError && cause.status === 403 && cause.code === "TASK_NOT_ASSIGNED") {
+          authorizationError = fr.employeeTasks.taskNoLongerAssigned;
+          await revokeCachedTaskContext(employeeId, taskId, () => openRequestGenerationRef.current === requestGeneration
+            && activeIdentityRef.current === employeeId && activeScreenRef.current.kind === "detail" && activeScreenRef.current.id === taskId);
+        }
         else if (cause instanceof ApiRequestError && cause.status === 401) authorizationError = fr.auth.reauthenticateOnline;
         else if (cause instanceof ServerWorkAuthorizationError) authorizationError = cause.authorization.status === "locked-expired" ? fr.auth.offlineExpired : fr.auth.reauthenticateOnline;
         throw cause;
       }
     });
-    if (!result.current) return;
+    if (!result.current || openRequestGenerationRef.current !== requestGeneration || activeIdentityRef.current !== employeeId) return;
     setDetailState(result.state);
     if (result.state.status === "ready") {
       setTask(result.task);
+      if (result.task) {
+          const authorizedTask = result.task;
+        try {
+            await draftsRef.current.cacheSynchronizedTask(employeeId, authorizedTask);
+          if (openRequestGenerationRef.current !== requestGeneration || activeIdentityRef.current !== employeeId) return;
+            updateCachedTasks(employeeId, (previous) => previous.some((item) => item.id === authorizedTask.id)
+              ? previous.map((item) => item.id === authorizedTask.id ? authorizedTask : item)
+              : [...previous, authorizedTask]);
+        } catch {
+          if (openRequestGenerationRef.current !== requestGeneration || activeIdentityRef.current !== employeeId) return;
+          setTaskCacheWarning(fr.employeeTasks.taskCacheFailed);
+        }
+      }
       const generation = draftGenerationRef.current;
       try {
-        const draft = await draftsRef.current.read(user.id, id);
-        if (generation === draftGenerationRef.current) {
+        const draft = await draftsRef.current.read(employeeId, id);
+        if (generation === draftGenerationRef.current && openRequestGenerationRef.current === requestGeneration && activeIdentityRef.current === employeeId) {
           setActiveDraft(draft ?? undefined);
           draftRevisionRef.current = draft?.revision ?? 0;
           draftRevisionByScopeRef.current.set(`${user.id}\u0000${id}`, draft?.revision ?? 0);
@@ -503,16 +677,113 @@ export default function App() {
           setDraftHydration("ready");
         }
       } catch (cause) {
-        if (generation === draftGenerationRef.current) {
+        if (generation === draftGenerationRef.current && openRequestGenerationRef.current === requestGeneration && activeIdentityRef.current === employeeId) {
           setDraftHydration("failed");
           if (cause instanceof GraphiePayloadCompatibilityError || cause instanceof LocalDraftPayloadCompatibilityError) setDraftNotice(fr.employeeTasks.draftCompatibilityUnavailable);
           else setError(fr.employeeTasks.draftStorageUnavailable);
-          await redactDraftIfAuthorizationLost(user.id);
+          await redactDraftIfAuthorizationLost(employeeId);
         }
       }
+    } else if (isCurrentOpen(requestGeneration, employeeId, id)) {
+      setDraftHydration("failed"); setError(authorizationError ?? fr.employeeTasks.detailError);
     }
-    else { setDraftHydration("failed"); setError(authorizationError ?? fr.employeeTasks.detailError); }
+    if (openRequestGenerationRef.current === requestGeneration && activeIdentityRef.current === employeeId) setLoading(false);
+  }
+
+  async function openCachedTask(cached: EmployeeTaskResponse["task"]) {
+    if (!user || !cachedTasks.some((item) => item.id === cached.id)) return;
+    if (isOnlineRef.current) { await openTask(cached.id); return; }
+    const employeeId = user.id;
+    const requestGeneration = ++openRequestGenerationRef.current;
+    pendingCachedOpenRef.current = undefined;
+    detailRequestsRef.current.invalidate();
+    const access = await authorizationRef.current.evaluate(employeeId).catch(() => ({ status: "locked-corrupt-or-clock-invalid" as const }));
+    if (requestGeneration !== openRequestGenerationRef.current || activeIdentityRef.current !== employeeId) return;
+    if (isOnlineRef.current) { await openTask(cached.id); return; }
+    if (access.status !== "offline-authorized" && access.status !== "online-authorized") {
+      await redactDraftIfAuthorizationLost(employeeId);
+      return;
+    }
+    const cachedContext = await draftsRef.current.listCachedSynchronizedTasks(employeeId).catch(() => []);
+    if (requestGeneration !== openRequestGenerationRef.current || activeIdentityRef.current !== employeeId) return;
+    if (isOnlineRef.current) { await openTask(cached.id); return; }
+    const authorizedTask = cachedContext.find((entry) => entry.task.id === cached.id)?.task as EmployeeTaskResponse["task"] | undefined;
+    if (!authorizedTask) { setError(fr.employeeTasks.taskUnavailableOffline); return; }
+    const latestAccess = await authorizationRef.current.evaluate(employeeId).catch(() => ({ status: "locked-corrupt-or-clock-invalid" as const }));
+    if (requestGeneration !== openRequestGenerationRef.current || activeIdentityRef.current !== employeeId) return;
+    if (isOnlineRef.current) { await openTask(cached.id); return; }
+    if (latestAccess.status !== "offline-authorized") {
+      await redactDraftIfAuthorizationLost(employeeId);
+      return;
+    }
+    detailRequestsRef.current.invalidate();
+    draftGenerationRef.current++;
+    draftOperationGenerationRef.current++;
+    const generation = draftGenerationRef.current;
+    pendingCachedOpenRef.current = { employeeId, taskId: authorizedTask.id, generation: requestGeneration };
+    setTask(authorizedTask);
+    setDetailState({ taskId: authorizedTask.id, status: "ready" });
+    selectScreen({ kind: "detail", id: cached.id });
+    setActiveSectionId(GRAPHIE_MOBILE_POV_CATALOGUE.sections[0]!.id);
+    setActiveDraft(undefined);
+    setDraftContent("");
+    setFormValues({});
+    formValuesRef.current = {};
+    setLegacyContentMode(false);
+    legacyContentModeRef.current = false;
+    setDraftHydration("loading");
+    setDraftSaveState("idle");
+    setTaskCacheWarning(undefined);
+    setError(undefined);
     setLoading(false);
+    try {
+      const draft = await draftsRef.current.read(employeeId, authorizedTask.id);
+      if (generation !== draftGenerationRef.current || !isCurrentOpen(requestGeneration, employeeId, authorizedTask.id)) return;
+      if (isOnlineRef.current) { pendingCachedOpenRef.current = undefined; await openTask(authorizedTask.id); return; }
+      const currentAccess = await authorizationRef.current.evaluate(employeeId).catch(() => ({ status: "locked-corrupt-or-clock-invalid" as const }));
+      if (generation !== draftGenerationRef.current || !isCurrentOpen(requestGeneration, employeeId, authorizedTask.id)) return;
+      if (isOnlineRef.current) { pendingCachedOpenRef.current = undefined; await openTask(authorizedTask.id); return; }
+      if (currentAccess.status !== "offline-authorized") {
+        await redactDraftIfAuthorizationLost(employeeId);
+        return;
+      }
+      const currentCache = await draftsRef.current.listCachedSynchronizedTasks(employeeId).catch(() => []);
+      if (generation !== draftGenerationRef.current || !isCurrentOpen(requestGeneration, employeeId, authorizedTask.id)) return;
+      if (isOnlineRef.current) { pendingCachedOpenRef.current = undefined; await openTask(authorizedTask.id); return; }
+      const finalAccess = await authorizationRef.current.evaluate(employeeId).catch(() => ({ status: "locked-corrupt-or-clock-invalid" as const }));
+      if (generation !== draftGenerationRef.current || !isCurrentOpen(requestGeneration, employeeId, authorizedTask.id)) return;
+      if (isOnlineRef.current) { pendingCachedOpenRef.current = undefined; await openTask(authorizedTask.id); return; }
+      if (finalAccess.status !== "offline-authorized" || !currentCache.some((entry) => entry.task.id === authorizedTask.id)) {
+        updateCachedTasks(employeeId, (previous) => previous.filter((entry) => entry.id !== authorizedTask.id));
+        setTask(undefined);
+        setDetailState({ taskId: authorizedTask.id, status: "error" });
+        setDraftHydration("failed");
+        setError(fr.employeeTasks.taskUnavailableOffline);
+        pendingCachedOpenRef.current = undefined;
+        return;
+      }
+      const parsed = draft ? parseGraphiePayload(draft.payload) : { values: {} as GraphieFormValues, legacyContent: undefined as string | undefined };
+      setActiveDraft(draft ?? undefined);
+      draftRevisionRef.current = draft?.revision ?? 0;
+      draftRevisionByScopeRef.current.set(`${user.id}\u0000${cached.id}`, draft?.revision ?? 0);
+      setFormValues(parsed.values);
+      formValuesRef.current = parsed.values;
+      setDraftContent(parsed.legacyContent ?? "");
+      draftContentRef.current = parsed.legacyContent ?? "";
+      setLegacyContentMode(parsed.legacyContent !== undefined);
+      legacyContentModeRef.current = parsed.legacyContent !== undefined;
+      setDraftSaveState(draft ? "saved" : "idle");
+      setDraftHydration("ready");
+      setError(undefined);
+      pendingCachedOpenRef.current = undefined;
+    } catch (cause) {
+      if (openRequestGenerationRef.current !== requestGeneration || activeIdentityRef.current !== employeeId) return;
+      setDraftHydration("failed");
+      setError(cause instanceof GraphiePayloadCompatibilityError || cause instanceof LocalDraftPayloadCompatibilityError
+        ? fr.employeeTasks.draftCompatibilityUnavailable : fr.employeeTasks.draftStorageUnavailable);
+      await redactDraftIfAuthorizationLost(employeeId);
+      pendingCachedOpenRef.current = undefined;
+    }
   }
 
   function beginDraftDelete() {
@@ -591,6 +862,9 @@ export default function App() {
   }
 
   async function signOut() {
+    openRequestGenerationRef.current++;
+    localRefreshGenerationRef.current++;
+    taskListGenerationRef.current++;
     if (screen.kind === "detail" && (draftSaveState === "saving" || draftSaveState === "failed")) {
       const saved = await saveDraft();
       if (!saved) { setError(fr.employeeTasks.saveFailed); return; }
@@ -598,6 +872,7 @@ export default function App() {
     draftGenerationRef.current++;
     detailRequestsRef.current.invalidate();
     setAuthorization({ status: "locked-logged-out", identity: user });
+    activeIdentityRef.current = null;
     setUser(undefined);
     let lockPersisted = true;
     try { await authorizationRef.current.logout(user?.id); } catch { lockPersisted = false; }
@@ -605,13 +880,15 @@ export default function App() {
     try { await api.logout(); } catch { /* Expired sessions can still return to sign-in. */ }
     setTasks([]);
     setTask(undefined);
+    setCachedTaskContext(undefined);
     setActiveDraft(undefined);
     setDraftContent("");
     setLocalDrafts([]);
+    setTaskCacheWarning(undefined);
     setError(lockPersisted ? undefined : fr.auth.offlineUnavailable);
     setEmail("");
     setPassword("");
-    setScreen({ kind: "list" });
+    selectScreen({ kind: "list" });
     setLoading(false);
   }
 
@@ -641,6 +918,7 @@ export default function App() {
           </View>
         ) : (
           <View style={[styles.card, layout === "tablet" && styles.tabletCard]}>
+            <Text style={styles.muted}>{fr.employeeTasks.connectivity}: {isOnline ? fr.employeeTasks.online : fr.employeeTasks.offline}</Text>
             {authorization.status === "offline-authorized" ? <Text accessibilityRole="summary" style={styles.muted}>{fr.auth.offlineAuthorized}</Text> : null}
             {authorization.status === "revalidating" ? (
               <View style={{ gap: 12 }}>
@@ -672,29 +950,40 @@ export default function App() {
                   <Text accessibilityRole="alert" style={styles.error}>{fr.employeeTasks.draftStorageUnavailable}</Text>
                   <Button title={fr.common.retry} onPress={() => void refreshLocalDrafts()} />
                 </View> : null}
-                {localDrafts.length > 0 ? <View style={{ gap: 10 }}>
+                {taskCacheWarning ? <Text accessibilityRole="alert" style={styles.error}>{taskCacheWarning}</Text> : null}
+                {resumableDrafts.length > 0 ? <View style={{ gap: 10 }}>
                   <Text style={styles.heading}>{fr.employeeTasks.resumeDraft}</Text>
-                  {localDrafts.map((draft) => <Pressable key={draft.id} accessibilityRole="button" onPress={() => void openLocalDraft(draft.taskId)} style={styles.taskRow}>
+                  {resumableDrafts.map((draft) => <Pressable key={draft.id} accessibilityRole="button" onPress={() => void openLocalDraft(draft.taskId)} style={styles.taskRow}>
                     <View style={styles.taskCopy}><Text style={styles.taskTitle}>{draft.taskId}</Text><Text style={styles.muted}>{fr.employeeTasks.savedLocally}</Text></View>
                   </Pressable>)}
                 </View> : null}
+                {unavailableOfflineDrafts ? <Text accessibilityRole="summary" style={styles.muted}>{fr.employeeTasks.offlineDraftPreserved}</Text> : null}
+                {cachedTasks.filter((item) => !localDrafts.some((draft) => draft.taskId === item.id)).map((item) => <Pressable key={item.id} accessibilityRole="button" onPress={() => void openCachedTask(item)} style={styles.taskRow}>
+                  <View style={styles.taskCopy}><Text style={styles.taskTitle}>{item.establishment}</Text><Text style={styles.muted}>{fr.employeeTasks.synchronizedNotSubmitted}</Text></View>
+                </Pressable>)}
               </>
             ) : (
               <>
                 <Button title={fr.employeeTasks.back} onPress={() => void leaveTaskDetail()} secondary />
                 {loading ? <ActivityIndicator accessibilityLabel={fr.common.loading} color="#135c4c" /> : null}
-                {presentedTask ? <View style={layout === "tablet" ? styles.tabletDetails : styles.phoneDetails}>
-                  <Text style={styles.heading}>{presentedTask.establishment}</Text>
-                  <Detail label={fr.employeeTasks.taskId} value={presentedTask.id} />
+                {displayedTask ? <View style={layout === "tablet" ? styles.tabletDetails : styles.phoneDetails}>
+                  <Text style={styles.heading}>{displayedTask.establishment}</Text>
+                  <Detail label={fr.employeeTasks.taskId} value={displayedTask.id} />
                   <Detail label={fr.employeeTasks.type} value={fr.employeeTasks.graphieMobile} />
-                  <Detail label={fr.employeeTasks.establishment} value={presentedTask.establishment} />
-                  <Detail label={fr.employeeTasks.service} value={presentedTask.service || "—"} />
+                  <Detail label={fr.employeeTasks.establishment} value={displayedTask.establishment} />
+                  <Detail label={fr.employeeTasks.service} value={displayedTask.service || "—"} />
                   <Detail label={fr.employeeTasks.state} value={fr.employeeTasks.draft} />
-                  <Detail label={fr.employeeTasks.createdAt} value={new Date(presentedTask.createdAt).toLocaleDateString("fr-FR")} />
+                  <Detail label={fr.employeeTasks.createdAt} value={new Date(displayedTask.createdAt).toLocaleDateString("fr-FR")} />
                   <View style={{ width: "100%", gap: 10, paddingTop: 12 }}>
+                    {taskCacheWarning ? <Text accessibilityRole="alert" style={styles.error}>{taskCacheWarning}</Text> : null}
+                    <Text style={styles.muted}>{fr.employeeTasks.syncStatus}: {fr.employeeTasks.synchronizedNotSubmitted}</Text>
+                    <Text style={styles.muted}>{fr.employeeTasks.connectivity}: {isOnline ? fr.employeeTasks.online : fr.employeeTasks.offline}</Text>
+                    <Text style={styles.muted}>{fr.employeeTasks.localPersistence}: {draftSaveState === "saving" ? fr.employeeTasks.savingLocally : draftSaveState === "saved" ? fr.employeeTasks.savedLocally : draftSaveState === "failed" ? fr.employeeTasks.saveFailed : fr.employeeTasks.notSavedLocally}</Text>
+                    <Text style={styles.heading}>{fr.employeeTasks.sectionNavigation}</Text>
+                    <View style={styles.sectionNavigation}>{GRAPHIE_MOBILE_POV_CATALOGUE.sections.map((section) => <Pressable key={section.id} accessibilityRole="button" accessibilityState={{ selected: section.id === activeSectionId }} onPress={() => { setActiveSectionId(section.id); if (draftSaveState === "saving") void saveDraft(); }} style={styles.sectionButton}><Text style={styles.muted}>{section.labelFr}</Text></Pressable>)}</View>
                     {draftHydration === "loading" ? <Text accessibilityRole="summary" style={styles.muted}>{fr.common.loading}</Text> : null}
                     {legacyContentMode ? <Field label={fr.employeeTasks.legacyDraftContent} value={draftContent} onChangeText={changeDraftContent} editable={draftHydration === "ready" && !draftDeletingRef.current && !deleteDraftConfirmation} multiline /> : null}
-                    {GRAPHIE_MOBILE_POV_CATALOGUE.sections.map((section) => <View key={section.id} style={{ gap: 10, paddingTop: 8 }}>
+                    {GRAPHIE_MOBILE_POV_CATALOGUE.sections.filter((section) => section.id === activeSectionId).map((section) => <View key={section.id} style={{ gap: 10, paddingTop: 8 }}>
                       <Text style={styles.heading}>{section.labelFr}</Text>
                       {section.fields.map((field) => field.type === "choice"
                         ? <ChoiceField key={field.id} field={field} value={formValues[field.id] ?? ""} onSelect={(value) => changeFormField(field.id, value)} editable={draftHydration === "ready" && !draftDeletingRef.current && !deleteDraftConfirmation} />
@@ -717,7 +1006,9 @@ export default function App() {
                   <Detail label={fr.employeeTasks.taskId} value={activeDraft.taskId} />
                   {draftHydration === "loading" ? <Text accessibilityRole="summary" style={styles.muted}>{fr.common.loading}</Text> : null}
                   {legacyContentMode ? <Field label={fr.employeeTasks.legacyDraftContent} value={draftContent} onChangeText={changeDraftContent} editable={draftHydration === "ready" && !draftDeletingRef.current && !deleteDraftConfirmation} multiline /> : null}
-                  {GRAPHIE_MOBILE_POV_CATALOGUE.sections.map((section) => <View key={section.id} style={{ gap: 10, paddingTop: 8 }}>
+                  <Text style={styles.heading}>{fr.employeeTasks.sectionNavigation}</Text>
+                  <View style={styles.sectionNavigation}>{GRAPHIE_MOBILE_POV_CATALOGUE.sections.map((section) => <Pressable key={section.id} accessibilityRole="button" accessibilityState={{ selected: section.id === activeSectionId }} onPress={() => { setActiveSectionId(section.id); if (draftSaveState === "saving") void saveDraft(); }} style={styles.sectionButton}><Text style={styles.muted}>{section.labelFr}</Text></Pressable>)}</View>
+                  {GRAPHIE_MOBILE_POV_CATALOGUE.sections.filter((section) => section.id === activeSectionId).map((section) => <View key={section.id} style={{ gap: 10, paddingTop: 8 }}>
                     <Text style={styles.heading}>{section.labelFr}</Text>
                     {section.fields.map((field) => field.type === "choice"
                       ? <ChoiceField key={field.id} field={field} value={formValues[field.id] ?? ""} onSelect={(value) => changeFormField(field.id, value)} editable={draftHydration === "ready" && !draftDeletingRef.current && !deleteDraftConfirmation} />
@@ -777,6 +1068,8 @@ function Detail({ label, value }: { label: string; value: string }) {
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: "#f4f7f5" },
+  sectionNavigation: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  sectionButton: { minHeight: 48, justifyContent: "center", borderWidth: 1, borderColor: "#c7d5d0", borderRadius: 10, paddingHorizontal: 12 },
   container: { flexGrow: 1, justifyContent: "center", paddingHorizontal: 20, paddingVertical: 20 },
   brand: { color: "#135c4c", fontSize: 17, fontWeight: "800", letterSpacing: 1.4 },
   card: { backgroundColor: "#fff", borderRadius: 18, padding: 22, gap: 16, borderWidth: 1, borderColor: "#e1e9e4" },

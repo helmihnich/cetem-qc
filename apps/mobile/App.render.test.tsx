@@ -6,6 +6,7 @@ import { EMPLOYEE_CONTENT_HORIZONTAL_GUTTER } from "./employee-task-layout.js";
 import { createOfflineAuthorizationService } from "./offline-authorization-state.js";
 import { runOnlyWhenOnlineAuthorized } from "./server-work-authorization.js";
 import { GRAPHIE_MOBILE_POV_CATALOGUE } from "./graphie-pov-catalogue.js";
+import { fr } from "@cetem-qc/i18n";
 
 const runtime = globalThis as typeof globalThis & {
   __mobileTestWidth?: number;
@@ -17,10 +18,23 @@ const runtime = globalThis as typeof globalThis & {
   __sessionFailure?: { status: number; code: string };
   __testNow?: number;
   __draftRows?: Map<string, string>;
+  __cachedTaskRows?: Map<string, string>;
+  __employeeId?: string;
   __holdDraftWrite?: Promise<void>;
   __draftWriteStarted?: () => void;
   __holdDraftRead?: Promise<void>;
   __draftReadStarted?: () => void;
+  __holdDraftReadByTask?: Map<string, Promise<void>>;
+  __draftReadStartedByTask?: Map<string, () => void>;
+  __holdTaskListByEmployee?: Map<string, Promise<void>>;
+  __taskListStartedByEmployee?: Map<string, () => void>;
+  __holdTaskDetailById?: Map<string, Promise<void>>;
+  __taskDetailStartedById?: Map<string, () => void>;
+  __cacheWriteFailure?: boolean;
+  __revokedTaskIds?: Set<string>;
+  __failTaskDetailById?: Set<string>;
+  __assignedTasksByEmployee?: Map<string, Task[]>;
+  __failTaskListForEmployee?: Set<string>;
   __failDraftList?: boolean;
 };
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -67,20 +81,40 @@ mock.module("expo-sqlite", { namedExports: {
     const db = {
       execAsync: async () => undefined,
       getFirstAsync: async (sql: string, ...params: string[]) => {
-        if (sql.includes("user_version")) return { user_version: 1 };
-        if (sql.includes("sqlite_master")) return { name: "local_drafts" };
-        if (sql.includes("payload_json") && runtime.__holdDraftRead) { runtime.__draftReadStarted?.(); await runtime.__holdDraftRead; }
+        if (sql.includes("user_version")) return { user_version: 2 };
+        if (sql.includes("sqlite_master")) return { name: sql.includes("synchronized_tasks") ? "synchronized_tasks" : "local_drafts" };
+        if (sql.includes("payload_json")) {
+          const taskId = String(params[1] ?? "");
+          const taskGate = runtime.__holdDraftReadByTask?.get(taskId);
+          if (taskGate) { runtime.__draftReadStartedByTask?.get(taskId)?.(); await taskGate; }
+          if (runtime.__holdDraftRead) { runtime.__draftReadStarted?.(); await runtime.__holdDraftRead; }
+        }
         const row = rows.get(key(params[0]!, params[1]!));
         if (!row) return null;
         const parsed = JSON.parse(row) as { payload_json?: string; revision?: number };
         return sql.includes("payload_json") ? { payload_json: parsed.payload_json ?? row } : { revision: parsed.revision ?? (JSON.parse(parsed.payload_json ?? row) as { revision: number }).revision };
       },
-      getAllAsync: async (_sql: string, employeeId: string) => {
+      getAllAsync: async (sql: string, employeeId: string) => {
         if (runtime.__failDraftList) throw new Error("list failed");
+        if (sql.includes("synchronized_tasks")) return [...(runtime.__cachedTaskRows ?? new Map()).entries()]
+          .filter(([key]) => key.startsWith(`${employeeId}/`))
+          .map(([, raw]) => raw)
+          .map((raw) => JSON.parse(raw) as { task_json: string; synchronized_at: number })
+          .map((row) => ({ task_json: row.task_json, synchronized_at: row.synchronized_at }));
         return [...rows.values()].filter((raw) => (JSON.parse(raw) as { employeeId: string }).employeeId === employeeId).map((payload_json) => ({ payload_json }));
       },
       runAsync: async (sql: string, ...params: (string | number)[]) => {
-        if (sql.includes("INSERT INTO local_drafts")) {
+        if (sql.includes("DELETE FROM synchronized_tasks")) {
+          const [employeeId, taskId] = params.map(String);
+          for (const key of runtime.__cachedTaskRows?.keys() ?? []) {
+            if (key.startsWith(`${employeeId}/`) && (!taskId || key === `${employeeId}/${taskId}`)) runtime.__cachedTaskRows?.delete(key);
+          }
+        } else if (sql.includes("INSERT INTO synchronized_tasks")) {
+          if (runtime.__cacheWriteFailure) throw new Error("cache write failed");
+          runtime.__cachedTaskRows ??= new Map();
+          const [employeeId, taskId, taskJson, synchronizedAt] = params;
+          runtime.__cachedTaskRows.set(`${employeeId}/${taskId}`, JSON.stringify({ task_json: taskJson, synchronized_at: synchronizedAt }));
+        } else if (sql.includes("INSERT INTO local_drafts")) {
           const writeGate = runtime.__holdDraftWrite;
           if (writeGate) { runtime.__draftWriteStarted?.(); await writeGate; }
           const [employeeId, taskId, id, payloadSchemaVersion, revision, createdAt, savedAt, payloadJson] = params;
@@ -102,7 +136,12 @@ mock.module("expo-sqlite", { namedExports: {
       },
       withExclusiveTransactionAsync: async (operation: (tx: unknown) => Promise<void>) => {
         const before = new Map(rows);
-        try { await operation(db); } catch (error) { rows.clear(); for (const [id, value] of before) rows.set(id, value); throw error; }
+        const cacheBefore = new Map(runtime.__cachedTaskRows);
+        try { await operation(db); } catch (error) {
+          rows.clear(); for (const [id, value] of before) rows.set(id, value);
+          runtime.__cachedTaskRows = new Map(cacheBefore);
+          throw error;
+        }
       },
       closeAsync: async () => undefined,
     };
@@ -152,22 +191,66 @@ const secondTask: Task = {
   service: "Urgences",
   createdAt: "2026-09-30T11:00:00.000Z",
 };
+const thirdTask: Task = {
+  id: "00000000-0000-4000-8000-000000000053",
+  establishment: "Centre hospitalier Est",
+  service: "Imagerie",
+  createdAt: "2026-09-30T12:00:00.000Z",
+};
+
+function deferred() {
+  let resolve!: () => void;
+  const promise = new Promise<void>((done) => { resolve = done; });
+  return { promise, resolve };
+}
 
 function installMocks() {
   runtime.__mobileTestWidth = 390;
   runtime.__secureValues = new Map();
   runtime.__draftRows = new Map();
+  runtime.__cachedTaskRows = new Map();
+  runtime.__employeeId = "employee-1";
   runtime.__holdDraftRead = undefined;
   runtime.__holdDraftWrite = undefined;
+  runtime.__holdDraftReadByTask = new Map();
+  runtime.__draftReadStartedByTask = new Map();
+  runtime.__holdTaskListByEmployee = new Map();
+  runtime.__taskListStartedByEmployee = new Map();
+  runtime.__holdTaskDetailById = new Map();
+  runtime.__taskDetailStartedById = new Map();
+  runtime.__cacheWriteFailure = false;
+  runtime.__revokedTaskIds = new Set();
+  runtime.__failTaskDetailById = new Set();
+  runtime.__assignedTasksByEmployee = new Map();
+  runtime.__failTaskListForEmployee = new Set();
   runtime.__draftReadStarted = undefined;
   runtime.__draftWriteStarted = undefined;
   runtime.__failDraftList = false;
   runtime.__networkOnline = true;
   runtime.__sessionAvailable = true;
   const api: MockApi = {
-    authenticate: async () => ({ user: { id: "employee-1", email: "employee@example.test", displayName: "Employée Test", role: "employe", mustChangePassword: false } }),
-    listAssignedEmployeeTasks: async () => { api.listCalls++; return { tasks: [firstTask, secondTask] }; },
-    getAssignedEmployeeTask: async (id) => { api.detailCalls.push(id); return { task: id === secondTask.id ? secondTask : firstTask }; },
+    authenticate: async () => ({ user: { id: runtime.__employeeId ?? "employee-1", email: "employee@example.test", displayName: "Employée Test", role: "employe", mustChangePassword: false } }),
+    listAssignedEmployeeTasks: async () => {
+      api.listCalls++;
+      const employeeId = runtime.__employeeId ?? "employee-1";
+      const gate = runtime.__holdTaskListByEmployee?.get(employeeId);
+      if (gate) { runtime.__taskListStartedByEmployee?.get(employeeId)?.(); await gate; }
+      if (runtime.__failTaskListForEmployee?.has(employeeId)) throw new Error("task list unavailable");
+      return { tasks: runtime.__assignedTasksByEmployee?.get(employeeId) ?? (employeeId === "employee-2" ? [thirdTask] : [firstTask, secondTask]) };
+    },
+    getAssignedEmployeeTask: async (id) => {
+      api.detailCalls.push(id);
+      const employeeId = runtime.__employeeId ?? "employee-1";
+      const assignedAtRequest = !runtime.__revokedTaskIds?.has(id) && (employeeId !== "employee-2" || id === thirdTask.id);
+      const gate = runtime.__holdTaskDetailById?.get(id);
+      if (gate) { runtime.__taskDetailStartedById?.get(id)?.(); await gate; }
+      if (runtime.__failTaskDetailById?.has(id)) throw new Error("task detail unavailable");
+      if (!assignedAtRequest) {
+        const { ApiRequestError: MockApiRequestError } = await import("@cetem-qc/api-client/v1");
+        throw new MockApiRequestError("task assignment revoked", 403, "TASK_NOT_ASSIGNED");
+      }
+      return { task: id === secondTask.id ? secondTask : id === thirdTask.id ? thirdTask : firstTask };
+    },
     getSession: async () => {
       api.sessionCalls++;
       if (runtime.__sessionFailure) {
@@ -178,7 +261,7 @@ function installMocks() {
         const { ApiRequestError: MockApiRequestError } = await import("@cetem-qc/api-client/v1");
         throw new MockApiRequestError("session expired", 401, "AUTHENTICATION_FAILED");
       }
-      return { user: { id: "employee-1", role: "employe" } };
+      return { user: { id: runtime.__employeeId ?? "employee-1", role: "employe" } };
     },
     logout: async () => { runtime.__sessionAvailable = false; },
     listCalls: 0,
@@ -202,6 +285,15 @@ function findButton(tree: ReactTestRenderer, title: string): ReactTestInstance {
   const button = tree.root.findAll((node) => node.type === "Pressable" && node.findAll((child) => child.type === "Text" && child.children.join("") === title).length > 0)[0];
   assert.ok(button, `expected button ${title}`);
   return button;
+}
+
+async function waitForButton(tree: ReactTestRenderer, title: string) {
+  for (let tick = 0; tick < 20; tick++) {
+    const button = tree.root.findAll((node) => node.type === "Pressable" && node.findAll((child) => child.type === "Text" && child.children.join("") === title).length > 0)[0];
+    if (button) return button;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+  return findButton(tree, title);
 }
 
 function findInput(tree: ReactTestRenderer, label: string): ReactTestInstance | undefined {
@@ -278,6 +370,7 @@ test("legacy notes and structured context survive save and restart independently
   assert.equal(legacy?.props.value, "old legacy notes");
   assert.equal(context?.props.value, "");
   const choiceField = GRAPHIE_MOBILE_POV_CATALOGUE.sections.find((section) => section.id === "qualitative")!.fields[0]!;
+  await act(async () => { findButton(tree, GRAPHIE_MOBILE_POV_CATALOGUE.sections.find((section) => section.id === "qualitative")!.labelFr).props.onPress(); });
   const optionButtons = tree.root.findAll((node) => node.type === "Pressable" && String(node.props.accessibilityLabel ?? "").startsWith(`${choiceField.labelFr}: `));
   assert.deepEqual(optionButtons.map((node) => node.props.accessibilityLabel), choiceField.options!.map((option) => `${choiceField.labelFr}: ${option}`));
   assert.equal(findInput(tree, choiceField.labelFr), undefined, "choice fields do not expose arbitrary text input");
@@ -287,7 +380,10 @@ test("legacy notes and structured context survive save and restart independently
   const selectedAfterTap = findChoice(tree, `${choiceField.labelFr}: ${selectedOption}, sélectionné`)!;
   assert.equal(selectedAfterTap.props.accessibilityState.selected, true);
   assert.ok(selectedAfterTap.findAll((node) => node.type === "Text" && node.children.join("").includes("sélectionné")).length > 0);
-  await act(async () => { legacy!.props.onChangeText("edited legacy notes"); context!.props.onChangeText("current structured context"); });
+  await act(async () => { findButton(tree, GRAPHIE_MOBILE_POV_CATALOGUE.sections[0]!.labelFr).props.onPress(); });
+  const resumedLegacy = tree.root.findAll((node) => node.type === "TextInput" && String(node.props.accessibilityLabel ?? "").startsWith("Contenu conserv"))[0]!;
+  const resumedContext = findInput(tree, GRAPHIE_MOBILE_POV_CATALOGUE.sections[0]!.fields.find((field) => field.id === "intervention.contexte")!.labelFr)!;
+  await act(async () => { resumedLegacy.props.onChangeText("edited legacy notes"); resumedContext.props.onChangeText("current structured context"); });
   await act(async () => { assert.equal(await findButton(tree, "Enregistrer").props.onPress(), true); });
   const saved = JSON.parse(runtime.__draftRows!.get(key)!) as { payload: { values: Record<string, string>; legacyContent?: string } };
   assert.equal(saved.payload.legacyContent, "edited legacy notes");
@@ -306,6 +402,7 @@ test("legacy notes and structured context survive save and restart independently
   await act(async () => { findTaskRow(tree, firstTask.establishment).props.onPress(); });
   assert.equal(findInput(tree, "Contenu conservé du brouillon précédent")?.props.value, "edited legacy notes");
   assert.equal(findInput(tree, "Contexte du contrôle")?.props.value, "current structured context");
+  await act(async () => { findButton(tree, GRAPHIE_MOBILE_POV_CATALOGUE.sections.find((section) => section.id === "qualitative")!.labelFr).props.onPress(); });
   assert.equal(findChoice(tree, `${choiceField.labelFr}: ${selectedOption}, sélectionné`)?.props.accessibilityState.selected, true);
   await act(async () => { tree.unmount(); });
 });
@@ -367,7 +464,7 @@ test("employee saves locally, remounts offline to resume, and confirms or cancel
   runtime.__networkOnline = false;
   await act(async () => { tree = create(<App />); await new Promise((resolve) => setTimeout(resolve, 0)); });
   assert.ok(findText(tree, "Reprendre le brouillon local"));
-  await act(async () => { findButton(tree, firstTask.id).props.onPress(); await new Promise((resolve) => setTimeout(resolve, 0)); });
+  await act(async () => { (await waitForButton(tree, firstTask.id)).props.onPress(); for (let tick = 0; tick < 100; tick++) await new Promise((resolve) => setTimeout(resolve, 0)); });
   const resumed = findInput(tree, "Contexte du contrôle");
   assert.equal(resumed?.props.value, "newer edit while save is pending");
   await act(async () => { findButton(tree, "Supprimer le brouillon local").props.onPress(); });
@@ -378,6 +475,541 @@ test("employee saves locally, remounts offline to resume, and confirms or cancel
   await act(async () => { findButton(tree, "Confirmer").props.onPress(); await new Promise((resolve) => setTimeout(resolve, 0)); });
   assert.equal(runtime.__draftRows?.size, 0);
   assert.ok(findText(tree, "Brouillon local supprimé."));
+  await act(async () => { tree.unmount(); });
+});
+
+test("continues an online-cached task across sections offline and resumes it without server calls", async () => {
+  await loadApp();
+  installMocks();
+  const api = runtime.__mobileTestApi!;
+  let tree!: ReactTestRenderer;
+  await act(async () => { tree = create(<App />); });
+  await signIn(tree);
+  assert.equal(runtime.__cachedTaskRows!.size, 2, "the successful online task-list response is cached locally");
+  const callsBeforeOffline = { list: api.listCalls, session: api.sessionCalls, details: [...api.detailCalls] };
+  await act(async () => { tree.unmount(); });
+
+  runtime.__networkOnline = false;
+  await act(async () => { tree = create(<App />); await new Promise((resolve) => setTimeout(resolve, 0)); });
+  const callsAfterOfflineStartup = { list: api.listCalls, session: api.sessionCalls, details: [...api.detailCalls] };
+  await act(async () => { (await waitForButton(tree, firstTask.establishment)).props.onPress(); for (let tick = 0; tick < 100; tick++) await new Promise((resolve) => setTimeout(resolve, 0)); });
+  assert.ok(findText(tree, firstTask.id));
+  assert.ok(tree.root.findAll((node) => node.type === "Text" && node.children.join("").includes("Hors ligne")).length > 0);
+  const context = findInput(tree, GRAPHIE_MOBILE_POV_CATALOGUE.sections[0]!.fields.find((field) => field.id === "intervention.contexte")!.labelFr)!;
+  await act(async () => { context.props.onChangeText("offline continuation"); });
+  const qualitative = GRAPHIE_MOBILE_POV_CATALOGUE.sections.find((section) => section.id === "qualitative")!;
+  await act(async () => { findButton(tree, qualitative.labelFr).props.onPress(); });
+  const choice = qualitative.fields.find((field) => field.type === "choice")!;
+  const option = choice.options![0]!;
+  await act(async () => { findChoice(tree, `${choice.labelFr}: ${option}`)!.props.onPress(); });
+  await act(async () => { assert.equal(await findButton(tree, "Enregistrer").props.onPress(), true); });
+  assert.equal(api.listCalls, callsAfterOfflineStartup.list, "offline task navigation does not reload the task list");
+  assert.deepEqual(api.detailCalls, callsAfterOfflineStartup.details, "offline task navigation does not call task detail");
+  assert.equal(runtime.__draftRows!.size, 1);
+  await act(async () => { tree.unmount(); });
+
+  await act(async () => { tree = create(<App />); await new Promise((resolve) => setTimeout(resolve, 0)); });
+  await act(async () => { findButton(tree, firstTask.id).props.onPress(); for (let tick = 0; tick < 8; tick++) await new Promise((resolve) => setTimeout(resolve, 0)); });
+  assert.equal(findInput(tree, GRAPHIE_MOBILE_POV_CATALOGUE.sections[0]!.fields.find((field) => field.id === "intervention.contexte")!.labelFr)?.props.value, "offline continuation");
+  await act(async () => { findButton(tree, qualitative.labelFr).props.onPress(); });
+  assert.equal(tree.root.findAll((node) => node.type === "Pressable" && node.props.accessibilityState?.selected === true && String(node.props.accessibilityLabel ?? "").startsWith(`${choice.labelFr}: ${option}`)).length, 1);
+  assert.deepEqual(api.detailCalls, callsAfterOfflineStartup.details, "offline cached task navigation makes no task-detail requests");
+  await act(async () => { tree.unmount(); });
+});
+
+test("offline timer autosave commits locally without API calls and survives restart", async () => {
+  await loadApp();
+  installMocks();
+  let tree!: ReactTestRenderer;
+  await act(async () => { tree = create(<App />); });
+  await signIn(tree);
+  const api = runtime.__mobileTestApi!;
+  const callsBeforeOffline = { list: api.listCalls, session: api.sessionCalls, details: [...api.detailCalls] };
+  await act(async () => { tree.unmount(); });
+
+  runtime.__networkOnline = false;
+  await act(async () => { tree = create(<App />); await new Promise((resolve) => setTimeout(resolve, 0)); });
+  const callsAfterOfflineStartup = { list: api.listCalls, session: api.sessionCalls, details: [...api.detailCalls] };
+  await act(async () => { (await waitForButton(tree, firstTask.establishment)).props.onPress(); for (let tick = 0; tick < 100; tick++) await new Promise((resolve) => setTimeout(resolve, 0)); });
+  const field = GRAPHIE_MOBILE_POV_CATALOGUE.sections[0]!.fields.find((item) => item.id === "intervention.contexte")!;
+  await act(async () => { findInput(tree, field.labelFr)!.props.onChangeText("timer saved offline"); });
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 650)); });
+  const key = `employee-1/${firstTask.id}`;
+  const saved = JSON.parse(runtime.__draftRows!.get(key)!) as { payload: { values: Record<string, string> } };
+  assert.equal(saved.payload.values[field.id], "timer saved offline");
+  assert.ok(findText(tree, fr.employeeTasks.savedLocally), "local acknowledgement follows the durable autosave");
+  assert.deepEqual({ list: api.listCalls, session: api.sessionCalls, details: api.detailCalls }, callsBeforeOffline);
+  await act(async () => { tree.unmount(); });
+
+  runtime.__networkOnline = true;
+  await act(async () => { tree = create(<App />); await new Promise((resolve) => setTimeout(resolve, 0)); });
+  await act(async () => { (await waitForButton(tree, firstTask.id)).props.onPress(); for (let tick = 0; tick < 100; tick++) await new Promise((resolve) => setTimeout(resolve, 0)); });
+  assert.equal(findInput(tree, field.labelFr)?.props.value, "timer saved offline");
+  assert.deepEqual(api.detailCalls, [firstTask.id], "only online draft resume revalidates task assignment");
+  await act(async () => { tree.unmount(); });
+  runtime.__networkOnline = false;
+});
+
+test("offline timer autosave still locks and preserves protected data after authorization expiry", async () => {
+  await loadApp();
+  const actualNow = Date.now;
+  runtime.__testNow = actualNow();
+  Date.now = () => runtime.__testNow!;
+  try {
+    installMocks();
+    let tree!: ReactTestRenderer;
+    await act(async () => { tree = create(<App />); });
+    await signIn(tree);
+    const api = runtime.__mobileTestApi!;
+    const callsBeforeOffline = { list: api.listCalls, session: api.sessionCalls, details: [...api.detailCalls] };
+    await act(async () => { tree.unmount(); });
+    runtime.__networkOnline = false;
+    await act(async () => { tree = create(<App />); await new Promise((resolve) => setTimeout(resolve, 0)); });
+    await act(async () => { (await waitForButton(tree, firstTask.establishment)).props.onPress(); for (let tick = 0; tick < 100; tick++) await new Promise((resolve) => setTimeout(resolve, 0)); });
+    const field = GRAPHIE_MOBILE_POV_CATALOGUE.sections[0]!.fields.find((item) => item.id === "intervention.contexte")!;
+    await act(async () => { findInput(tree, field.labelFr)!.props.onChangeText("must not autosave after expiry"); });
+    runtime.__testNow += 8 * 24 * 60 * 60 * 1000;
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 650)); });
+    assert.equal(runtime.__draftRows!.has(`employee-1/${firstTask.id}`), false, "expired authorization prevents the timer write");
+    assert.ok(findText(tree, "Connexion Employé"), "authorization loss redacts the editor");
+    assert.deepEqual({ list: api.listCalls, session: api.sessionCalls, details: api.detailCalls }, callsBeforeOffline);
+    await act(async () => { tree.unmount(); });
+  } finally {
+    Date.now = actualNow;
+    delete runtime.__testNow;
+  }
+});
+
+test("online resume rechecks the cached task assignment before hydrating the draft", async () => {
+  await loadApp();
+  installMocks();
+  const original = JSON.stringify({
+    id: "online-draft", employeeId: "employee-1", taskId: firstTask.id, payloadSchemaVersion: 1, revision: 1,
+    payload: { content: "authorized cached draft" }, createdAt: 10, savedAt: 20,
+  });
+  runtime.__draftRows!.set(`employee-1/${firstTask.id}`, original);
+  runtime.__cachedTaskRows!.set(`employee-1/${firstTask.id}`, JSON.stringify({ task_json: JSON.stringify(firstTask), synchronized_at: 10 }));
+  let tree!: ReactTestRenderer;
+  await act(async () => { tree = create(<App />); });
+  await signIn(tree);
+  await act(async () => { findButton(tree, firstTask.id).props.onPress(); for (let tick = 0; tick < 8; tick++) await new Promise((resolve) => setTimeout(resolve, 0)); });
+  assert.deepEqual(runtime.__mobileTestApi!.detailCalls, [firstTask.id], "online draft resume revalidates through task detail");
+  assert.equal(findInput(tree, "Contenu conservé du brouillon précédent")?.props.value, "authorized cached draft");
+  await act(async () => { tree.unmount(); });
+});
+
+test("revoked online task assignment hides the cached form and preserves the encrypted draft", async () => {
+  await loadApp();
+  installMocks();
+  const original = JSON.stringify({
+    id: "revoked-draft", employeeId: "employee-1", taskId: firstTask.id, payloadSchemaVersion: 1, revision: 1,
+    payload: { content: "protected revoked draft" }, createdAt: 10, savedAt: 20,
+  });
+  runtime.__draftRows!.set(`employee-1/${firstTask.id}`, original);
+  runtime.__cachedTaskRows!.set(`employee-1/${firstTask.id}`, JSON.stringify({ task_json: JSON.stringify(firstTask), synchronized_at: 10 }));
+  runtime.__assignedTasksByEmployee!.set("employee-1", [firstTask]);
+  runtime.__revokedTaskIds!.add(firstTask.id);
+  let tree!: ReactTestRenderer;
+  await act(async () => { tree = create(<App />); });
+  await signIn(tree);
+  await act(async () => { (await waitForButton(tree, firstTask.id)).props.onPress(); for (let tick = 0; tick < 12; tick++) await new Promise((resolve) => setTimeout(resolve, 0)); });
+  assert.deepEqual(runtime.__mobileTestApi!.detailCalls, [firstTask.id]);
+  assert.equal(findInput(tree, "Contenu conservé du brouillon précédent"), undefined, "form content is not hydrated before online authorization");
+  assert.ok(findText(tree, fr.employeeTasks.taskNoLongerAssigned));
+  assert.equal(runtime.__draftRows!.get(`employee-1/${firstTask.id}`), original, "denial does not delete or rewrite protected local data");
+  await act(async () => { tree.unmount(); });
+});
+
+test("online TASK_NOT_ASSIGNED revokes cached context, preserves the draft, and denies a later offline open", async () => {
+  await loadApp();
+  installMocks();
+  const originalDraft = JSON.stringify({
+    id: "revoked-online-resume", employeeId: "employee-1", taskId: firstTask.id,
+    payloadSchemaVersion: 1, revision: 4, payload: { content: "preserve these measurements" }, createdAt: 10, savedAt: 40,
+  });
+  runtime.__draftRows!.set(`employee-1/${firstTask.id}`, originalDraft);
+  runtime.__revokedTaskIds!.add(firstTask.id);
+  let tree!: ReactTestRenderer;
+  await act(async () => { tree = create(<App />); });
+  await signIn(tree);
+  assert.ok(runtime.__cachedTaskRows!.has(`employee-1/${firstTask.id}`));
+
+  await act(async () => { findButton(tree, firstTask.id).props.onPress(); for (let tick = 0; tick < 12; tick++) await new Promise((resolve) => setTimeout(resolve, 0)); });
+  assert.deepEqual(runtime.__mobileTestApi!.detailCalls, [firstTask.id]);
+  assert.equal(findInput(tree, fr.employeeTasks.legacyDraftContent), undefined, "denied content is not hydrated");
+  assert.ok(findText(tree, fr.employeeTasks.taskNoLongerAssigned));
+  assert.ok(!runtime.__cachedTaskRows!.has(`employee-1/${firstTask.id}`), "only the denied task context is revoked");
+  assert.equal(runtime.__draftRows!.get(`employee-1/${firstTask.id}`), originalDraft, "revocation leaves the complete Story 5.3 record unchanged");
+
+  await act(async () => { findButton(tree, fr.employeeTasks.back).props.onPress(); for (let tick = 0; tick < 8; tick++) await new Promise((resolve) => setTimeout(resolve, 0)); });
+  runtime.__networkOnline = false;
+  await act(async () => { runtime.__networkListener?.({ isConnected: false, isInternetReachable: false }); for (let tick = 0; tick < 8; tick++) await new Promise((resolve) => setTimeout(resolve, 0)); });
+  assert.equal(tree.root.findAll((node) => node.type === "Pressable" && node.findAll((child) => child.type === "Text" && child.children.join("") === firstTask.id).length > 0).length, 0, "revoked draft is not resumable offline");
+  assert.equal(tree.root.findAll((node) => node.type === "Pressable" && node.findAll((child) => child.type === "Text" && child.children.join("") === firstTask.establishment).length > 0).length, 0, "revoked task is absent from the offline task list");
+  assert.ok(findText(tree, fr.employeeTasks.offlineDraftPreserved));
+  assert.equal(runtime.__draftRows!.get(`employee-1/${firstTask.id}`), originalDraft);
+  assert.deepEqual(runtime.__mobileTestApi!.detailCalls, [firstTask.id], "denied offline work issues no second detail request");
+  await act(async () => { tree.unmount(); });
+});
+
+test("generic online task-detail failure retains cached authorization and draft for offline use", async () => {
+  await loadApp();
+  installMocks();
+  const originalDraft = JSON.stringify({
+    id: "transient-resume", employeeId: "employee-1", taskId: firstTask.id,
+    payloadSchemaVersion: 1, revision: 2, payload: { content: "transient failure preserves this" }, createdAt: 10, savedAt: 20,
+  });
+  runtime.__draftRows!.set(`employee-1/${firstTask.id}`, originalDraft);
+  runtime.__failTaskDetailById!.add(firstTask.id);
+  let tree!: ReactTestRenderer;
+  await act(async () => { tree = create(<App />); });
+  await signIn(tree);
+  await act(async () => { findButton(tree, firstTask.id).props.onPress(); for (let tick = 0; tick < 12; tick++) await new Promise((resolve) => setTimeout(resolve, 0)); });
+  assert.ok(findText(tree, fr.employeeTasks.detailError));
+  assert.ok(runtime.__cachedTaskRows!.has(`employee-1/${firstTask.id}`), "unknown failure does not revoke cached context");
+  assert.equal(runtime.__draftRows!.get(`employee-1/${firstTask.id}`), originalDraft);
+
+  await act(async () => { findButton(tree, fr.employeeTasks.back).props.onPress(); for (let tick = 0; tick < 8; tick++) await new Promise((resolve) => setTimeout(resolve, 0)); });
+  runtime.__networkOnline = false;
+  await act(async () => { runtime.__networkListener?.({ isConnected: false, isInternetReachable: false }); for (let tick = 0; tick < 8; tick++) await new Promise((resolve) => setTimeout(resolve, 0)); });
+  await act(async () => { findButton(tree, firstTask.id).props.onPress(); for (let tick = 0; tick < 12; tick++) await new Promise((resolve) => setTimeout(resolve, 0)); });
+  assert.ok(findInput(tree, fr.employeeTasks.legacyDraftContent), "valid offline access still resumes after a transient error");
+  assert.equal(runtime.__cachedTaskRows!.get(`employee-1/${firstTask.id}`) !== undefined, true);
+  assert.equal(runtime.__draftRows!.get(`employee-1/${firstTask.id}`), originalDraft);
+  await act(async () => { tree.unmount(); });
+});
+
+test("stale TASK_NOT_ASSIGNED response revokes only its originating task after an account switch", async () => {
+  await loadApp();
+  installMocks();
+  const employeeTwoDraft = JSON.stringify({
+    id: "employee-two-draft", employeeId: "employee-2", taskId: thirdTask.id,
+    payloadSchemaVersion: 1, revision: 1, payload: { content: "employee two evidence" }, createdAt: 10, savedAt: 20,
+  });
+  const employeeOneDraft = JSON.stringify({
+    id: "employee-one-pending-revocation", employeeId: "employee-1", taskId: firstTask.id,
+    payloadSchemaVersion: 1, revision: 1, payload: { content: "employee one evidence" }, createdAt: 10, savedAt: 20,
+  });
+  runtime.__draftRows!.set(`employee-1/${firstTask.id}`, employeeOneDraft);
+  runtime.__draftRows!.set(`employee-2/${thirdTask.id}`, employeeTwoDraft);
+  runtime.__assignedTasksByEmployee!.set("employee-1", [firstTask, secondTask]);
+  runtime.__assignedTasksByEmployee!.set("employee-2", [thirdTask]);
+  runtime.__revokedTaskIds!.add(firstTask.id);
+  const detailGate = deferred();
+  let detailStarted!: () => void;
+  const detailStartedPromise = new Promise<void>((resolve) => { detailStarted = resolve; });
+  runtime.__holdTaskDetailById!.set(firstTask.id, detailGate.promise);
+  runtime.__taskDetailStartedById!.set(firstTask.id, detailStarted);
+  let tree!: ReactTestRenderer;
+  await act(async () => { tree = create(<App />); });
+  await signIn(tree);
+  await act(async () => { findButton(tree, firstTask.id).props.onPress(); await detailStartedPromise; });
+
+  await act(async () => { findButton(tree, fr.employeeTasks.back).props.onPress(); for (let tick = 0; tick < 8; tick++) await new Promise((resolve) => setTimeout(resolve, 0)); });
+  await act(async () => { findButton(tree, fr.auth.logout).props.onPress(); for (let tick = 0; tick < 8; tick++) await new Promise((resolve) => setTimeout(resolve, 0)); });
+  runtime.__employeeId = "employee-2";
+  await signIn(tree);
+  assert.ok(findText(tree, thirdTask.establishment), "employee two is the current screen before the stale response returns");
+  runtime.__holdTaskDetailById!.delete(firstTask.id);
+  await act(async () => { detailGate.resolve(); for (let tick = 0; tick < 12; tick++) await new Promise((resolve) => setTimeout(resolve, 0)); });
+
+  assert.ok(findText(tree, thirdTask.establishment), "the stale response does not replace the current employee's screen");
+  assert.ok(!runtime.__cachedTaskRows!.has(`employee-1/${firstTask.id}`), "the authoritative denial revokes only its originating task");
+  assert.ok(runtime.__cachedTaskRows!.has(`employee-1/${secondTask.id}`), "another task for the first employee remains unchanged");
+  assert.ok(runtime.__cachedTaskRows!.has(`employee-2/${thirdTask.id}`), "the current employee's cache is untouched");
+  assert.equal(runtime.__draftRows!.get(`employee-2/${thirdTask.id}`), employeeTwoDraft, "another employee's draft remains unchanged");
+  assert.ok(!findText(tree, firstTask.establishment));
+  await act(async () => { tree.unmount(); });
+});
+
+test("offline cached open revalidates a reconnect race and withholds a revoked draft", async () => {
+  await loadApp();
+  installMocks();
+  const original = JSON.stringify({
+    id: "reconnect-revoked", employeeId: "employee-1", taskId: firstTask.id, payloadSchemaVersion: 1, revision: 2,
+    payload: { content: "must remain protected" }, createdAt: 10, savedAt: 20,
+  });
+  runtime.__draftRows!.set(`employee-1/${firstTask.id}`, original);
+  let tree!: ReactTestRenderer;
+  await act(async () => { tree = create(<App />); });
+  await signIn(tree);
+  runtime.__networkOnline = false;
+  await act(async () => { runtime.__networkListener?.({ isConnected: false, isInternetReachable: false }); for (let tick = 0; tick < 5; tick++) await new Promise((resolve) => setTimeout(resolve, 0)); });
+  const gate = deferred();
+  let readStarted!: () => void;
+  const readStartedPromise = new Promise<void>((resolve) => { readStarted = resolve; });
+  runtime.__holdDraftReadByTask!.set(firstTask.id, gate.promise);
+  runtime.__draftReadStartedByTask!.set(firstTask.id, readStarted);
+  await act(async () => { findButton(tree, firstTask.id).props.onPress(); await readStartedPromise; });
+  runtime.__revokedTaskIds!.add(firstTask.id);
+  runtime.__networkOnline = true;
+  await act(async () => { runtime.__networkListener?.({ isConnected: true, isInternetReachable: true }); await new Promise((resolve) => setTimeout(resolve, 0)); });
+  runtime.__holdDraftReadByTask!.delete(firstTask.id);
+  await act(async () => { gate.resolve(); for (let tick = 0; tick < 15; tick++) await new Promise((resolve) => setTimeout(resolve, 0)); });
+  assert.deepEqual(runtime.__mobileTestApi!.detailCalls, [firstTask.id], "reconnect routes the pending open through current task authorization");
+  assert.equal(findInput(tree, "Contenu conservé du brouillon précédent"), undefined);
+  assert.equal(findText(tree, "must remain protected"), undefined);
+  assert.equal(runtime.__draftRows!.get(`employee-1/${firstTask.id}`), original, "denial preserves the encrypted local draft");
+  assert.ok(!runtime.__cachedTaskRows!.has(`employee-1/${firstTask.id}`), "revoked authorization removes only the task context");
+  assert.ok(tree.root.findAll((node) => node.type === "Text" && node.children.join("").includes(fr.employeeTasks.taskNoLongerAssigned)).length > 0, JSON.stringify(tree.root.findAll((node) => node.type === "Text").map((node) => node.children.join(""))));
+  await act(async () => { tree.unmount(); });
+});
+
+test("offline cached open may hydrate after reconnect only when current task authorization succeeds", async () => {
+  await loadApp();
+  installMocks();
+  const original = JSON.stringify({
+    id: "reconnect-authorized", employeeId: "employee-1", taskId: firstTask.id, payloadSchemaVersion: 1, revision: 2,
+    payload: { content: "authorized after reconnect" }, createdAt: 10, savedAt: 20,
+  });
+  runtime.__draftRows!.set(`employee-1/${firstTask.id}`, original);
+  let tree!: ReactTestRenderer;
+  await act(async () => { tree = create(<App />); });
+  await signIn(tree);
+  runtime.__networkOnline = false;
+  await act(async () => { runtime.__networkListener?.({ isConnected: false, isInternetReachable: false }); for (let tick = 0; tick < 5; tick++) await new Promise((resolve) => setTimeout(resolve, 0)); });
+  const gate = deferred();
+  let readStarted!: () => void;
+  const readStartedPromise = new Promise<void>((resolve) => { readStarted = resolve; });
+  runtime.__holdDraftReadByTask!.set(firstTask.id, gate.promise);
+  runtime.__draftReadStartedByTask!.set(firstTask.id, readStarted);
+  await act(async () => { findButton(tree, firstTask.id).props.onPress(); await readStartedPromise; });
+  runtime.__networkOnline = true;
+  await act(async () => { runtime.__networkListener?.({ isConnected: true, isInternetReachable: true }); await new Promise((resolve) => setTimeout(resolve, 0)); });
+  runtime.__holdDraftReadByTask!.delete(firstTask.id);
+  await act(async () => { gate.resolve(); for (let tick = 0; tick < 15; tick++) await new Promise((resolve) => setTimeout(resolve, 0)); });
+  assert.deepEqual(runtime.__mobileTestApi!.detailCalls, [firstTask.id]);
+  assert.equal(findInput(tree, "Contenu conservé du brouillon précédent")?.props.value, "authorized after reconnect");
+  assert.ok(runtime.__cachedTaskRows!.has(`employee-1/${firstTask.id}`), "authorized task context remains available");
+  await act(async () => { tree.unmount(); });
+});
+
+test("navigation to another task wins while reconnect authorization is pending", async () => {
+  await loadApp();
+  installMocks();
+  const original = JSON.stringify({
+    id: "stale-reconnect", employeeId: "employee-1", taskId: firstTask.id, payloadSchemaVersion: 1, revision: 1,
+    payload: { content: "stale reconnect content" }, createdAt: 10, savedAt: 20,
+  });
+  runtime.__draftRows!.set(`employee-1/${firstTask.id}`, original);
+  const readGate = deferred();
+  const detailGate = deferred();
+  let readStarted!: () => void;
+  let detailStarted!: () => void;
+  const readStartedPromise = new Promise<void>((resolve) => { readStarted = resolve; });
+  const detailStartedPromise = new Promise<void>((resolve) => { detailStarted = resolve; });
+  runtime.__holdDraftReadByTask!.set(firstTask.id, readGate.promise);
+  runtime.__draftReadStartedByTask!.set(firstTask.id, readStarted);
+  runtime.__holdTaskDetailById!.set(firstTask.id, detailGate.promise);
+  runtime.__taskDetailStartedById!.set(firstTask.id, detailStarted);
+  let tree!: ReactTestRenderer;
+  await act(async () => { tree = create(<App />); });
+  await signIn(tree);
+  runtime.__networkOnline = false;
+  await act(async () => { runtime.__networkListener?.({ isConnected: false, isInternetReachable: false }); for (let tick = 0; tick < 5; tick++) await new Promise((resolve) => setTimeout(resolve, 0)); });
+  await act(async () => { findButton(tree, firstTask.id).props.onPress(); await readStartedPromise; });
+  runtime.__networkOnline = true;
+  await act(async () => { runtime.__networkListener?.({ isConnected: true, isInternetReachable: true }); await new Promise((resolve) => setTimeout(resolve, 0)); });
+  runtime.__holdDraftReadByTask!.delete(firstTask.id);
+  await act(async () => { readGate.resolve(); await detailStartedPromise; });
+  runtime.__holdTaskDetailById!.delete(firstTask.id);
+  await act(async () => { findButton(tree, "Retour à Mes tâches").props.onPress(); for (let tick = 0; tick < 6; tick++) await new Promise((resolve) => setTimeout(resolve, 0)); });
+  await act(async () => { findTaskRow(tree, secondTask.establishment).props.onPress(); for (let tick = 0; tick < 10; tick++) await new Promise((resolve) => setTimeout(resolve, 0)); });
+  detailGate.resolve();
+  await act(async () => { for (let tick = 0; tick < 10; tick++) await new Promise((resolve) => setTimeout(resolve, 0)); });
+  assert.ok(findText(tree, secondTask.id), "the current task remains selected after the late reconnect response");
+  assert.equal(findText(tree, firstTask.id), undefined);
+  assert.equal(findText(tree, "stale reconnect content"), undefined);
+  assert.equal(runtime.__draftRows!.get(`employee-1/${firstTask.id}`), original);
+  await act(async () => { tree.unmount(); });
+});
+
+test("task-cache write failure warns but does not strand an authorized online editor", async () => {
+  await loadApp();
+  installMocks();
+  runtime.__cacheWriteFailure = true;
+  let tree!: ReactTestRenderer;
+  await act(async () => { tree = create(<App />); });
+  await signIn(tree);
+  assert.ok(findText(tree, fr.employeeTasks.taskCacheFailed), "the list reports failed offline-context persistence");
+  await act(async () => { findTaskRow(tree, firstTask.establishment).props.onPress(); for (let tick = 0; tick < 8; tick++) await new Promise((resolve) => setTimeout(resolve, 0)); });
+  const editor = findInput(tree, "Contexte du contrôle");
+  assert.equal(editor?.props.editable, true, "authorized server task and draft hydration complete despite the cache warning");
+  assert.ok(findText(tree, fr.employeeTasks.taskCacheFailed));
+  assert.ok(!runtime.__cachedTaskRows!.has(`employee-1/${firstTask.id}`), "failed cache write is not represented as offline availability");
+  await act(async () => { tree.unmount(); });
+});
+
+test("successful authoritative refresh revokes omitted offline context and preserves its local draft", async () => {
+  await loadApp();
+  installMocks();
+  const originalDraft = JSON.stringify({
+    id: "preserved-revoked-draft", employeeId: "employee-1", taskId: firstTask.id,
+    payloadSchemaVersion: 1, revision: 3, payload: { content: "preserved evidence" }, createdAt: 10, savedAt: 30,
+  });
+  runtime.__draftRows!.set(`employee-1/${firstTask.id}`, originalDraft);
+  runtime.__cachedTaskRows!.set(`employee-1/${firstTask.id}`, JSON.stringify({ task_json: JSON.stringify(firstTask), synchronized_at: 10 }));
+  runtime.__assignedTasksByEmployee!.set("employee-1", [secondTask]);
+  let tree!: ReactTestRenderer;
+  await act(async () => { tree = create(<App />); });
+  await signIn(tree);
+  for (let tick = 0; tick < 8; tick++) await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+  assert.deepEqual([...runtime.__cachedTaskRows!.keys()], ["employee-1/" + secondTask.id], "successful server omission reconciles only task context");
+  assert.equal(runtime.__draftRows!.get(`employee-1/${firstTask.id}`), originalDraft, "the local draft bytes and revision are preserved");
+
+  runtime.__networkOnline = false;
+  await act(async () => { runtime.__networkListener?.({ isConnected: false, isInternetReachable: false }); await new Promise((resolve) => setTimeout(resolve, 0)); });
+  for (let tick = 0; tick < 8; tick++) await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+  assert.equal(findText(tree, firstTask.establishment), undefined, "the revoked task is no longer offered as offline work");
+  assert.equal(findText(tree, firstTask.id), undefined, "the preserved draft is not presented as resumable without authorized task context");
+  assert.ok(findText(tree, fr.employeeTasks.offlineDraftPreserved));
+  assert.equal(runtime.__draftRows!.get(`employee-1/${firstTask.id}`), originalDraft);
+  await act(async () => { tree.unmount(); });
+});
+
+test("authoritative task refresh updates retained context and a failed refresh does not revoke cache", async () => {
+  await loadApp();
+  installMocks();
+  const changedTask = { ...firstTask, service: "Service actualisé" };
+  runtime.__assignedTasksByEmployee!.set("employee-1", [changedTask]);
+  let tree!: ReactTestRenderer;
+  await act(async () => { tree = create(<App />); });
+  await signIn(tree);
+  for (let tick = 0; tick < 8; tick++) await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+  let cachedRow = JSON.parse(runtime.__cachedTaskRows!.get(`employee-1/${firstTask.id}`)!) as { task_json: string };
+  assert.equal((JSON.parse(cachedRow.task_json) as Task).service, changedTask.service);
+  const priorCache = new Map(runtime.__cachedTaskRows);
+  await act(async () => { findButton(tree, "Se déconnecter").props.onPress(); for (let tick = 0; tick < 8; tick++) await new Promise((resolve) => setTimeout(resolve, 0)); });
+  runtime.__failTaskListForEmployee!.add("employee-1");
+  await signIn(tree);
+  for (let tick = 0; tick < 8; tick++) await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+  assert.deepEqual(runtime.__cachedTaskRows, priorCache, "unknown refresh outcome never destructively reconciles task context");
+  assert.ok(findText(tree, changedTask.establishment));
+  await act(async () => { tree.unmount(); });
+});
+
+test("a stale employee task-list response cannot reconcile another account cache", async () => {
+  await loadApp();
+  installMocks();
+  const firstGate = deferred();
+  let firstStarted!: () => void;
+  const firstRequestStarted = new Promise<void>((resolve) => { firstStarted = resolve; });
+  runtime.__holdTaskListByEmployee!.set("employee-1", firstGate.promise);
+  runtime.__taskListStartedByEmployee!.set("employee-1", firstStarted);
+  runtime.__cachedTaskRows!.set(`employee-1/${firstTask.id}`, JSON.stringify({ task_json: JSON.stringify(firstTask), synchronized_at: 10 }));
+  let tree!: ReactTestRenderer;
+  await act(async () => { tree = create(<App />); });
+  await signIn(tree);
+  await act(async () => { await firstRequestStarted; });
+  await act(async () => { findButton(tree, "Se déconnecter").props.onPress(); for (let tick = 0; tick < 8; tick++) await new Promise((resolve) => setTimeout(resolve, 0)); });
+  runtime.__employeeId = "employee-2";
+  runtime.__holdTaskListByEmployee!.delete("employee-1");
+  await signIn(tree);
+  assert.ok(runtime.__cachedTaskRows!.has(`employee-2/${thirdTask.id}`));
+  runtime.__holdTaskListByEmployee!.delete("employee-1");
+  await act(async () => { firstGate.resolve(); for (let tick = 0; tick < 8; tick++) await new Promise((resolve) => setTimeout(resolve, 0)); });
+  assert.ok(runtime.__cachedTaskRows!.has(`employee-2/${thirdTask.id}`), "late employee A response cannot remove employee B context");
+  assert.ok(runtime.__cachedTaskRows!.has(`employee-1/${firstTask.id}`), "the stale request cannot reconcile any account after logout");
+  await act(async () => { tree.unmount(); });
+});
+
+test("later task open wins when an earlier online task detail resolves last", async () => {
+  await loadApp();
+  installMocks();
+  const firstGate = deferred();
+  const secondGate = deferred();
+  let firstStarted!: () => void;
+  let secondStarted!: () => void;
+  const firstRequestStarted = new Promise<void>((resolve) => { firstStarted = resolve; });
+  const secondRequestStarted = new Promise<void>((resolve) => { secondStarted = resolve; });
+  runtime.__holdTaskDetailById!.set(firstTask.id, firstGate.promise);
+  runtime.__holdTaskDetailById!.set(secondTask.id, secondGate.promise);
+  runtime.__taskDetailStartedById!.set(firstTask.id, firstStarted);
+  runtime.__taskDetailStartedById!.set(secondTask.id, secondStarted);
+  let tree!: ReactTestRenderer;
+  await act(async () => { tree = create(<App />); });
+  await signIn(tree);
+  await act(async () => { findTaskRow(tree, firstTask.establishment).props.onPress(); await firstRequestStarted; });
+  await act(async () => { findButton(tree, "Retour à Mes tâches").props.onPress(); await new Promise((resolve) => setTimeout(resolve, 0)); });
+  await act(async () => { findTaskRow(tree, secondTask.establishment).props.onPress(); await secondRequestStarted; });
+  runtime.__holdTaskDetailById!.delete(secondTask.id);
+  await act(async () => { secondGate.resolve(); for (let tick = 0; tick < 8; tick++) await new Promise((resolve) => setTimeout(resolve, 0)); });
+  assert.ok(findText(tree, secondTask.id), "task B finishes and becomes the selected detail");
+  runtime.__holdTaskDetailById!.delete(firstTask.id);
+  await act(async () => { firstGate.resolve(); for (let tick = 0; tick < 8; tick++) await new Promise((resolve) => setTimeout(resolve, 0)); });
+  assert.ok(findText(tree, secondTask.id), "late task A response cannot replace task B");
+  assert.equal(findText(tree, firstTask.id), undefined);
+  await act(async () => { tree.unmount(); });
+});
+
+test("offline cached-task navigation ignores an earlier delayed draft read", async () => {
+  await loadApp();
+  installMocks();
+  for (const [task, content] of [[firstTask, "offline A"], [secondTask, "offline B"]] as const) {
+    runtime.__draftRows!.set(`employee-1/${task.id}`, JSON.stringify({
+      id: `draft-${task.id}`, employeeId: "employee-1", taskId: task.id, payloadSchemaVersion: 1, revision: 1,
+      payload: { content }, createdAt: 10, savedAt: 20,
+    }));
+  }
+  const firstGate = deferred();
+  const secondGate = deferred();
+  let firstStarted!: () => void;
+  let secondStarted!: () => void;
+  const firstReadStarted = new Promise<void>((resolve) => { firstStarted = resolve; });
+  const secondReadStarted = new Promise<void>((resolve) => { secondStarted = resolve; });
+  runtime.__holdDraftReadByTask!.set(firstTask.id, firstGate.promise);
+  runtime.__holdDraftReadByTask!.set(secondTask.id, secondGate.promise);
+  runtime.__draftReadStartedByTask!.set(firstTask.id, firstStarted);
+  runtime.__draftReadStartedByTask!.set(secondTask.id, secondStarted);
+  let tree!: ReactTestRenderer;
+  await act(async () => { tree = create(<App />); });
+  await signIn(tree);
+  const callsBeforeOffline = [...runtime.__mobileTestApi!.detailCalls];
+  runtime.__networkOnline = false;
+  await act(async () => { for (let tick = 0; tick < 8; tick++) await new Promise((resolve) => setTimeout(resolve, 0)); });
+  assert.ok(findButton(tree, firstTask.id), "draft row remains available while offline");
+  await act(async () => { findButton(tree, firstTask.id).props.onPress(); for (let tick = 0; tick < 8; tick++) await new Promise((resolve) => setTimeout(resolve, 0)); });
+  await act(async () => { findButton(tree, "Retour à Mes tâches").props.onPress(); await new Promise((resolve) => setTimeout(resolve, 0)); });
+  await act(async () => { findButton(tree, secondTask.id).props.onPress(); for (let tick = 0; tick < 8; tick++) await new Promise((resolve) => setTimeout(resolve, 0)); });
+  runtime.__holdDraftReadByTask!.delete(firstTask.id);
+  runtime.__holdDraftReadByTask!.delete(secondTask.id);
+  await act(async () => { firstGate.resolve(); secondGate.resolve(); for (let tick = 0; tick < 8; tick++) await new Promise((resolve) => setTimeout(resolve, 0)); });
+  assert.equal(findInput(tree, "Contenu conservé du brouillon précédent")?.props.value, "offline B");
+  assert.deepEqual(runtime.__mobileTestApi!.detailCalls, [firstTask.id, secondTask.id], "task details were fetched only for the initial online cache population");
+  await act(async () => { tree.unmount(); });
+});
+
+test("employee switch hides prior cache while loading and ignores its late detail response", async () => {
+  await loadApp();
+  installMocks();
+  const oldTaskGate = deferred();
+  const newListGate = deferred();
+  let oldTaskStarted!: () => void;
+  let newListStarted!: () => void;
+  const oldTaskRequestStarted = new Promise<void>((resolve) => { oldTaskStarted = resolve; });
+  const newListRequestStarted = new Promise<void>((resolve) => { newListStarted = resolve; });
+  runtime.__holdTaskDetailById!.set(firstTask.id, oldTaskGate.promise);
+  runtime.__taskDetailStartedById!.set(firstTask.id, oldTaskStarted);
+  let tree!: ReactTestRenderer;
+  await act(async () => { tree = create(<App />); });
+  await signIn(tree);
+  assert.ok(runtime.__cachedTaskRows!.has(`employee-1/${firstTask.id}`));
+  await act(async () => { findTaskRow(tree, firstTask.establishment).props.onPress(); await oldTaskRequestStarted; });
+  await act(async () => { findButton(tree, "Retour à Mes tâches").props.onPress(); await new Promise((resolve) => setTimeout(resolve, 0)); });
+  await act(async () => { findButton(tree, "Se déconnecter").props.onPress(); for (let tick = 0; tick < 5; tick++) await new Promise((resolve) => setTimeout(resolve, 0)); });
+  runtime.__employeeId = "employee-2";
+  runtime.__holdTaskListByEmployee!.set("employee-2", newListGate.promise);
+  runtime.__taskListStartedByEmployee!.set("employee-2", newListStarted);
+  await signIn(tree);
+  await act(async () => { await newListRequestStarted; });
+  assert.equal(findText(tree, firstTask.establishment), undefined, "employee A's cached context is hidden while B's list loads");
+  runtime.__holdTaskDetailById!.delete(firstTask.id);
+  await act(async () => { oldTaskGate.resolve(); for (let tick = 0; tick < 5; tick++) await new Promise((resolve) => setTimeout(resolve, 0)); });
+  assert.equal(findText(tree, firstTask.establishment), undefined, "late employee A response cannot repopulate B's view");
+  runtime.__holdTaskListByEmployee!.delete("employee-2");
+  await act(async () => { newListGate.resolve(); for (let tick = 0; tick < 8; tick++) await new Promise((resolve) => setTimeout(resolve, 0)); });
+  assert.ok(findText(tree, thirdTask.establishment));
+  assert.equal(findText(tree, firstTask.establishment), undefined);
   await act(async () => { tree.unmount(); });
 });
 
@@ -453,7 +1085,7 @@ test("delete confirmation is cleared on navigation and cannot target the next dr
   let tree!: ReactTestRenderer;
   await act(async () => { tree = create(<App />); });
   await signIn(tree);
-  await act(async () => { findButton(tree, firstTask.id).props.onPress(); await new Promise((resolve) => setTimeout(resolve, 0)); });
+  await act(async () => { (await waitForButton(tree, firstTask.id)).props.onPress(); await new Promise((resolve) => setTimeout(resolve, 0)); });
   await act(async () => { findButton(tree, "Supprimer le brouillon local").props.onPress(); });
   assert.ok(findText(tree, "Supprimer ce brouillon local ? Cette action est définitive."));
   await act(async () => { findButton(tree, "Retour à Mes tâches").props.onPress(); });
@@ -667,7 +1299,7 @@ test("offline restart restores the same employee's authorization and logout pres
   runtime.__secureValues!.set("cetem-qc.offline-authorization.v1", JSON.stringify({
     schemaVersion: 1,
     status: "grant",
-    identity: { id: "employee-1", email: "employee@example.test", displayName: "Employée Test", role: "employe", mustChangePassword: false },
+    identity: { id: runtime.__employeeId ?? "employee-1", email: "employee@example.test", displayName: "Employée Test", role: "employe", mustChangePassword: false },
     authenticatedAt: now - 60_000,
     lastTrustedTime: now - 60_000,
     policyWindowMs: 7 * 24 * 60 * 60 * 1000,

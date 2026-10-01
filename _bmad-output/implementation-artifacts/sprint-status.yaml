@@ -1,4 +1,4 @@
-﻿# STATUS DEFINITIONS:
+# STATUS DEFINITIONS:
 # ==================
 # Epic Status:
 #   - backlog: Epic not yet started
@@ -29,7 +29,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 # - Retrospective appends its action items to action_items; the status view surfaces open ones
 generated: 09-26-2026 18:00
-last_updated: 10-01-2026 00:28
+last_updated: 10-02-2026 00:06
 project: cetem-qc
 project_key: NOKEY
 tracking_system: file-system
@@ -59,13 +59,13 @@ development_status:
   4-3-make-assigned-work-visible-in-app: done
   epic-4-retrospective: done
 
-  epic-5: in-progress
+  epic-5: done
   5-1-open-assigned-work-across-supported-phone-and-tablet-form-fa: done
   5-2-protect-local-drafts-and-apply-the-resolved-offline-access-w: done
   5-3-save-resume-and-explicitly-delete-a-local-draft: done
   5-4-capture-the-confirmed-graphie-mobile-form-structure: done
-  5-5-continue-editing-a-synchronized-task-offline: backlog
-  epic-5-retrospective: optional
+  5-5-continue-editing-a-synchronized-task-offline: done
+  epic-5-retrospective: done
 
   epic-6: backlog
   6-1-implement-explicitly-defined-source-workbook-calculations: backlog
@@ -185,9 +185,38 @@ action_items:
   - id: "epic-4-retro-item-9-keep-dep-01-dependent-form-portions-bloc"
     epic: 4
     action: "Treat the Story 5.4 PoV catalogue structure as resolved by Product Owner
-      decision while keeping unsupported DEP-01R business rules unresolved; keep Epic 6
-      calculations and Epic 7 synchronization/submission out of Epic 5 unless an
+      decision while keeping unsupported DEP-01R business rules unresolved; keep Epic
+      6 calculations and Epic 7 synchronization/submission out of Epic 5 unless an
       authoritative Epic 5 story requires them."
     owner: "Epic 5 story authors and product/business owner"
     status: open
     ref: "_bmad-output/implementation-artifacts/epic-4-retro-2026-09-30.md"
+  - id: "epic-5-retro-item-10-persist-story-5-5-final-specification-an"
+    epic: 5
+    action: "Persist Story 5.5 final specification and closure evidence, including
+      review scenarios and verification results."
+    owner: "Mobile story owner"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-5-retro-2026-10-01.md"
+  - id: "epic-5-retro-item-11-maintain-delayed-operation-authorization"
+    epic: 5
+    action: "Maintain delayed-operation authorization race coverage for connectivity,
+      navigation, account switch, stale task lists, TASK_NOT_ASSIGNED, and scoped
+      draft preservation."
+    owner: "Mobile maintainers"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-5-retro-2026-10-01.md"
+  - id: "epic-5-retro-item-12-prepare-deterministic-source-formula-reg"
+    epic: 5
+    action: "Prepare deterministic source-formula regression fixtures with workbook
+      provenance, separate from CETEM-approved acceptance fixtures, before Story 6.1."
+    owner: "Calculation implementation owner"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-5-retro-2026-10-01.md"
+  - id: "epic-5-retro-item-13-track-native-builds-device-behavior-nati"
+    epic: 5
+    action: "Track native builds/device behavior, native SQLCipher and secure-store
+      behavior, and seeded-v1 SQLite migration evidence in platform readiness."
+    owner: "Mobile/platform maintainer"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-5-retro-2026-10-01.md"
