@@ -452,6 +452,22 @@ So that a network interruption does not stop the control.
 
 **Traceability:** FR-020, FR-042, NFR-001, UX-DR3–UX-DR6.
 
+### Story 5.6: Align the Graphie Mobile form with the official CETEM paper form
+
+As an Employé,
+I want the Graphie Mobile form to follow the official CETEM paper form section by section,
+So that I enter the same raw readings I record on paper and later calculations have real inputs.
+
+**Acceptance Criteria:**
+
+**Given** the paper form « Rapport de Contrôle de Qualité d'un Appareil Mobile de Radiographie »
+**When** the employee opens the Graphie Mobile form
+**Then** the form captures the header, equipment and control-instrument identification, N.A/Oui/Non visual and mechanical checks, raw-reading tables for voltage accuracy, voltage repeatability (Kerma entered once), output linearity and light-field correspondence, per-test and general comments, and « Contrôle effectué par »
+**And** catalogue `2.0.0` / schema `3` replaces `1.0.0` / `2`; v1 drafts are not migrated and keep failing safely with the existing compatibility notice
+**And** values stay strings; no calculation, tolerance, « concluant » verdict, conclusion or approval field is added.
+
+**Traceability:** spec `_bmad-output/specs/spec-5-6-align-graphie-mobile-form-with-cetem-paper-form/SPEC.md`; paper form photos `docs/product/source/formulaire-cetem/`. **Unblocks:** Story 6.3 (together with the calculation rule-set v2 story).
+
 ## Epic 6: Traceable Calculations and Individual Results
 
 ### Story 6.1: Implement explicitly defined source-workbook calculations
