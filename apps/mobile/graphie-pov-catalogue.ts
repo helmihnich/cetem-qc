@@ -1,6 +1,6 @@
-export const GRAPHIE_CATALOGUE_ID = "graphie-mobile-pov";
-export const GRAPHIE_CATALOGUE_VERSION = "1.0.0";
-export const GRAPHIE_FORM_SCHEMA_VERSION = 2;
+import { GRAPHIE_CATALOGUE_ID, GRAPHIE_CATALOGUE_VERSION, GRAPHIE_FORM_SCHEMA_VERSION } from "@cetem-qc/domain/identity";
+
+export { GRAPHIE_CATALOGUE_ID, GRAPHIE_CATALOGUE_VERSION, GRAPHIE_FORM_SCHEMA_VERSION };
 
 export type CatalogueProvenance = "CETEM_WORKBOOK" | "IAEA_GUIDANCE" | "AAPM_GUIDANCE" | "PROJECT_POV_DECISION";
 export type CatalogueFieldType = "text" | "date" | "number" | "boolean" | "choice" | "textarea";

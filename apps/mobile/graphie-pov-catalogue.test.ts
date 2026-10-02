@@ -1,6 +1,18 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { GRAPHIE_CALCULATION_CATALOGUE } from "@cetem-qc/domain/identity";
 import { GRAPHIE_CATALOGUE_VERSION, GRAPHIE_FORM_SCHEMA_VERSION, GRAPHIE_MOBILE_POV_CATALOGUE, GraphiePayloadCompatibilityError, parseGraphiePayload } from "./graphie-pov-catalogue.js";
+
+test("catalogue and calculation identity share one version contract", () => {
+  assert.deepEqual(
+    {
+      catalogueId: GRAPHIE_MOBILE_POV_CATALOGUE.id,
+      catalogueVersion: GRAPHIE_MOBILE_POV_CATALOGUE.version,
+      schemaVersion: GRAPHIE_MOBILE_POV_CATALOGUE.schemaVersion,
+    },
+    GRAPHIE_CALCULATION_CATALOGUE,
+  );
+});
 
 test("catalogue groups French intervention, equipment, instrument, qualitative, measurement and comment fields in order", () => {
   assert.deepEqual(GRAPHIE_MOBILE_POV_CATALOGUE.sections.map((section) => section.id), ["intervention", "equipment", "instruments", "qualitative", "quantitative", "comments"]);

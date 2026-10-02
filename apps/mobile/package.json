@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@cetem-qc/api-client": "workspace:*",
+    "@cetem-qc/domain": "workspace:*",
     "@cetem-qc/i18n": "workspace:*",
     "expo": "57.0.25",
     "expo-crypto": "~57.0.3",
