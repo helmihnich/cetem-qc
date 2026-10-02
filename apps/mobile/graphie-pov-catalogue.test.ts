@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { GRAPHIE_CALCULATION_CATALOGUE } from "@cetem-qc/domain/identity";
+import { GRAPHIE_CALCULATION_CATALOGUE, GRAPHIE_CALCULATION_RULE_ID, GRAPHIE_CALCULATION_RULE_VERSION } from "@cetem-qc/domain";
 import { GRAPHIE_CATALOGUE_VERSION, GRAPHIE_FORM_SCHEMA_VERSION, GRAPHIE_MOBILE_POV_CATALOGUE, GraphiePayloadCompatibilityError, parseGraphiePayload } from "./graphie-pov-catalogue.js";
 
 test("catalogue and calculation identity share one version contract", () => {
@@ -33,18 +33,21 @@ test("catalogue groups French intervention, equipment, instrument, qualitative, 
 
 test("legacy Story 5.3 content is preserved without reinterpretation; form payload pins catalogue and schema versions", () => {
   assert.equal(parseGraphiePayload({ content: "existing work" }).legacyContent, "existing work");
-  const payload = { catalogueId: GRAPHIE_MOBILE_POV_CATALOGUE.id, catalogueVersion: GRAPHIE_MOBILE_POV_CATALOGUE.version, schemaVersion: GRAPHIE_MOBILE_POV_CATALOGUE.schemaVersion, values: { "intervention.date": "2026-10-01" } };
+  const payload = { catalogueId: GRAPHIE_MOBILE_POV_CATALOGUE.id, catalogueVersion: GRAPHIE_MOBILE_POV_CATALOGUE.version, schemaVersion: GRAPHIE_MOBILE_POV_CATALOGUE.schemaVersion, ruleId: GRAPHIE_CALCULATION_RULE_ID, ruleVersion: GRAPHIE_CALCULATION_RULE_VERSION, values: { "intervention.date": "2026-10-01" } };
   assert.deepEqual(parseGraphiePayload(payload).values, payload.values);
   assert.throws(() => parseGraphiePayload({ ...payload, catalogueId: "unknown" }));
 });
 
 test("only the supported catalogue/schema pair and plain string records are accepted", () => {
-  const supported = { catalogueId: GRAPHIE_MOBILE_POV_CATALOGUE.id, catalogueVersion: GRAPHIE_CATALOGUE_VERSION, schemaVersion: GRAPHIE_FORM_SCHEMA_VERSION, values: { "intervention.contexte": "context" } };
+  const supported = { catalogueId: GRAPHIE_MOBILE_POV_CATALOGUE.id, catalogueVersion: GRAPHIE_CATALOGUE_VERSION, schemaVersion: GRAPHIE_FORM_SCHEMA_VERSION, ruleId: GRAPHIE_CALCULATION_RULE_ID, ruleVersion: GRAPHIE_CALCULATION_RULE_VERSION, values: { "intervention.contexte": "context" } };
   assert.deepEqual(parseGraphiePayload(supported).values, supported.values);
   for (const payload of [
     { ...supported, catalogueVersion: "2.0.0" },
     { ...supported, schemaVersion: GRAPHIE_FORM_SCHEMA_VERSION + 1 },
     { ...supported, catalogueId: "unknown" },
+    { ...supported, ruleId: "unknown-rule" },
+    { ...supported, ruleVersion: "2.0.0" },
+    { catalogueId: supported.catalogueId, catalogueVersion: supported.catalogueVersion, schemaVersion: supported.schemaVersion, values: supported.values },
     { ...supported, schemaVersion: "2" },
     { ...supported, values: ["not", "a", "record"] },
     { ...supported, values: { "intervention.contexte": 12 } },
@@ -58,7 +61,7 @@ test("only the supported catalogue/schema pair and plain string records are acce
 test("legacy text stays separate from structured context, and beam geometry is project-defined", () => {
   const parsed = parseGraphiePayload({ content: "old notes" });
   assert.equal(parsed.legacyContent, "old notes");
-  const payload = { catalogueId: GRAPHIE_MOBILE_POV_CATALOGUE.id, catalogueVersion: GRAPHIE_CATALOGUE_VERSION, schemaVersion: GRAPHIE_FORM_SCHEMA_VERSION, values: { "intervention.contexte": "structured context" }, legacyContent: "old notes" };
+  const payload = { catalogueId: GRAPHIE_MOBILE_POV_CATALOGUE.id, catalogueVersion: GRAPHIE_CATALOGUE_VERSION, schemaVersion: GRAPHIE_FORM_SCHEMA_VERSION, ruleId: GRAPHIE_CALCULATION_RULE_ID, ruleVersion: GRAPHIE_CALCULATION_RULE_VERSION, values: { "intervention.contexte": "structured context" }, legacyContent: "old notes" };
   const resumed = parseGraphiePayload(payload);
   assert.equal(resumed.values["intervention.contexte"], "structured context");
   assert.equal(resumed.legacyContent, "old notes");

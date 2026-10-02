@@ -385,18 +385,18 @@ test("legacy notes and structured context survive save and restart independently
   const resumedContext = findInput(tree, GRAPHIE_MOBILE_POV_CATALOGUE.sections[0]!.fields.find((field) => field.id === "intervention.contexte")!.labelFr)!;
   await act(async () => { resumedLegacy.props.onChangeText("edited legacy notes"); resumedContext.props.onChangeText("current structured context"); });
   await act(async () => { assert.equal(await findButton(tree, "Enregistrer").props.onPress(), true); });
-  const saved = JSON.parse(runtime.__draftRows!.get(key)!) as { payload: { values: Record<string, string>; legacyContent?: string } };
+  const saved = JSON.parse(runtime.__draftRows!.get(key)!) as { payload: { catalogueId: string; catalogueVersion: string; schemaVersion: number; ruleId: string; ruleVersion: string; values: Record<string, string>; legacyContent?: string } };
+  assert.deepEqual(
+    { catalogueId: saved.payload.catalogueId, catalogueVersion: saved.payload.catalogueVersion, schemaVersion: saved.payload.schemaVersion, ruleId: saved.payload.ruleId, ruleVersion: saved.payload.ruleVersion },
+    { catalogueId: "graphie-mobile-pov", catalogueVersion: "1.0.0", schemaVersion: 2, ruleId: "cetem-workbook-explicit-formulas", ruleVersion: "1.0.0" },
+  );
   assert.equal(saved.payload.legacyContent, "edited legacy notes");
   assert.equal(saved.payload.values["intervention.contexte"], "current structured context");
   assert.equal(saved.payload.values[choiceField.id], selectedOption);
   await act(async () => { tree.unmount(); });
 
   runtime.__secureValues = new Map();
-  runtime.__draftRows = new Map([[key, JSON.stringify({
-    id: "legacy-form", employeeId: "employee-1", taskId: firstTask.id,
-    payloadSchemaVersion: 1, revision: 2, createdAt: 10, savedAt: 20,
-    payload: { catalogueId: "graphie-mobile-pov", catalogueVersion: "1.0.0", schemaVersion: 2, values: { "intervention.contexte": "current structured context", [choiceField.id]: selectedOption }, legacyContent: "edited legacy notes" },
-  })]]);
+  runtime.__draftRows = new Map([[key, JSON.stringify(JSON.parse(runtime.__draftRows!.get(key)!))]]);
   await act(async () => { tree = create(<App />); });
   await signIn(tree);
   await act(async () => { findTaskRow(tree, firstTask.establishment).props.onPress(); });
@@ -414,7 +414,7 @@ test("malformed saved form metadata shows compatibility state and retains stored
   const encryptedRow = JSON.stringify({
     id: "future-form", employeeId: "employee-1", taskId: firstTask.id,
     payloadSchemaVersion: 1, revision: 2, createdAt: 10, savedAt: 20,
-    payload: { content: "do not reinterpret malformed metadata", catalogueId: "graphie-mobile-pov", catalogueVersion: "1.0.0", schemaVersion: 2, values: {} },
+    payload: { content: "do not reinterpret malformed metadata", catalogueId: "graphie-mobile-pov", catalogueVersion: "1.0.0", schemaVersion: 2, ruleId: "cetem-workbook-explicit-formulas", ruleVersion: "1.0.0", values: {} },
   });
   let tree!: ReactTestRenderer;
   await act(async () => { tree = create(<App />); });
@@ -1019,7 +1019,7 @@ test("hydration keeps an existing draft read-only until its committed revision i
   runtime.__draftRows!.set(`employee-1/${firstTask.id}`, JSON.stringify({
     id: "committed-draft", employeeId: "employee-1", taskId: firstTask.id,
     payloadSchemaVersion: 1, revision: 7,
-    payload: { catalogueId: "graphie-mobile-pov", catalogueVersion: "1.0.0", schemaVersion: 2, values: { "intervention.contexte": "durable content" } },
+    payload: { catalogueId: "graphie-mobile-pov", catalogueVersion: "1.0.0", schemaVersion: 2, ruleId: "cetem-workbook-explicit-formulas", ruleVersion: "1.0.0", values: { "intervention.contexte": "durable content" } },
     createdAt: 10, savedAt: 20,
   }));
   let beginRead!: () => void;

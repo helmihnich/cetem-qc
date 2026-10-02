@@ -17,7 +17,7 @@ import { createSqliteDraftDatabase } from "./local-drafts/sqlite-draft-database"
 import { createAuthorizedDrafts } from "./local-drafts/authorized-drafts";
 import { DraftListCorruptionError, LocalDraftPayloadCompatibilityError, type LocalDraft } from "./local-drafts/model";
 import { runOnlyWhenOnlineAuthorized, ServerWorkAuthorizationError } from "./server-work-authorization";
-import { GRAPHIE_MOBILE_POV_CATALOGUE, GraphiePayloadCompatibilityError, parseGraphiePayload, type CatalogueField, type GraphieFormValues } from "./graphie-pov-catalogue";
+import { GRAPHIE_CALCULATION_RULE_ID, GRAPHIE_CALCULATION_RULE_VERSION, GRAPHIE_MOBILE_POV_CATALOGUE, GraphiePayloadCompatibilityError, parseGraphiePayload, type CatalogueField, type GraphieFormValues } from "./graphie-pov-catalogue";
 
 declare const process: { env: { EXPO_PUBLIC_API_URL?: string; EXPO_PUBLIC_OFFLINE_AUTHORIZATION_WINDOW_DAYS?: string } };
 
@@ -327,6 +327,8 @@ export default function App() {
           catalogueId: GRAPHIE_MOBILE_POV_CATALOGUE.id,
           catalogueVersion: GRAPHIE_MOBILE_POV_CATALOGUE.version,
           schemaVersion: GRAPHIE_MOBILE_POV_CATALOGUE.schemaVersion,
+          ruleId: GRAPHIE_CALCULATION_RULE_ID,
+          ruleVersion: GRAPHIE_CALCULATION_RULE_VERSION,
           values: { ...formValuesRef.current },
           ...(legacyContentModeRef.current ? { legacyContent: draftContentRef.current } : {}),
         }, draftRevisionByScopeRef.current.get(scopeKey) ?? 0);

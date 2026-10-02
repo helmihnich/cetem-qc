@@ -1,6 +1,8 @@
+import { GRAPHIE_CALCULATION_IDENTITY } from "@cetem-qc/domain";
+
 export const LOCAL_DRAFT_SCHEMA_VERSION = 1;
 
-export type GraphieDraftPayload = { catalogueId: string; catalogueVersion: string; schemaVersion: number; values: Record<string, string>; legacyContent?: string };
+export type GraphieDraftPayload = { catalogueId: string; catalogueVersion: string; schemaVersion: number; ruleId: string; ruleVersion: string; values: Record<string, string>; legacyContent?: string };
 
 export type LocalDraft = {
   id: string;
@@ -52,7 +54,14 @@ export function parseLocalDraft(raw: string): LocalDraft {
     || typeof payload.catalogueVersion !== "string"
     || !payload.catalogueVersion
     || !Number.isSafeInteger(payload.schemaVersion)
-    || Object.keys(payload).some((key) => !["catalogueId", "catalogueVersion", "schemaVersion", "values", "legacyContent"].includes(key))
+    || Object.keys(payload).some((key) => !["catalogueId", "catalogueVersion", "schemaVersion", "ruleId", "ruleVersion", "values", "legacyContent"].includes(key))
+    || payload.catalogueId !== GRAPHIE_CALCULATION_IDENTITY.catalogueId
+    || payload.catalogueVersion !== GRAPHIE_CALCULATION_IDENTITY.catalogueVersion
+    || payload.schemaVersion !== GRAPHIE_CALCULATION_IDENTITY.schemaVersion
+    || payload.ruleId !== GRAPHIE_CALCULATION_IDENTITY.ruleId
+    || payload.ruleVersion !== GRAPHIE_CALCULATION_IDENTITY.ruleVersion
+    || typeof payload.ruleId !== "string" || !payload.ruleId
+    || typeof payload.ruleVersion !== "string" || !payload.ruleVersion
     || !isPlainStringRecord(payload.values)
     || (payload.legacyContent !== undefined && typeof payload.legacyContent !== "string"))) {
     throw new LocalDraftPayloadCompatibilityError();

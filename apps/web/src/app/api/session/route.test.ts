@@ -55,6 +55,53 @@ test("session restoration checks the API and clears expired or revoked cookies",
   } finally { globalThis.fetch = originalFetch; }
 });
 
+test("password replacement proxy forwards the activation session and installs a rotated HttpOnly cookie", async () => {
+  let forwardedUrl = "";
+  let forwardedMethod = "";
+  let forwardedAuthorization = "";
+  let forwardedBody = "";
+  globalThis.fetch = async (input, init) => {
+    forwardedUrl = String(input);
+    forwardedMethod = init?.method ?? "";
+    forwardedAuthorization = new Headers(init?.headers).get("authorization") ?? "";
+    forwardedBody = String(init?.body ?? "");
+    return Response.json({ token: "rotated-session-token-not-for-the-browser", user: session.user, sessionExpiresAt: session.sessionExpiresAt });
+  };
+  try {
+    const response = await replacePassword(new Request("http://127.0.0.1:3000/api/session/password", {
+      method: "POST",
+      headers: { origin: "http://127.0.0.1:3000", cookie: `cetem_qc_session=${validToken}`, "content-type": "application/json" },
+      body: JSON.stringify({ currentPassword: "temporary-secret", newPassword: "replacement-secret" }),
+    }));
+    assert.equal(response.status, 200);
+    assert.match(forwardedUrl, /\/api\/v1\/authenticate\/password$/);
+    assert.equal(forwardedMethod, "POST");
+    assert.equal(forwardedAuthorization, `Bearer ${validToken}`);
+    assert.deepEqual(JSON.parse(forwardedBody), { currentPassword: "temporary-secret", newPassword: "replacement-secret" });
+    const browserPayload = await response.json();
+    assert.deepEqual(browserPayload, { user: session.user, sessionExpiresAt: session.sessionExpiresAt });
+    assert.equal(JSON.stringify(browserPayload).includes("rotated-session-token"), false);
+    assert.match(cookie(response), /HttpOnly/);
+    assert.match(cookie(response), /SameSite=Lax/i);
+    assert.match(cookie(response), /rotated-session-token-not-for-the-browser/);
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test("password replacement proxy rejects missing, malformed, null and cross-origin Origin before forwarding", async () => {
+  let forwarded = false;
+  globalThis.fetch = async () => { forwarded = true; return Response.json({}); };
+  try {
+    for (const origin of [undefined, "not-an-origin", "null", "https://attacker.example"]) {
+      const headers = new Headers({ cookie: `cetem_qc_session=${validToken}`, "content-type": "application/json" });
+      if (origin !== undefined) headers.set("origin", origin);
+      const response = await replacePassword(new Request("http://127.0.0.1:3000/api/session/password", { method: "POST", headers, body: "{}" }));
+      assert.equal(response.status, 403);
+      assert.equal((await response.json() as { error: { code: string } }).error.code, "CSRF_REJECTED");
+    }
+    assert.equal(forwarded, false);
+  } finally { globalThis.fetch = originalFetch; }
+});
+
 test("server-validated Responsable session makes roster reachable; employee role remains denied", async () => {
   globalThis.fetch = async (input) => String(input).endsWith("/session")
     ? Response.json(session)

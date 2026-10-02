@@ -1,6 +1,7 @@
-import { GRAPHIE_CATALOGUE_ID, GRAPHIE_CATALOGUE_VERSION, GRAPHIE_FORM_SCHEMA_VERSION } from "@cetem-qc/domain/identity";
+import { GRAPHIE_CATALOGUE_ID, GRAPHIE_CATALOGUE_VERSION, GRAPHIE_FORM_SCHEMA_VERSION, GRAPHIE_CALCULATION_RULE_ID, GRAPHIE_CALCULATION_RULE_VERSION } from "@cetem-qc/domain";
 
 export { GRAPHIE_CATALOGUE_ID, GRAPHIE_CATALOGUE_VERSION, GRAPHIE_FORM_SCHEMA_VERSION };
+export { GRAPHIE_CALCULATION_RULE_ID, GRAPHIE_CALCULATION_RULE_VERSION };
 
 export type CatalogueProvenance = "CETEM_WORKBOOK" | "IAEA_GUIDANCE" | "AAPM_GUIDANCE" | "PROJECT_POV_DECISION";
 export type CatalogueFieldType = "text" | "date" | "number" | "boolean" | "choice" | "textarea";
@@ -74,17 +75,24 @@ export class GraphiePayloadCompatibilityError extends Error {
   }
 }
 
-export function parseGraphiePayload(payload: unknown): { catalogueId: string; catalogueVersion: string; schemaVersion: number; values: GraphieFormValues; legacyContent?: string } {
+export function parseGraphiePayload(payload: unknown): { catalogueId: string; catalogueVersion: string; schemaVersion: number; ruleId: string; ruleVersion: string; values: GraphieFormValues; legacyContent?: string } {
   if (typeof payload !== "object" || payload === null || Array.isArray(payload)) throw new GraphiePayloadCompatibilityError();
   const record = payload as Record<string, unknown>;
   // Story 5.3 persisted opaque content. Preserve it as a legacy value; never reinterpret it as form fields.
   if (typeof record.content === "string" && Object.keys(record).length === 1) {
-    return { catalogueId: GRAPHIE_CATALOGUE_ID, catalogueVersion: GRAPHIE_CATALOGUE_VERSION, schemaVersion: GRAPHIE_FORM_SCHEMA_VERSION, values: {}, legacyContent: record.content };
+    return { catalogueId: GRAPHIE_CATALOGUE_ID, catalogueVersion: GRAPHIE_CATALOGUE_VERSION, schemaVersion: GRAPHIE_FORM_SCHEMA_VERSION, ruleId: GRAPHIE_CALCULATION_RULE_ID, ruleVersion: GRAPHIE_CALCULATION_RULE_VERSION, values: {}, legacyContent: record.content };
   }
-  if (record.catalogueId !== GRAPHIE_CATALOGUE_ID
+  if (typeof record.catalogueId !== "string" || !record.catalogueId
+    || typeof record.catalogueVersion !== "string" || !record.catalogueVersion
+    || !Number.isSafeInteger(record.schemaVersion)
+    || typeof record.ruleId !== "string" || !record.ruleId
+    || typeof record.ruleVersion !== "string" || !record.ruleVersion
+    || record.catalogueId !== GRAPHIE_CATALOGUE_ID
     || record.catalogueVersion !== GRAPHIE_CATALOGUE_VERSION
     || record.schemaVersion !== GRAPHIE_FORM_SCHEMA_VERSION
-    || Object.keys(record).some((key) => !["catalogueId", "catalogueVersion", "schemaVersion", "values", "legacyContent"].includes(key))
+    || record.ruleId !== GRAPHIE_CALCULATION_RULE_ID
+    || record.ruleVersion !== GRAPHIE_CALCULATION_RULE_VERSION
+    || Object.keys(record).some((key) => !["catalogueId", "catalogueVersion", "schemaVersion", "ruleId", "ruleVersion", "values", "legacyContent"].includes(key))
     || typeof record.values !== "object"
     || record.values === null
     || Array.isArray(record.values)
@@ -94,5 +102,5 @@ export function parseGraphiePayload(payload: unknown): { catalogueId: string; ca
       || (choiceOptions.has(key) && value !== "" && !choiceOptions.get(key)!.includes(value)))
     || (record.legacyContent !== undefined && typeof record.legacyContent !== "string")) throw new GraphiePayloadCompatibilityError();
   const values = record.values as GraphieFormValues;
-  return { catalogueId: record.catalogueId, catalogueVersion: record.catalogueVersion, schemaVersion: record.schemaVersion, values: { ...values }, ...(record.legacyContent !== undefined ? { legacyContent: record.legacyContent as string } : {}) };
+  return { catalogueId: record.catalogueId as string, catalogueVersion: record.catalogueVersion as string, schemaVersion: record.schemaVersion as number, ruleId: record.ruleId as string, ruleVersion: record.ruleVersion as string, values: { ...values }, ...(record.legacyContent !== undefined ? { legacyContent: record.legacyContent as string } : {}) };
 }

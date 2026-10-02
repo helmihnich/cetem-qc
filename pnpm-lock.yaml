@@ -209,6 +209,9 @@ importers:
 
   apps/api:
     dependencies:
+      '@cetem-qc/domain':
+        specifier: workspace:*
+        version: link:../../packages/domain
       '@cetem-qc/schemas':
         specifier: workspace:*
         version: link:../../packages/schemas

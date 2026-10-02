@@ -6,9 +6,11 @@
     "build": "tsc --noEmit",
     "typecheck": "tsc --noEmit",
     "db:migrate": "tsx src/db/migrate.ts",
-    "bootstrap:responsable": "tsx src/scripts/bootstrap-responsable.ts"
+    "bootstrap:responsable": "tsx src/scripts/bootstrap-responsable.ts",
+    "test:calculations": "node --import tsx --test src/modules/calculations/calculations.test.ts"
   },
   "dependencies": {
+    "@cetem-qc/domain": "workspace:*",
     "@cetem-qc/schemas": "workspace:*",
     "@cetem-qc/types": "workspace:*",
     "express": "5.2.1",

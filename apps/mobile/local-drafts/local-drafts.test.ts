@@ -91,10 +91,22 @@ test("preserves Story 5.3 opaque content and persists versioned form payloads wi
   const f = fixture();
   const drafts = f.repository();
   const legacy = await drafts.save("employee-a", "task-a", "opaque first content");
-  const form = { catalogueId: "graphie-mobile-pov", catalogueVersion: "1.0.0", schemaVersion: 2, values: { "intervention.date": "2026-10-01" } };
+  const form = { catalogueId: "graphie-mobile-pov", catalogueVersion: "1.0.0", schemaVersion: 2, ruleId: "cetem-workbook-explicit-formulas", ruleVersion: "1.0.0", values: { "intervention.date": "2026-10-01T00:00:00.000000001Z" } };
   const revised = await drafts.save("employee-a", "task-a", form, legacy.revision);
   assert.equal(revised.revision, legacy.revision + 1);
   assert.deepEqual((await f.repository().read("employee-a", "task-a"))?.payload, form);
+});
+
+test("unsupported calculation tuple cannot hydrate or rewrite retained draft bytes", async () => {
+  const f = fixture();
+  const original = JSON.stringify({
+    id: "draft-old", employeeId: "employee-a", taskId: "task-a", payloadSchemaVersion: 1,
+    revision: 1, createdAt: 100, savedAt: 100,
+    payload: { catalogueId: "graphie-mobile-pov", catalogueVersion: "1.0.0", schemaVersion: 2, ruleId: "future-rule", ruleVersion: "3.0", values: { "voltage.accuracy": "49.20000000000001" } },
+  });
+  f.records.set("employee-a/task-a", original);
+  await assert.rejects(f.repository().read("employee-a", "task-a"));
+  assert.equal(f.records.get("employee-a/task-a"), original);
 });
 
 test("enforces one draft per employee/task and isolates employees and tasks", async () => {

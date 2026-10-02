@@ -84,9 +84,30 @@ test("linearity retains the 0.49 factor and rule/catalogue identity", () => {
   assert.equal(actual.status, "calculated");
   if (actual.status === "calculated") {
     assert.equal(actual.value, (0.49 * 0.672 / 10 + 0.49 * 2.708 / 40 + 0.49 * 11 / 160) / 3);
-    assert.deepEqual(actual, { ...GRAPHIE_CALCULATION_IDENTITY, status: "calculated", value: actual.value });
+    assert.deepEqual(actual, { ...GRAPHIE_CALCULATION_IDENTITY, formulaSource: actual.formulaSource, status: "calculated", value: actual.value });
   }
   assert.deepEqual(graphieCalculations.repeatedVoltageMean(GRAPHIE_CALCULATION_IDENTITY, [69.7, 69.6, 69.7, 69.6, 69.7]), graphieCalculations.repeatedVoltageMean(GRAPHIE_CALCULATION_IDENTITY, [69.7, 69.6, 69.7, 69.6, 69.7]));
+});
+
+test("each calculation result retains its authorized workbook formula family and source cells", () => {
+  const cases = [
+    ["voltageAccuracy", graphieCalculations.voltageAccuracy(GRAPHIE_CALCULATION_IDENTITY, 50, 49.2), "voltage-accuracy", ["F13", "F14", "F15"]],
+    ["repeatedVoltageMean", graphieCalculations.repeatedVoltageMean(GRAPHIE_CALCULATION_IDENTITY, [69.7, 69.6, 69.7, 69.6, 69.7]), "voltage-mean", ["D26"]],
+    ["repeatedVoltageDeviation", graphieCalculations.repeatedVoltageDeviation(GRAPHIE_CALCULATION_IDENTITY, 69.6, 69.66), "voltage-deviation", ["D20", "E20"]],
+    ["outputReproducibility", graphieCalculations.outputReproducibility(GRAPHIE_CALCULATION_IDENTITY, { kerma: [1.308, 3.154, 3.128], mas: [40, 40, 40] }), "output-reproducibility", ["P14"]],
+    ["outputReproducibilityDeviation", graphieCalculations.outputReproducibilityDeviation(GRAPHIE_CALCULATION_IDENTITY, 0.0327, 0.06325), "output-reproducibility", ["Q14"]],
+    ["outputRepeatabilityMeans", graphieCalculations.outputRepeatabilityMeans(GRAPHIE_CALCULATION_IDENTITY, { kerma: [2.677, 2.708, 2.705, 2.708, 2.705], mas: [40, 40, 40, 40, 40] }), "output-repeatability", ["N25", "O25"]],
+    ["outputRepeatabilityDeviation", graphieCalculations.outputRepeatabilityDeviation(GRAPHIE_CALCULATION_IDENTITY, 2.677, 2.7006), "output-repeatability", ["P25"]],
+    ["outputLinearity", graphieCalculations.outputLinearity(GRAPHIE_CALCULATION_IDENTITY, { kerma: [0.672, 2.708, 11], mas: [10, 40, 160] }), "output-linearity", ["O40"]],
+    ["outputLinearityDeviation", graphieCalculations.outputLinearityDeviation(GRAPHIE_CALCULATION_IDENTITY, 0.03326283333333333, 0.04), "output-linearity", ["P40"]],
+    ["initialLinearity", graphieCalculations.initialLinearity(GRAPHIE_CALCULATION_IDENTITY, 0.1, 0.2), "initial-linearity", ["Q40"]],
+  ] as const;
+  for (const [name, outcome, family, sourceCells] of cases) {
+    assert.ok("formulaSource" in outcome, `${name} includes workbook provenance`);
+    if (!("formulaSource" in outcome)) continue;
+    assert.equal(outcome.formulaSource.family, family);
+    assert.deepEqual(outcome.formulaSource.sourceCells, sourceCells);
+  }
 });
 
 test("calculation context rejects unsupported catalogue, schema, and rule versions", () => {
@@ -136,6 +157,6 @@ test("undefined numeric cases remain nonnumeric unavailable results", () => {
       kerma: [Number.MAX_VALUE, Number.MAX_VALUE, Number.MAX_VALUE, Number.MAX_VALUE, Number.MAX_VALUE],
       mas: [1, 1, 1, 1, 1],
     }),
-    { ...GRAPHIE_CALCULATION_IDENTITY, status: "unavailable", reason: "invalid-input" },
+    { ...GRAPHIE_CALCULATION_IDENTITY, formulaSource: graphieCalculations.outputRepeatabilityMeans(GRAPHIE_CALCULATION_IDENTITY, { kerma: [1, 2, 3, 4, 5], mas: [1, 1, 1, 1, 1] }).formulaSource, status: "unavailable", reason: "invalid-input" },
   );
 });

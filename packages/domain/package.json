@@ -5,6 +5,7 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./identity": "./src/graphie-identity.ts"
+    "./identity": "./src/graphie-identity.ts",
+    "./source-regression": "./src/graphie-calculations.source-regression.ts"
   }
 }
