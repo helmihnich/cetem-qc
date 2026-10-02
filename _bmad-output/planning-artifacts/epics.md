@@ -550,6 +550,22 @@ So that reproducing workbook evidence is not mistaken for business approval.
 
 **Traceability:** FR-025, FR-026, DR-002, AD-7. **Dependency:** DEP-02.
 
+### Story 6.6: Align calculation rules with the official CETEM paper form
+
+As an Employé,
+I want the shared calculations and tolerances to match the official CETEM paper form,
+So that the results and suggested verdicts I see are the ones the signed report uses.
+
+**Acceptance Criteria:**
+
+**Given** the paper form « Rapport de Contrôle de Qualité d'un Appareil Mobile de Radiographie » replaces the workbook as the rule reference
+**When** the shared domain calculates voltage accuracy, voltage repeatability, output reproducibility/repeatability, linearity (with DFC) and light-field correspondence
+**Then** it applies the paper formulas and the printed tolerances (≤ 10 %, ≤ 5 %, < 10 %, < 15 %), returns a suggested per-test verdict, and returns « indisponible » for light field (no printed tolerance)
+**And** rule `cetem-paper-form` / `2.0.0` replaces `cetem-workbook-explicit-formulas` / `1.0.0`; drafts with the old rule are refused safely and are not migrated
+**And** workbook-only rules (3-row reproducibility, initial linearity, fixed 0.49) are removed, and no overall conformity is computed.
+
+**Traceability:** spec `_bmad-output/specs/spec-6-6-align-calculation-rules-with-cetem-paper-form/SPEC.md`; paper form photos `docs/product/source/formulaire-cetem/`; FR-025, FR-026, AD-2, AD-7. **Blocks:** Story 6.3.
+
 ## Epic 7: Reliable Synchronization and Server-Accepted Submission
 
 ### Story 7.1: Queue durable synchronization operations
