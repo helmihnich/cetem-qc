@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { createAuthorizedDrafts } from "./authorized-drafts.js";
-import { createDraftRepository, DraftListCorruptionError, type DraftDatabase, type LocalDraft } from "./model.js";
+import { createDraftRepository, DraftListCorruptionError, LocalDraftPayloadCompatibilityError, type DraftDatabase, type LocalDraft } from "./model.js";
 import { initializeDraftDatabase } from "./sqlite-draft-schema.js";
 import { createOfflineAuthorizationService } from "../offline-authorization-state.js";
 
@@ -91,7 +91,7 @@ test("preserves Story 5.3 opaque content and persists versioned form payloads wi
   const f = fixture();
   const drafts = f.repository();
   const legacy = await drafts.save("employee-a", "task-a", "opaque first content");
-  const form = { catalogueId: "graphie-mobile-pov", catalogueVersion: "1.0.0", schemaVersion: 2, ruleId: "cetem-workbook-explicit-formulas", ruleVersion: "1.0.0", values: { "intervention.date": "2026-10-01T00:00:00.000000001Z" } };
+  const form = { catalogueId: "graphie-mobile-pov", catalogueVersion: "2.0.0", schemaVersion: 3, ruleId: "cetem-workbook-explicit-formulas", ruleVersion: "1.0.0", values: { "controlPerformedBy.dateControle": "2026-10-01T00:00:00.000000001Z", "voltage.repeatability.row2.kvMeasured": "69,7" } };
   const revised = await drafts.save("employee-a", "task-a", form, legacy.revision);
   assert.equal(revised.revision, legacy.revision + 1);
   assert.deepEqual((await f.repository().read("employee-a", "task-a"))?.payload, form);
@@ -102,10 +102,22 @@ test("unsupported calculation tuple cannot hydrate or rewrite retained draft byt
   const original = JSON.stringify({
     id: "draft-old", employeeId: "employee-a", taskId: "task-a", payloadSchemaVersion: 1,
     revision: 1, createdAt: 100, savedAt: 100,
-    payload: { catalogueId: "graphie-mobile-pov", catalogueVersion: "1.0.0", schemaVersion: 2, ruleId: "future-rule", ruleVersion: "3.0", values: { "voltage.accuracy": "49.20000000000001" } },
+    payload: { catalogueId: "graphie-mobile-pov", catalogueVersion: "2.0.0", schemaVersion: 3, ruleId: "future-rule", ruleVersion: "3.0", values: { "voltage.accuracy.row1.kvMeasured": "49.20000000000001" } },
   });
   f.records.set("employee-a/task-a", original);
   await assert.rejects(f.repository().read("employee-a", "task-a"));
+  assert.equal(f.records.get("employee-a/task-a"), original);
+});
+
+test("a stored catalogue 1.0.0 / schema 2 draft is incompatible and its stored bytes stay unchanged", async () => {
+  const f = fixture();
+  const original = JSON.stringify({
+    id: "draft-v1", employeeId: "employee-a", taskId: "task-a", payloadSchemaVersion: 1,
+    revision: 3, createdAt: 100, savedAt: 120,
+    payload: { catalogueId: "graphie-mobile-pov", catalogueVersion: "1.0.0", schemaVersion: 2, ruleId: "cetem-workbook-explicit-formulas", ruleVersion: "1.0.0", values: { "intervention.contexte": "v1 work", "voltage.accuracy": "49.2" } },
+  });
+  f.records.set("employee-a/task-a", original);
+  await assert.rejects(f.repository().read("employee-a", "task-a"), LocalDraftPayloadCompatibilityError);
   assert.equal(f.records.get("employee-a/task-a"), original);
 });
 

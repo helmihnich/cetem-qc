@@ -3,7 +3,7 @@ import { GRAPHIE_CATALOGUE_ID, GRAPHIE_CATALOGUE_VERSION, GRAPHIE_FORM_SCHEMA_VE
 export { GRAPHIE_CATALOGUE_ID, GRAPHIE_CATALOGUE_VERSION, GRAPHIE_FORM_SCHEMA_VERSION };
 export { GRAPHIE_CALCULATION_RULE_ID, GRAPHIE_CALCULATION_RULE_VERSION };
 
-export type CatalogueProvenance = "CETEM_WORKBOOK" | "IAEA_GUIDANCE" | "AAPM_GUIDANCE" | "PROJECT_POV_DECISION";
+export type CatalogueProvenance = "CETEM_PAPER_FORM" | "CETEM_WORKBOOK" | "IAEA_GUIDANCE" | "AAPM_GUIDANCE" | "PROJECT_POV_DECISION";
 export type CatalogueFieldType = "text" | "date" | "number" | "boolean" | "choice" | "textarea";
 export type CatalogueField = {
   id: string;
@@ -13,61 +13,196 @@ export type CatalogueField = {
   provenance: CatalogueProvenance[];
   options?: readonly string[];
   helpFr?: string;
+  /** Value pre-printed on the paper form; seeded only into a new draft. */
+  defaultValue?: string;
   required?: boolean;
   min?: number;
   max?: number;
   allowNA?: boolean;
 };
-export type CatalogueSection = { id: string; labelFr: string; fields: readonly CatalogueField[] };
+/** Explicit row grouping of table cells: `fieldIds[r][c]` is the cell of row r, column c. */
+export type CatalogueTable = {
+  id: string;
+  rowLabelsFr: readonly string[];
+  columnLabelsFr: readonly string[];
+  fieldIds: readonly (readonly string[])[];
+  helpFr?: string;
+};
+/** `fields` is the flattened, ordered list of every field in the section, table cells included. */
+export type CatalogueSection = { id: string; labelFr: string; fields: readonly CatalogueField[]; tables?: readonly CatalogueTable[] };
 
-// Field labels and groups are product-defined for the PoV. Workbook provenance identifies
-// source meaning only; it does not claim CETEM reviewed or approved this catalogue.
-const project = ["PROJECT_POV_DECISION"] as const;
-const projectAndWorkbook = ["PROJECT_POV_DECISION", "CETEM_WORKBOOK"] as const;
-const projectAndGuidance = ["PROJECT_POV_DECISION", "IAEA_GUIDANCE", "AAPM_GUIDANCE"] as const;
-const text = (id: string, labelFr: string, provenance: readonly CatalogueProvenance[] = project): CatalogueField => ({ id, labelFr, type: "text", provenance: [...provenance] });
-const area = (id: string, labelFr: string, provenance: readonly CatalogueProvenance[] = project): CatalogueField => ({ id, labelFr, type: "textarea", provenance: [...provenance] });
-const number = (id: string, labelFr: string, unit: string, provenance: readonly CatalogueProvenance[] = projectAndWorkbook): CatalogueField => ({ id, labelFr, type: "number", unit, provenance: [...provenance] });
+// Structure and wording follow the official CETEM paper form « Rapport de Contrôle de Qualité
+// d'un Appareil Mobile de Radiographie ». CETEM_WORKBOOK only marks fields that feed a workbook
+// formula; it does not claim CETEM reviewed or approved this catalogue.
+const paper = ["CETEM_PAPER_FORM"] as const;
+const paperAndWorkbook = ["CETEM_PAPER_FORM", "CETEM_WORKBOOK"] as const;
+type Provenance = readonly CatalogueProvenance[];
+type FieldExtras = { unit?: string; helpFr?: string; defaultValue?: string; options?: readonly string[] };
+const field = (id: string, labelFr: string, type: CatalogueFieldType, provenance: Provenance = paper, extras: FieldExtras = {}): CatalogueField => ({
+  id,
+  labelFr,
+  type,
+  provenance: [...provenance],
+  ...(extras.unit !== undefined ? { unit: extras.unit } : {}),
+  ...(extras.options !== undefined ? { options: [...extras.options] } : {}),
+  ...(extras.helpFr !== undefined ? { helpFr: extras.helpFr } : {}),
+  ...(extras.defaultValue !== undefined ? { defaultValue: extras.defaultValue } : {}),
+});
+const text = (id: string, labelFr: string, extras?: FieldExtras) => field(id, labelFr, "text", paper, extras);
+const area = (id: string, labelFr: string) => field(id, labelFr, "textarea");
+const number = (id: string, labelFr: string, unit: string, provenance: Provenance = paper, defaultValue?: string) =>
+  field(id, labelFr, "number", provenance, { unit, ...(defaultValue !== undefined ? { defaultValue } : {}) });
+const YES_NO_NA = ["N.A", "Oui", "Non"] as const;
+const check = (id: string, labelFr: string) => field(id, labelFr, "choice", paper, { options: YES_NO_NA });
+
+type Column = { key: string; labelFr: string; build: (id: string, row: number) => CatalogueField };
+/** Builds an explicit table: one field per row × column, ID `<id>.row<N>.<column>` unless `idOf` is given. */
+function table(id: string, rowLabelsFr: readonly string[], columns: readonly Column[], options: { helpFr?: string; idOf?: (row: number, column: Column) => string } = {}) {
+  const idOf = options.idOf ?? ((row: number, column: Column) => `${id}.row${row}.${column.key}`);
+  const rows = rowLabelsFr.map((_, index) => columns.map((column) => column.build(idOf(index + 1, column), index + 1)));
+  const definition: CatalogueTable = {
+    id,
+    rowLabelsFr: [...rowLabelsFr],
+    columnLabelsFr: columns.map((column) => column.labelFr),
+    fieldIds: rows.map((row) => row.map((cell) => cell.id)),
+    ...(options.helpFr !== undefined ? { helpFr: options.helpFr } : {}),
+  };
+  return { definition, fields: rows.flat() };
+}
+
+// Identification de l'équipement: the paper's rows are attributes and its columns are units. The grid is
+// declared per unit so a phone shows one group per device; field IDs stay `equipment.<unit>.<attribute>`.
+const equipmentUnits = [
+  { key: "equipment", labelFr: "Équipement" },
+  { key: "tube", labelFr: "Tube à rayons X" },
+  { key: "generator", labelFr: "Générateur HT" },
+] as const;
+const equipmentAttributes = [
+  { key: "brand", labelFr: "Marque" },
+  { key: "model", labelFr: "Modèle" },
+  { key: "serial", labelFr: "N° de série" },
+  { key: "dms", labelFr: "D.M.S" },
+] as const;
+const equipmentGrid = table("equipment", equipmentUnits.map((unit) => unit.labelFr),
+  equipmentAttributes.map((attribute) => ({ key: attribute.key, labelFr: attribute.labelFr, build: (id: string) => text(id, attribute.labelFr) })),
+  { idOf: (row, column) => `equipment.${equipmentUnits[row - 1]!.key}.${column.key}` });
+
+// Appareils et outils de contrôle: one multifunction Fluke device is pre-printed for KVp mètre and Dosimètre.
+const flukeMultifunction = { brand: "Fluke Biomedical", model: "8000", serial: "105991" } as const;
+const instrumentRows = [
+  { key: "kvpMeter", labelFr: "KVp mètre", defaults: flukeMultifunction },
+  { key: "dosimeter", labelFr: "Dosimètre", defaults: flukeMultifunction },
+  { key: "tapeMeasure", labelFr: "Mètre-ruban", defaults: undefined },
+] as const;
+const instrumentAttributes = [
+  { key: "brand", labelFr: "Marque" },
+  { key: "model", labelFr: "Modèle" },
+  { key: "serial", labelFr: "N° de série" },
+] as const;
+const instrumentsGrid = table("instruments", instrumentRows.map((row) => row.labelFr),
+  instrumentAttributes.map((attribute) => ({
+    key: attribute.key,
+    labelFr: attribute.labelFr,
+    build: (id: string, row: number) => {
+      const defaults = instrumentRows[row - 1]!.defaults;
+      return text(id, attribute.labelFr, defaults ? { defaultValue: defaults[attribute.key] } : {});
+    },
+  })),
+  { idOf: (row, column) => `instruments.${instrumentRows[row - 1]!.key}.${column.key}` });
+
+const voltageAccuracyDefaults = ["50", "70", undefined] as const;
+const voltageAccuracyTable = table("voltage.accuracy", ["KV min", "KV", "KV max"], [
+  { key: "kvDisplayed", labelFr: "kV affiché", build: (id, row) => number(id, "kV affiché", "kV", paperAndWorkbook, voltageAccuracyDefaults[row - 1]) },
+  { key: "kvMeasured", labelFr: "kV mesuré", build: (id) => number(id, "kV mesuré", "kV", paperAndWorkbook) },
+]);
+
+const measurementRows = (count: number) => Array.from({ length: count }, (_, index) => `Mesure ${index + 1}`);
+export const KERMA_REUSE_HELP_FR = "La mesure du kerma sera utilisée par la suite pour le contrôle de la reproductibilité et la répétabilité du rayonnement de sortie.";
+const repeatabilityTable = table("voltage.repeatability", measurementRows(5), [
+  { key: "kvDisplayed", labelFr: "kV affiché", build: (id) => number(id, "kV affiché", "kV", paper, "70") },
+  { key: "kvMeasured", labelFr: "kV mesuré", build: (id) => number(id, "kV mesuré", "kV", paperAndWorkbook) },
+  { key: "kerma", labelFr: "Kerma", build: (id) => number(id, "Kerma", "mGy", paperAndWorkbook) },
+], { helpFr: KERMA_REUSE_HELP_FR });
+
+const linearityTable = table("output.linearity", measurementRows(3), [
+  { key: "kvDisplayed", labelFr: "kV affiché", build: (id) => number(id, "kV affiché", "kV", paper, "70") },
+  { key: "mas", labelFr: "mAs", build: (id, row) => number(id, "mAs", "mAs", paperAndWorkbook, row === 1 ? "10" : undefined) },
+  { key: "kerma", labelFr: "Kerma (dét)", build: (id) => number(id, "Kerma (dét)", "mGy", paperAndWorkbook) },
+]);
 
 export const GRAPHIE_MOBILE_POV_CATALOGUE: { id: string; version: string; schemaVersion: number; sections: readonly CatalogueSection[] } = {
   id: GRAPHIE_CATALOGUE_ID,
   version: GRAPHIE_CATALOGUE_VERSION,
   schemaVersion: GRAPHIE_FORM_SCHEMA_VERSION,
   sections: [
-    { id: "intervention", labelFr: "Intervention", fields: [
-      { ...text("intervention.date", "Date du contrôle"), type: "date" },
-      text("intervention.etablissement", "Établissement"), text("intervention.service", "Service"),
-      text("intervention.technicien", "Employé ou technicien"), text("intervention.contexte", "Contexte du contrôle"),
-      area("intervention.commentaires", "Commentaires sur l’intervention"),
+    { id: "header", labelFr: "En-tête", fields: [
+      text("header.reportNumber", "N° rapport", { helpFr: "N° …/LCQ" }),
+      text("header.etablissement", "Établissement"),
+      text("header.serviceLieu", "Service / Lieu"),
+      field("header.interventionNature", "Nature de l'intervention", "choice", paper, { options: ["Demande ponctuelle", "Convention"], defaultValue: "Convention" }),
+      text("header.refCetembh", "Réf. CETEMBH (Convention N°)"),
+      text("header.refClient", "Réf. Client (N°)"),
     ] },
-    { id: "equipment", labelFr: "Équipement contrôlé", fields: [
-      ...["Fabricant", "Modèle", "Numéro de série", "Type d’équipement", "Identification de l’installation", "Identification du générateur", "Identification du tube à rayons X"].map((label, i) => text(`equipment.identity.${i}`, label)),
+    { id: "equipment", labelFr: "Identification de l'équipement", fields: equipmentGrid.fields, tables: [equipmentGrid.definition] },
+    { id: "instruments", labelFr: "Appareils et outils de contrôle", fields: instrumentsGrid.fields, tables: [instrumentsGrid.definition] },
+    { id: "visual", labelFr: "Contrôles visuels", fields: [
+      check("visual.integrity", "Intégrité de l'appareil, bon état des couvercles"),
+      check("visual.cleanliness", "Propreté générale"),
+      check("visual.keyboards", "Bon état mécanique des claviers"),
+      check("visual.accessories", "Bon état des accessoires et des périphériques"),
+      check("visual.connectorsCables", "Bon état des connecteurs et des câbles électriques"),
     ] },
-    { id: "instruments", labelFr: "Instruments de mesure", fields: [
-      text("instrument.name", "Instrument de mesure"), text("instrument.manufacturer", "Fabricant"),
-      text("instrument.model", "Modèle"), text("instrument.serial", "Numéro de série"), text("instrument.calibration", "Informations d’étalonnage"),
+    { id: "mechanical", labelFr: "Contrôle de sécurité mécanique", fields: [
+      check("mechanical.brakes", "Contrôle des freins"),
+      check("mechanical.movements", "Contrôle des mouvements"),
     ] },
-    { id: "qualitative", labelFr: "Vérifications qualitatives", fields: [
-      ...["État général", "Commandes et affichage", "Câbles et connecteurs", "Déplacement et verrouillage", "Collimateur et concordance du champ lumineux"].map((label, i) => ({ ...text(`qualitative.${i}`, label, projectAndGuidance), type: "choice" as const, options: ["Conforme", "À signaler", "Non vérifié"] })),
-      area("qualitative.observations", "Observations qualitatives", projectAndGuidance),
+    { id: "voltageAccuracy", labelFr: "Exactitude de la tension", fields: [
+      ...voltageAccuracyTable.fields,
+      area("voltage.accuracy.comments", "Commentaire"),
+    ], tables: [voltageAccuracyTable.definition] },
+    { id: "repeatability", labelFr: "Répétabilité de la tension", fields: [
+      number("voltage.repeatability.mas", "mAs", "mAs", paperAndWorkbook),
+      number("voltage.repeatability.maMaxHalf", "mA max/2", "mA"),
+      ...repeatabilityTable.fields,
+      area("voltage.repeatability.voltageComments", "Commentaire — répétabilité de la tension"),
+      area("voltage.repeatability.outputComments", "Commentaire — reproductibilité et répétabilité du rayonnement de sortie"),
+    ], tables: [repeatabilityTable.definition] },
+    { id: "linearity", labelFr: "Linéarité du rayonnement de sortie", fields: [
+      ...linearityTable.fields,
+      number("output.linearity.maMaxHalf", "mA max/2", "mA"),
+      number("output.linearity.dfc", "DFC (distance foyer–chambre)", "m"),
+      area("output.linearity.comments", "Commentaire"),
+    ], tables: [linearityTable.definition] },
+    { id: "lightField", labelFr: "Géométrie du faisceau de rayons X : correspondance entre le champ lumineux et le champ de rayons X", fields: [
+      number("lightField.kv", "kV", "kV", paper, "70"),
+      number("lightField.mas", "mAs", "mAs", paper, "4"),
+      number("lightField.dfr", "D.F.R (distance foyer–récepteur)", "m", paper, "1"),
+      ...[1, 2, 3, 4].map((index) => number(`lightField.gap${index}`, `Écart ${index}`, "mm")),
+      area("lightField.comments", "Commentaire"),
     ] },
-    { id: "quantitative", labelFr: "Mesures et contrôles quantitatifs", fields: [
-      { id: "voltage.accuracy", labelFr: "Exactitude de la tension", type: "number", unit: "kV", provenance: [...projectAndWorkbook] },
-      { id: "voltage.reproducibility", labelFr: "Reproductibilité de la tension", type: "number", unit: "%", provenance: [...projectAndWorkbook] },
-      { id: "output.reproducibility", labelFr: "Reproductibilité du rayonnement de sortie", type: "number", unit: "%", provenance: [...projectAndWorkbook] },
-      { id: "output.linearity", labelFr: "Linéarité du rayonnement de sortie", type: "number", unit: "%", provenance: [...projectAndWorkbook] },
-      { id: "beam.geometry", labelFr: "Géométrie et faisceau", type: "number", unit: "mm", provenance: [...project] },
-      number("measurement.other", "Autre mesure", "", project),
+    { id: "comments", labelFr: "Commentaires généraux", fields: [area("comments.general", "Commentaires généraux")] },
+    { id: "controlPerformedBy", labelFr: "Contrôle effectué par", fields: [
+      text("controlPerformedBy.nom", "Nom et prénom"),
+      text("controlPerformedBy.qualite", "Qualité"),
+      field("controlPerformedBy.dateControle", "Date de contrôle", "date"),
     ] },
-    { id: "comments", labelFr: "Commentaires généraux", fields: [area("comments.general", "Observations et commentaires")] },
   ],
 };
 
 export type GraphieFormValues = Record<string, string>;
-const supportedFieldIds = new Set(GRAPHIE_MOBILE_POV_CATALOGUE.sections.flatMap((section) => section.fields.map((field) => field.id)));
-const choiceOptions = new Map(GRAPHIE_MOBILE_POV_CATALOGUE.sections.flatMap((section) => section.fields
+const catalogueFields = GRAPHIE_MOBILE_POV_CATALOGUE.sections.flatMap((section) => section.fields);
+const supportedFieldIds = new Set(catalogueFields.map((field) => field.id));
+const choiceOptions = new Map(catalogueFields
   .filter((field) => field.type === "choice")
-  .map((field) => [field.id, field.options ?? []] as const)));
+  .map((field) => [field.id, field.options ?? []] as const));
+
+/** Paper pre-printed values, seeded as editable values only when no draft exists for the task. */
+export function createNewGraphieDraftValues(): GraphieFormValues {
+  return Object.fromEntries(catalogueFields
+    .filter((field) => field.defaultValue !== undefined)
+    .map((field) => [field.id, field.defaultValue!]));
+}
+
 export class GraphiePayloadCompatibilityError extends Error {
   constructor() {
     super("Saved Graphie form payload is incompatible with this catalogue version.");

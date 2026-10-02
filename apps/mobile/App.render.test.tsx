@@ -366,11 +366,11 @@ test("legacy notes and structured context survive save and restart independently
   await signIn(tree);
   await act(async () => { findTaskRow(tree, firstTask.establishment).props.onPress(); });
   const legacy = findInput(tree, "Contenu conservé du brouillon précédent");
-  const context = findInput(tree, "Contexte du contrôle");
+  const context = findInput(tree, "N° rapport");
   assert.equal(legacy?.props.value, "old legacy notes");
   assert.equal(context?.props.value, "");
-  const choiceField = GRAPHIE_MOBILE_POV_CATALOGUE.sections.find((section) => section.id === "qualitative")!.fields[0]!;
-  await act(async () => { findButton(tree, GRAPHIE_MOBILE_POV_CATALOGUE.sections.find((section) => section.id === "qualitative")!.labelFr).props.onPress(); });
+  const choiceField = GRAPHIE_MOBILE_POV_CATALOGUE.sections.find((section) => section.id === "visual")!.fields[0]!;
+  await act(async () => { findButton(tree, GRAPHIE_MOBILE_POV_CATALOGUE.sections.find((section) => section.id === "visual")!.labelFr).props.onPress(); });
   const optionButtons = tree.root.findAll((node) => node.type === "Pressable" && String(node.props.accessibilityLabel ?? "").startsWith(`${choiceField.labelFr}: `));
   assert.deepEqual(optionButtons.map((node) => node.props.accessibilityLabel), choiceField.options!.map((option) => `${choiceField.labelFr}: ${option}`));
   assert.equal(findInput(tree, choiceField.labelFr), undefined, "choice fields do not expose arbitrary text input");
@@ -382,16 +382,16 @@ test("legacy notes and structured context survive save and restart independently
   assert.ok(selectedAfterTap.findAll((node) => node.type === "Text" && node.children.join("").includes("sélectionné")).length > 0);
   await act(async () => { findButton(tree, GRAPHIE_MOBILE_POV_CATALOGUE.sections[0]!.labelFr).props.onPress(); });
   const resumedLegacy = tree.root.findAll((node) => node.type === "TextInput" && String(node.props.accessibilityLabel ?? "").startsWith("Contenu conserv"))[0]!;
-  const resumedContext = findInput(tree, GRAPHIE_MOBILE_POV_CATALOGUE.sections[0]!.fields.find((field) => field.id === "intervention.contexte")!.labelFr)!;
+  const resumedContext = findInput(tree, GRAPHIE_MOBILE_POV_CATALOGUE.sections[0]!.fields.find((field) => field.id === "header.reportNumber")!.labelFr)!;
   await act(async () => { resumedLegacy.props.onChangeText("edited legacy notes"); resumedContext.props.onChangeText("current structured context"); });
   await act(async () => { assert.equal(await findButton(tree, "Enregistrer").props.onPress(), true); });
   const saved = JSON.parse(runtime.__draftRows!.get(key)!) as { payload: { catalogueId: string; catalogueVersion: string; schemaVersion: number; ruleId: string; ruleVersion: string; values: Record<string, string>; legacyContent?: string } };
   assert.deepEqual(
     { catalogueId: saved.payload.catalogueId, catalogueVersion: saved.payload.catalogueVersion, schemaVersion: saved.payload.schemaVersion, ruleId: saved.payload.ruleId, ruleVersion: saved.payload.ruleVersion },
-    { catalogueId: "graphie-mobile-pov", catalogueVersion: "1.0.0", schemaVersion: 2, ruleId: "cetem-workbook-explicit-formulas", ruleVersion: "1.0.0" },
+    { catalogueId: "graphie-mobile-pov", catalogueVersion: "2.0.0", schemaVersion: 3, ruleId: "cetem-workbook-explicit-formulas", ruleVersion: "1.0.0" },
   );
   assert.equal(saved.payload.legacyContent, "edited legacy notes");
-  assert.equal(saved.payload.values["intervention.contexte"], "current structured context");
+  assert.equal(saved.payload.values["header.reportNumber"], "current structured context");
   assert.equal(saved.payload.values[choiceField.id], selectedOption);
   await act(async () => { tree.unmount(); });
 
@@ -401,8 +401,8 @@ test("legacy notes and structured context survive save and restart independently
   await signIn(tree);
   await act(async () => { findTaskRow(tree, firstTask.establishment).props.onPress(); });
   assert.equal(findInput(tree, "Contenu conservé du brouillon précédent")?.props.value, "edited legacy notes");
-  assert.equal(findInput(tree, "Contexte du contrôle")?.props.value, "current structured context");
-  await act(async () => { findButton(tree, GRAPHIE_MOBILE_POV_CATALOGUE.sections.find((section) => section.id === "qualitative")!.labelFr).props.onPress(); });
+  assert.equal(findInput(tree, "N° rapport")?.props.value, "current structured context");
+  await act(async () => { findButton(tree, GRAPHIE_MOBILE_POV_CATALOGUE.sections.find((section) => section.id === "visual")!.labelFr).props.onPress(); });
   assert.equal(findChoice(tree, `${choiceField.labelFr}: ${selectedOption}, sélectionné`)?.props.accessibilityState.selected, true);
   await act(async () => { tree.unmount(); });
 });
@@ -435,7 +435,7 @@ test("employee saves locally, remounts offline to resume, and confirms or cancel
   await act(async () => { tree = create(<App />); });
   await signIn(tree);
   await act(async () => { findTaskRow(tree, firstTask.establishment).props.onPress(); });
-  const content = findInput(tree, "Contexte du contrôle");
+  const content = findInput(tree, "N° rapport");
   assert.ok(content);
   await act(async () => { content!.props.onChangeText("opaque local work"); });
   await act(async () => { await new Promise((resolve) => setTimeout(resolve, 550)); });
@@ -465,7 +465,7 @@ test("employee saves locally, remounts offline to resume, and confirms or cancel
   await act(async () => { tree = create(<App />); await new Promise((resolve) => setTimeout(resolve, 0)); });
   assert.ok(findText(tree, "Reprendre le brouillon local"));
   await act(async () => { (await waitForButton(tree, firstTask.id)).props.onPress(); for (let tick = 0; tick < 100; tick++) await new Promise((resolve) => setTimeout(resolve, 0)); });
-  const resumed = findInput(tree, "Contexte du contrôle");
+  const resumed = findInput(tree, "N° rapport");
   assert.equal(resumed?.props.value, "newer edit while save is pending");
   await act(async () => { findButton(tree, "Supprimer le brouillon local").props.onPress(); });
   assert.ok(findText(tree, "Supprimer ce brouillon local ? Cette action est définitive."));
@@ -495,9 +495,9 @@ test("continues an online-cached task across sections offline and resumes it wit
   await act(async () => { (await waitForButton(tree, firstTask.establishment)).props.onPress(); for (let tick = 0; tick < 100; tick++) await new Promise((resolve) => setTimeout(resolve, 0)); });
   assert.ok(findText(tree, firstTask.id));
   assert.ok(tree.root.findAll((node) => node.type === "Text" && node.children.join("").includes("Hors ligne")).length > 0);
-  const context = findInput(tree, GRAPHIE_MOBILE_POV_CATALOGUE.sections[0]!.fields.find((field) => field.id === "intervention.contexte")!.labelFr)!;
+  const context = findInput(tree, GRAPHIE_MOBILE_POV_CATALOGUE.sections[0]!.fields.find((field) => field.id === "header.reportNumber")!.labelFr)!;
   await act(async () => { context.props.onChangeText("offline continuation"); });
-  const qualitative = GRAPHIE_MOBILE_POV_CATALOGUE.sections.find((section) => section.id === "qualitative")!;
+  const qualitative = GRAPHIE_MOBILE_POV_CATALOGUE.sections.find((section) => section.id === "visual")!;
   await act(async () => { findButton(tree, qualitative.labelFr).props.onPress(); });
   const choice = qualitative.fields.find((field) => field.type === "choice")!;
   const option = choice.options![0]!;
@@ -510,7 +510,7 @@ test("continues an online-cached task across sections offline and resumes it wit
 
   await act(async () => { tree = create(<App />); await new Promise((resolve) => setTimeout(resolve, 0)); });
   await act(async () => { findButton(tree, firstTask.id).props.onPress(); for (let tick = 0; tick < 8; tick++) await new Promise((resolve) => setTimeout(resolve, 0)); });
-  assert.equal(findInput(tree, GRAPHIE_MOBILE_POV_CATALOGUE.sections[0]!.fields.find((field) => field.id === "intervention.contexte")!.labelFr)?.props.value, "offline continuation");
+  assert.equal(findInput(tree, GRAPHIE_MOBILE_POV_CATALOGUE.sections[0]!.fields.find((field) => field.id === "header.reportNumber")!.labelFr)?.props.value, "offline continuation");
   await act(async () => { findButton(tree, qualitative.labelFr).props.onPress(); });
   assert.equal(tree.root.findAll((node) => node.type === "Pressable" && node.props.accessibilityState?.selected === true && String(node.props.accessibilityLabel ?? "").startsWith(`${choice.labelFr}: ${option}`)).length, 1);
   assert.deepEqual(api.detailCalls, callsAfterOfflineStartup.details, "offline cached task navigation makes no task-detail requests");
@@ -531,7 +531,7 @@ test("offline timer autosave commits locally without API calls and survives rest
   await act(async () => { tree = create(<App />); await new Promise((resolve) => setTimeout(resolve, 0)); });
   const callsAfterOfflineStartup = { list: api.listCalls, session: api.sessionCalls, details: [...api.detailCalls] };
   await act(async () => { (await waitForButton(tree, firstTask.establishment)).props.onPress(); for (let tick = 0; tick < 100; tick++) await new Promise((resolve) => setTimeout(resolve, 0)); });
-  const field = GRAPHIE_MOBILE_POV_CATALOGUE.sections[0]!.fields.find((item) => item.id === "intervention.contexte")!;
+  const field = GRAPHIE_MOBILE_POV_CATALOGUE.sections[0]!.fields.find((item) => item.id === "header.reportNumber")!;
   await act(async () => { findInput(tree, field.labelFr)!.props.onChangeText("timer saved offline"); });
   await act(async () => { await new Promise((resolve) => setTimeout(resolve, 650)); });
   const key = `employee-1/${firstTask.id}`;
@@ -566,7 +566,7 @@ test("offline timer autosave still locks and preserves protected data after auth
     runtime.__networkOnline = false;
     await act(async () => { tree = create(<App />); await new Promise((resolve) => setTimeout(resolve, 0)); });
     await act(async () => { (await waitForButton(tree, firstTask.establishment)).props.onPress(); for (let tick = 0; tick < 100; tick++) await new Promise((resolve) => setTimeout(resolve, 0)); });
-    const field = GRAPHIE_MOBILE_POV_CATALOGUE.sections[0]!.fields.find((item) => item.id === "intervention.contexte")!;
+    const field = GRAPHIE_MOBILE_POV_CATALOGUE.sections[0]!.fields.find((item) => item.id === "header.reportNumber")!;
     await act(async () => { findInput(tree, field.labelFr)!.props.onChangeText("must not autosave after expiry"); });
     runtime.__testNow += 8 * 24 * 60 * 60 * 1000;
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 650)); });
@@ -833,7 +833,7 @@ test("task-cache write failure warns but does not strand an authorized online ed
   await signIn(tree);
   assert.ok(findText(tree, fr.employeeTasks.taskCacheFailed), "the list reports failed offline-context persistence");
   await act(async () => { findTaskRow(tree, firstTask.establishment).props.onPress(); for (let tick = 0; tick < 8; tick++) await new Promise((resolve) => setTimeout(resolve, 0)); });
-  const editor = findInput(tree, "Contexte du contrôle");
+  const editor = findInput(tree, "N° rapport");
   assert.equal(editor?.props.editable, true, "authorized server task and draft hydration complete despite the cache warning");
   assert.ok(findText(tree, fr.employeeTasks.taskCacheFailed));
   assert.ok(!runtime.__cachedTaskRows!.has(`employee-1/${firstTask.id}`), "failed cache write is not represented as offline availability");
@@ -1019,7 +1019,7 @@ test("hydration keeps an existing draft read-only until its committed revision i
   runtime.__draftRows!.set(`employee-1/${firstTask.id}`, JSON.stringify({
     id: "committed-draft", employeeId: "employee-1", taskId: firstTask.id,
     payloadSchemaVersion: 1, revision: 7,
-    payload: { catalogueId: "graphie-mobile-pov", catalogueVersion: "1.0.0", schemaVersion: 2, ruleId: "cetem-workbook-explicit-formulas", ruleVersion: "1.0.0", values: { "intervention.contexte": "durable content" } },
+    payload: { catalogueId: "graphie-mobile-pov", catalogueVersion: "2.0.0", schemaVersion: 3, ruleId: "cetem-workbook-explicit-formulas", ruleVersion: "1.0.0", values: { "header.reportNumber": "durable content" } },
     createdAt: 10, savedAt: 20,
   }));
   let beginRead!: () => void;
@@ -1031,7 +1031,7 @@ test("hydration keeps an existing draft read-only until its committed revision i
   await act(async () => { tree = create(<App />); });
   await signIn(tree);
   await act(async () => { findTaskRow(tree, firstTask.establishment).props.onPress(); await readStarted; });
-  const editor = () => findInput(tree, "Contexte du contrôle")!;
+  const editor = () => findInput(tree, "N° rapport")!;
   assert.equal(editor().props.editable, false);
   assert.equal(editor().props.value, "");
   assert.equal(findButton(tree, "Enregistrer").props.disabled, true);
@@ -1045,7 +1045,7 @@ test("hydration keeps an existing draft read-only until its committed revision i
   await act(async () => { editor().props.onChangeText("revision seven updated"); await findButton(tree, "Enregistrer").props.onPress(); });
   const committed = JSON.parse(runtime.__draftRows!.get(`employee-1/${firstTask.id}`)!) as { revision: number; payload: { values: Record<string, string> } };
   assert.equal(committed.revision, 8, "the hydrated revision is used as the save base");
-  assert.equal(committed.payload.values["intervention.contexte"], "revision seven updated");
+  assert.equal(committed.payload.values["header.reportNumber"], "revision seven updated");
   await act(async () => { tree.unmount(); });
 });
 
@@ -1468,4 +1468,285 @@ test("expired local grant blocks task fetch even when the server session remains
     Date.now = actualNow;
     delete runtime.__testNow;
   }
+});
+
+// Story 5.6: paper-form sections, tables and defaults.
+function sectionOf(id: string) {
+  return GRAPHIE_MOBILE_POV_CATALOGUE.sections.find((section) => section.id === id)!;
+}
+
+async function goToSection(tree: ReactTestRenderer, id: string) {
+  await act(async () => { findButton(tree, sectionOf(id).labelFr).props.onPress(); });
+}
+
+function findSectionHeading(tree: ReactTestRenderer, label: string) {
+  return tree.root.findAll((node) => node.type === "Text" && node.props.accessibilityRole === "header" && node.children.join("") === label)[0];
+}
+
+async function openFirstTaskAfterRestart() {
+  runtime.__secureValues = new Map();
+  let tree!: ReactTestRenderer;
+  await act(async () => { tree = create(<App />); });
+  await signIn(tree);
+  await act(async () => { findTaskRow(tree, firstTask.establishment).props.onPress(); });
+  return tree;
+}
+
+for (const [layout, width] of [["phone", 390], ["tablet", 1024]] as const) {
+  test(`${layout} section navigation reaches all 11 paper sections, ending with « Contrôle effectué par »`, async () => {
+    await loadApp();
+    installMocks();
+    runtime.__mobileTestWidth = width;
+    let tree!: ReactTestRenderer;
+    await act(async () => { tree = create(<App />); });
+    await signIn(tree);
+    await act(async () => { findTaskRow(tree, firstTask.establishment).props.onPress(); });
+    assert.equal(GRAPHIE_MOBILE_POV_CATALOGUE.sections.length, 11);
+    for (const section of GRAPHIE_MOBILE_POV_CATALOGUE.sections) {
+      await goToSection(tree, section.id);
+      assert.ok(findSectionHeading(tree, section.labelFr), `expected heading ${section.labelFr}`);
+    }
+    assert.equal(GRAPHIE_MOBILE_POV_CATALOGUE.sections.at(-1)!.labelFr, "Contrôle effectué par");
+    assert.ok(findInput(tree, "Nom et prénom"));
+    assert.ok(findInput(tree, "Qualité"));
+    assert.ok(findInput(tree, "Date de contrôle"));
+    for (const forbidden of ["Conforme", "À signaler", "Non vérifié", "concluant", "Conclusion générale", "Contrôle approuvé par", "Signature"]) {
+      assert.equal(tree.root.findAll((node) => node.type === "Text" && node.children.join("").includes(forbidden)).length, 0, forbidden);
+    }
+    await act(async () => { tree.unmount(); });
+  });
+}
+
+test("phone tables render one labelled group per row with unit-labelled decimal inputs; tablet lays cells out in a row", async () => {
+  await loadApp();
+  installMocks();
+  runtime.__mobileTestWidth = 390;
+  let tree!: ReactTestRenderer;
+  await act(async () => { tree = create(<App />); });
+  await signIn(tree);
+  await act(async () => { findTaskRow(tree, firstTask.establishment).props.onPress(); });
+  const isTouchTarget = (style: unknown) => (Array.isArray(style) ? style : [style]).flat().some((item) => item && typeof item === "object" && (item as { minHeight?: number }).minHeight! >= 44);
+  for (const option of tree.root.findAll((node) => node.type === "Pressable" && String(node.props.accessibilityLabel ?? "").startsWith("Nature de l'intervention: "))) {
+    assert.ok(isTouchTarget(option.props.style), "choice buttons are at least 44 pt");
+  }
+  const deviceGrids = [
+    ["equipment", ["Équipement", "Tube à rayons X", "Générateur HT"], ["Marque", "Modèle", "N° de série", "D.M.S"]],
+    ["instruments", ["KVp mètre", "Dosimètre", "Mètre-ruban"], ["Marque", "Modèle", "N° de série"]],
+  ] as const;
+  for (const [sectionId, devices, attributes] of deviceGrids) {
+    await goToSection(tree, sectionId);
+    for (const device of devices) {
+      const group = tree.root.findAll((node) => node.type === "View" && node.props.accessibilityLabel === device)[0];
+      assert.ok(group, `expected one group per device: ${device}`);
+      assert.deepEqual(group!.findAll((node) => node.type === "TextInput").map((node) => node.props.accessibilityLabel), attributes.map((attribute) => `${device} — ${attribute}`));
+    }
+  }
+  await goToSection(tree, "repeatability");
+  for (const row of [1, 2, 3, 4, 5]) {
+    const group = tree.root.findAll((node) => node.type === "View" && node.props.accessibilityLabel === `Mesure ${row}`)[0];
+    assert.ok(group, `expected row group Mesure ${row}`);
+    assert.ok(group!.findAll((node) => node.type === "Text" && node.children.join("") === `Mesure ${row}`).length > 0);
+    assert.equal(group!.findAll((node) => node.type === "TextInput").length, 3);
+    assert.equal((Array.isArray(group!.props.style) ? group!.props.style : [group!.props.style]).some((item: { flexDirection?: string } | false) => item && item.flexDirection === "row"), false, "phone rows stack their inputs");
+  }
+  const measured = findInput(tree, "Mesure 2 — kV mesuré (kV)");
+  assert.ok(measured);
+  assert.equal(measured!.props.keyboardType, "decimal-pad");
+  assert.ok(findInput(tree, "Mesure 5 — Kerma (mGy)"));
+  assert.ok(findText(tree, "Kerma (mGy)"), "units are visible on the input label");
+  assert.ok(findText(tree, "La mesure du kerma sera utilisée par la suite pour le contrôle de la reproductibilité et la répétabilité du rayonnement de sortie."));
+  assert.equal(findInput(tree, "mAs (mAs)")?.props.keyboardType, "decimal-pad");
+  assert.ok(findInput(tree, "mA max/2 (mA)"));
+  assert.equal(tree.root.findAll((node) => node.type === "TextInput" && /Kerma/.test(String(node.props.accessibilityLabel))).length, 5, "Kerma is entered once per repeatability row only");
+  await goToSection(tree, "voltageAccuracy");
+  for (const label of ["KV min", "KV", "KV max"]) assert.ok(findInput(tree, `${label} — kV affiché (kV)`), label);
+  await goToSection(tree, "linearity");
+  for (const row of [1, 2, 3]) assert.ok(findInput(tree, `Mesure ${row} — Kerma (dét) (mGy)`));
+  const inputLabels = tree.root.findAll((node) => node.type === "TextInput").map((node) => node.props.accessibilityLabel);
+  assert.deepEqual(inputLabels.slice(-3), ["mA max/2 (mA)", "DFC (distance foyer–chambre) (m)", "Commentaire"]);
+  for (const input of tree.root.findAll((node) => node.type === "TextInput")) {
+    assert.ok(isTouchTarget(input.props.style), "touch target is at least 44 pt");
+    if (!input.props.multiline) assert.equal(input.props.keyboardType, "decimal-pad", String(input.props.accessibilityLabel));
+  }
+  await act(async () => { tree.unmount(); });
+
+  installMocks();
+  runtime.__mobileTestWidth = 1024;
+  await act(async () => { tree = create(<App />); });
+  await signIn(tree);
+  await act(async () => { findTaskRow(tree, firstTask.establishment).props.onPress(); });
+  await goToSection(tree, "repeatability");
+  const tabletRow = tree.root.findAll((node) => node.type === "View" && node.props.accessibilityLabel === "Mesure 1")[0]!;
+  assert.ok((Array.isArray(tabletRow.props.style) ? tabletRow.props.style : [tabletRow.props.style]).some((item: { flexDirection?: string } | false) => item && item.flexDirection === "row"));
+  assert.ok(findInput(tree, "Mesure 1 — kV mesuré (kV)"));
+  await act(async () => { tree.unmount(); });
+});
+
+test("a new draft shows paper defaults that persist across restart, and a cleared default stays empty", async () => {
+  await loadApp();
+  installMocks();
+  const key = `employee-1/${firstTask.id}`;
+  let tree!: ReactTestRenderer;
+  await act(async () => { tree = create(<App />); });
+  await signIn(tree);
+  await act(async () => { findTaskRow(tree, firstTask.establishment).props.onPress(); });
+  assert.equal(findChoice(tree, "Nature de l'intervention: Convention, sélectionné")?.props.accessibilityState.selected, true);
+  assert.ok(findChoice(tree, "Nature de l'intervention: Demande ponctuelle"));
+  await goToSection(tree, "instruments");
+  for (const row of ["KVp mètre", "Dosimètre"]) {
+    assert.equal(findInput(tree, `${row} — Marque`)?.props.value, "Fluke Biomedical");
+    assert.equal(findInput(tree, `${row} — Modèle`)?.props.value, "8000");
+    assert.equal(findInput(tree, `${row} — N° de série`)?.props.value, "105991");
+  }
+  for (const attribute of ["Marque", "Modèle", "N° de série"]) assert.equal(findInput(tree, `Mètre-ruban — ${attribute}`)?.props.value, "");
+  await goToSection(tree, "voltageAccuracy");
+  assert.deepEqual(["KV min", "KV", "KV max"].map((row) => findInput(tree, `${row} — kV affiché (kV)`)?.props.value), ["50", "70", ""]);
+  await goToSection(tree, "linearity");
+  assert.deepEqual([1, 2, 3].map((row) => findInput(tree, `Mesure ${row} — mAs (mAs)`)?.props.value), ["10", "", ""]);
+  await goToSection(tree, "lightField");
+  assert.deepEqual(["kV (kV)", "mAs (mAs)", "D.F.R (distance foyer–récepteur) (m)"].map((label) => findInput(tree, label)?.props.value), ["70", "4", "1"]);
+  assert.equal(runtime.__draftRows!.has(key), false, "seeding alone does not write a draft");
+  await goToSection(tree, "repeatability");
+  assert.deepEqual([1, 2, 3, 4, 5].map((row) => findInput(tree, `Mesure ${row} — kV affiché (kV)`)?.props.value), ["70", "70", "70", "70", "70"]);
+  await act(async () => { findInput(tree, "Mesure 3 — kV affiché (kV)")!.props.onChangeText(""); });
+  await act(async () => { assert.equal(await findButton(tree, "Enregistrer").props.onPress(), true); });
+  const saved = JSON.parse(runtime.__draftRows!.get(key)!) as { payload: { values: Record<string, string> } };
+  assert.equal(saved.payload.values["voltage.repeatability.row3.kvDisplayed"], "");
+  assert.equal(saved.payload.values["instruments.dosimeter.brand"], "Fluke Biomedical");
+  assert.equal(saved.payload.values["header.interventionNature"], "Convention");
+  await act(async () => { tree.unmount(); });
+
+  tree = await openFirstTaskAfterRestart();
+  assert.equal(findChoice(tree, "Nature de l'intervention: Convention, sélectionné")?.props.accessibilityState.selected, true);
+  await goToSection(tree, "repeatability");
+  assert.deepEqual([1, 2, 3, 4, 5].map((row) => findInput(tree, `Mesure ${row} — kV affiché (kV)`)?.props.value), ["70", "70", "", "70", "70"]);
+  await goToSection(tree, "instruments");
+  assert.equal(findInput(tree, "KVp mètre — Marque")?.props.value, "Fluke Biomedical");
+  await act(async () => { tree.unmount(); });
+});
+
+test("a new draft opened offline from the cached task list is seeded with the paper defaults", async () => {
+  await loadApp();
+  installMocks();
+  const key = `employee-1/${firstTask.id}`;
+  let tree!: ReactTestRenderer;
+  await act(async () => { tree = create(<App />); });
+  await signIn(tree);
+  await act(async () => { tree.unmount(); });
+
+  runtime.__networkOnline = false;
+  await act(async () => { tree = create(<App />); await new Promise((resolve) => setTimeout(resolve, 0)); });
+  await act(async () => { (await waitForButton(tree, firstTask.establishment)).props.onPress(); for (let tick = 0; tick < 100; tick++) await new Promise((resolve) => setTimeout(resolve, 0)); });
+  assert.equal(runtime.__draftRows!.has(key), false);
+  assert.equal(findChoice(tree, "Nature de l'intervention: Convention, sélectionné")?.props.accessibilityState.selected, true);
+  await goToSection(tree, "instruments");
+  assert.deepEqual(["Marque", "Modèle", "N° de série"].map((attribute) => findInput(tree, `KVp mètre — ${attribute}`)?.props.value), ["Fluke Biomedical", "8000", "105991"]);
+  await goToSection(tree, "repeatability");
+  assert.equal(findInput(tree, "Mesure 1 — kV affiché (kV)")?.props.value, "70");
+  await act(async () => { assert.equal(await findButton(tree, "Enregistrer").props.onPress(), true); });
+  const saved = JSON.parse(runtime.__draftRows!.get(key)!) as { payload: { values: Record<string, string> } };
+  assert.equal(saved.payload.values["header.interventionNature"], "Convention");
+  assert.equal(saved.payload.values["instruments.kvpMeter.serial"], "105991");
+  await act(async () => { tree.unmount(); });
+});
+
+test("table cells and light-field gaps survive save, restart and resume as exact strings", async () => {
+  await loadApp();
+  installMocks();
+  let tree!: ReactTestRenderer;
+  await act(async () => { tree = create(<App />); });
+  await signIn(tree);
+  await act(async () => { findTaskRow(tree, firstTask.establishment).props.onPress(); });
+  const entries: [string, string, string][] = [
+    ["voltageAccuracy", "KV max — kV affiché (kV)", "90"],
+    ["voltageAccuracy", "KV min — kV mesuré (kV)", "49,2"],
+    ["repeatability", "Mesure 2 — kV mesuré (kV)", "69,7"],
+    ["repeatability", "Mesure 5 — Kerma (mGy)", "0.123"],
+    ["repeatability", "mAs (mAs)", "20"],
+    ["linearity", "Mesure 3 — Kerma (dét) (mGy)", "1,308"],
+    ["linearity", "DFC (distance foyer–chambre) (m)", "0,7"],
+    ["lightField", "Écart 1 (mm)", "2"],
+    ["lightField", "Écart 4 (mm)", "-1,5"],
+    ["equipment", "Tube à rayons X — Marque", "Varian"],
+    ["controlPerformedBy", "Date de contrôle", "2026-10-02"],
+  ];
+  for (const [section, label, value] of entries) {
+    await goToSection(tree, section);
+    const input = findInput(tree, label);
+    assert.ok(input, label);
+    await act(async () => { input!.props.onChangeText(value); });
+  }
+  await act(async () => { assert.equal(await findButton(tree, "Enregistrer").props.onPress(), true); });
+  const saved = JSON.parse(runtime.__draftRows!.get(`employee-1/${firstTask.id}`)!) as { payload: { values: Record<string, string> } };
+  assert.equal(saved.payload.values["voltage.repeatability.row2.kvMeasured"], "69,7");
+  assert.equal(saved.payload.values["lightField.gap4"], "-1,5");
+  assert.equal(saved.payload.values["equipment.tube.brand"], "Varian");
+  await act(async () => { tree.unmount(); });
+
+  tree = await openFirstTaskAfterRestart();
+  for (const [section, label, value] of entries) {
+    await goToSection(tree, section);
+    assert.equal(findInput(tree, label)?.props.value, value, label);
+  }
+  await act(async () => { tree.unmount(); });
+});
+
+test("visual and mechanical checks offer N.A / Oui / Non touch buttons with exposed, persisted selection", async () => {
+  await loadApp();
+  installMocks();
+  let tree!: ReactTestRenderer;
+  await act(async () => { tree = create(<App />); });
+  await signIn(tree);
+  await act(async () => { findTaskRow(tree, firstTask.establishment).props.onPress(); });
+  await goToSection(tree, "visual");
+  for (const field of sectionOf("visual").fields) {
+    const options = tree.root.findAll((node) => node.type === "Pressable" && String(node.props.accessibilityLabel ?? "").startsWith(`${field.labelFr}: `));
+    assert.deepEqual(options.map((node) => node.props.accessibilityLabel), ["N.A", "Oui", "Non"].map((option) => `${field.labelFr}: ${option}`), "blank is the initial unanswered state");
+    assert.equal(options.some((node) => node.props.accessibilityState.selected), false, field.id);
+  }
+  await act(async () => { findChoice(tree, "Intégrité de l'appareil, bon état des couvercles: Oui")!.props.onPress(); });
+  await act(async () => { findChoice(tree, "Intégrité de l'appareil, bon état des couvercles: Oui, sélectionné")!.props.onPress(); });
+  assert.equal(findChoice(tree, "Intégrité de l'appareil, bon état des couvercles: Oui, sélectionné"), undefined, "tapping the selected option returns to unanswered");
+  assert.equal(tree.root.findAll((node) => node.type === "TextInput" && node.props.multiline).length, 0, "no comment field in visual checks");
+  await act(async () => { findChoice(tree, "Propreté générale: N.A")!.props.onPress(); });
+  await goToSection(tree, "mechanical");
+  await act(async () => { findChoice(tree, "Contrôle des freins: Non")!.props.onPress(); });
+  const selected = findChoice(tree, "Contrôle des freins: Non, sélectionné")!;
+  assert.equal(selected.props.accessibilityState.selected, true);
+  assert.ok(selected.findAll((node) => node.type === "Text" && node.children.join("").includes("sélectionné")).length > 0);
+  await act(async () => { assert.equal(await findButton(tree, "Enregistrer").props.onPress(), true); });
+  const saved = JSON.parse(runtime.__draftRows!.get(`employee-1/${firstTask.id}`)!) as { payload: { values: Record<string, string> } };
+  assert.equal(saved.payload.values["visual.integrity"], "");
+  await act(async () => { tree.unmount(); });
+
+  tree = await openFirstTaskAfterRestart();
+  await goToSection(tree, "mechanical");
+  assert.equal(findChoice(tree, "Contrôle des freins: Non, sélectionné")?.props.accessibilityState.selected, true);
+  assert.equal(findChoice(tree, "Contrôle des mouvements: Oui, sélectionné"), undefined);
+  await goToSection(tree, "visual");
+  assert.equal(findChoice(tree, "Propreté générale: N.A, sélectionné")?.props.accessibilityState.selected, true);
+  await act(async () => { tree.unmount(); });
+});
+
+test("a stored catalogue 1.0.0 / schema 2 draft shows the compatibility notice, renders no values and keeps its bytes", async () => {
+  await loadApp();
+  installMocks();
+  const key = `employee-1/${firstTask.id}`;
+  const storedRow = JSON.stringify({
+    id: "v1-form", employeeId: "employee-1", taskId: firstTask.id,
+    payloadSchemaVersion: 1, revision: 4, createdAt: 10, savedAt: 20,
+    payload: { catalogueId: "graphie-mobile-pov", catalogueVersion: "1.0.0", schemaVersion: 2, ruleId: "cetem-workbook-explicit-formulas", ruleVersion: "1.0.0", values: { "intervention.contexte": "v1 context", "voltage.accuracy": "49.2", "qualitative.0": "Conforme" } },
+  });
+  runtime.__draftRows!.set(key, storedRow);
+  let tree!: ReactTestRenderer;
+  await act(async () => { tree = create(<App />); });
+  await signIn(tree);
+  await act(async () => { findTaskRow(tree, firstTask.establishment).props.onPress(); });
+  assert.ok(findText(tree, fr.employeeTasks.draftCompatibilityUnavailable));
+  assert.equal(tree.root.findAll((node) => node.type === "TextInput").some((node) => ["v1 context", "49.2", "Fluke Biomedical", "Convention"].includes(String(node.props.value ?? ""))), false);
+  assert.equal(tree.root.findAll((node) => node.type === "Pressable" && node.props.accessibilityState?.selected === true && String(node.props.accessibilityLabel ?? "").includes(":")).length, 0);
+  assert.equal(findButton(tree, "Enregistrer").props.disabled, true);
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 600)); });
+  assert.equal(runtime.__draftRows!.get(key), storedRow);
+  await act(async () => { tree.unmount(); });
 });

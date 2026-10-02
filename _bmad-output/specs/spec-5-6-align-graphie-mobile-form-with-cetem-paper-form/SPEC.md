@@ -1,7 +1,8 @@
 ---
 id: SPEC-5-6-align-graphie-mobile-form-with-cetem-paper-form
 story: 5.6
-status: ready-for-dev
+status: done
+baseline_commit: fe4a44ef9890216d480f0ee074f0f3125233cb96
 approved: 2026-10-02
 companions:
   - field-catalogue.md

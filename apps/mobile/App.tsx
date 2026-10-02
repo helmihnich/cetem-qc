@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from "react";
-import { ActivityIndicator, AppState, Pressable, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from "react-native";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { ActivityIndicator, AppState, Pressable, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View, type StyleProp, type ViewStyle } from "react-native";
 import * as Network from "expo-network";
 import * as Crypto from "expo-crypto";
 import { ApiRequestError, createApiClient } from "@cetem-qc/api-client/v1";
@@ -17,7 +17,8 @@ import { createSqliteDraftDatabase } from "./local-drafts/sqlite-draft-database"
 import { createAuthorizedDrafts } from "./local-drafts/authorized-drafts";
 import { DraftListCorruptionError, LocalDraftPayloadCompatibilityError, type LocalDraft } from "./local-drafts/model";
 import { runOnlyWhenOnlineAuthorized, ServerWorkAuthorizationError } from "./server-work-authorization";
-import { GRAPHIE_CALCULATION_RULE_ID, GRAPHIE_CALCULATION_RULE_VERSION, GRAPHIE_MOBILE_POV_CATALOGUE, GraphiePayloadCompatibilityError, parseGraphiePayload, type CatalogueField, type GraphieFormValues } from "./graphie-pov-catalogue";
+import { GRAPHIE_CALCULATION_RULE_ID, GRAPHIE_CALCULATION_RULE_VERSION, GRAPHIE_MOBILE_POV_CATALOGUE, GraphiePayloadCompatibilityError, createNewGraphieDraftValues, parseGraphiePayload, type CatalogueField, type CatalogueSection, type CatalogueTable, type GraphieFormValues } from "./graphie-pov-catalogue";
+import type { EmployeeTaskLayout } from "./employee-task-layout";
 
 declare const process: { env: { EXPO_PUBLIC_API_URL?: string; EXPO_PUBLIC_OFFLINE_AUTHORIZATION_WINDOW_DAYS?: string } };
 
@@ -289,7 +290,7 @@ export default function App() {
       setActiveDraft(draft ?? undefined);
       draftRevisionRef.current = draft?.revision ?? 0;
       draftRevisionByScopeRef.current.set(`${user.id}\u0000${taskId}`, draft?.revision ?? 0);
-      const parsed = draft ? parseGraphiePayload(draft.payload) : { values: {} as GraphieFormValues, legacyContent: undefined as string | undefined };
+      const parsed = draft ? parseGraphiePayload(draft.payload) : { values: createNewGraphieDraftValues(), legacyContent: undefined as string | undefined };
       setDraftContent(parsed.legacyContent ?? "");
       draftContentRef.current = parsed.legacyContent ?? "";
       legacyContentModeRef.current = parsed.legacyContent !== undefined;
@@ -668,7 +669,7 @@ export default function App() {
           setActiveDraft(draft ?? undefined);
           draftRevisionRef.current = draft?.revision ?? 0;
           draftRevisionByScopeRef.current.set(`${user.id}\u0000${id}`, draft?.revision ?? 0);
-          const parsed = draft ? parseGraphiePayload(draft.payload) : { values: {} as GraphieFormValues, legacyContent: undefined as string | undefined };
+          const parsed = draft ? parseGraphiePayload(draft.payload) : { values: createNewGraphieDraftValues(), legacyContent: undefined as string | undefined };
           setDraftContent(parsed.legacyContent ?? "");
           draftContentRef.current = parsed.legacyContent ?? "";
           legacyContentModeRef.current = parsed.legacyContent !== undefined;
@@ -764,7 +765,7 @@ export default function App() {
         pendingCachedOpenRef.current = undefined;
         return;
       }
-      const parsed = draft ? parseGraphiePayload(draft.payload) : { values: {} as GraphieFormValues, legacyContent: undefined as string | undefined };
+      const parsed = draft ? parseGraphiePayload(draft.payload) : { values: createNewGraphieDraftValues(), legacyContent: undefined as string | undefined };
       setActiveDraft(draft ?? undefined);
       draftRevisionRef.current = draft?.revision ?? 0;
       draftRevisionByScopeRef.current.set(`${user.id}\u0000${cached.id}`, draft?.revision ?? 0);
@@ -985,12 +986,7 @@ export default function App() {
                     <View style={styles.sectionNavigation}>{GRAPHIE_MOBILE_POV_CATALOGUE.sections.map((section) => <Pressable key={section.id} accessibilityRole="button" accessibilityState={{ selected: section.id === activeSectionId }} onPress={() => { setActiveSectionId(section.id); if (draftSaveState === "saving") void saveDraft(); }} style={styles.sectionButton}><Text style={styles.muted}>{section.labelFr}</Text></Pressable>)}</View>
                     {draftHydration === "loading" ? <Text accessibilityRole="summary" style={styles.muted}>{fr.common.loading}</Text> : null}
                     {legacyContentMode ? <Field label={fr.employeeTasks.legacyDraftContent} value={draftContent} onChangeText={changeDraftContent} editable={draftHydration === "ready" && !draftDeletingRef.current && !deleteDraftConfirmation} multiline /> : null}
-                    {GRAPHIE_MOBILE_POV_CATALOGUE.sections.filter((section) => section.id === activeSectionId).map((section) => <View key={section.id} style={{ gap: 10, paddingTop: 8 }}>
-                      <Text style={styles.heading}>{section.labelFr}</Text>
-                      {section.fields.map((field) => field.type === "choice"
-                        ? <ChoiceField key={field.id} field={field} value={formValues[field.id] ?? ""} onSelect={(value) => changeFormField(field.id, value)} editable={draftHydration === "ready" && !draftDeletingRef.current && !deleteDraftConfirmation} />
-                        : <Field key={field.id} label={`${field.labelFr}${field.unit ? ` (${field.unit})` : ""}`} value={formValues[field.id] ?? ""} onChangeText={(value) => changeFormField(field.id, value)} editable={draftHydration === "ready" && !draftDeletingRef.current && !deleteDraftConfirmation} keyboardType={field.type === "number" ? "decimal-pad" : undefined} multiline={field.type === "textarea"} />)}
-                    </View>)}
+                    {GRAPHIE_MOBILE_POV_CATALOGUE.sections.filter((section) => section.id === activeSectionId).map((section) => <GraphieSectionForm key={section.id} section={section} layout={layout} values={formValues} onChange={changeFormField} editable={draftHydration === "ready" && !draftDeletingRef.current && !deleteDraftConfirmation} />)}
                     <Text accessibilityRole={draftSaveState === "failed" ? "alert" : "summary"} style={draftSaveState === "failed" ? styles.error : styles.muted}>
                       {draftSaveState === "failed" ? fr.employeeTasks.saveFailed : draftSaveState === "saving" ? fr.employeeTasks.savingDraft : draftSaveState === "saved" ? fr.employeeTasks.savedLocally : fr.workflow.draft}
                     </Text>
@@ -1010,12 +1006,7 @@ export default function App() {
                   {legacyContentMode ? <Field label={fr.employeeTasks.legacyDraftContent} value={draftContent} onChangeText={changeDraftContent} editable={draftHydration === "ready" && !draftDeletingRef.current && !deleteDraftConfirmation} multiline /> : null}
                   <Text style={styles.heading}>{fr.employeeTasks.sectionNavigation}</Text>
                   <View style={styles.sectionNavigation}>{GRAPHIE_MOBILE_POV_CATALOGUE.sections.map((section) => <Pressable key={section.id} accessibilityRole="button" accessibilityState={{ selected: section.id === activeSectionId }} onPress={() => { setActiveSectionId(section.id); if (draftSaveState === "saving") void saveDraft(); }} style={styles.sectionButton}><Text style={styles.muted}>{section.labelFr}</Text></Pressable>)}</View>
-                  {GRAPHIE_MOBILE_POV_CATALOGUE.sections.filter((section) => section.id === activeSectionId).map((section) => <View key={section.id} style={{ gap: 10, paddingTop: 8 }}>
-                    <Text style={styles.heading}>{section.labelFr}</Text>
-                    {section.fields.map((field) => field.type === "choice"
-                      ? <ChoiceField key={field.id} field={field} value={formValues[field.id] ?? ""} onSelect={(value) => changeFormField(field.id, value)} editable={draftHydration === "ready" && !draftDeletingRef.current && !deleteDraftConfirmation} />
-                      : <Field key={field.id} label={`${field.labelFr}${field.unit ? ` (${field.unit})` : ""}`} value={formValues[field.id] ?? ""} onChangeText={(value) => changeFormField(field.id, value)} editable={draftHydration === "ready" && !draftDeletingRef.current && !deleteDraftConfirmation} keyboardType={field.type === "number" ? "decimal-pad" : undefined} multiline={field.type === "textarea"} />)}
-                  </View>)}
+                  {GRAPHIE_MOBILE_POV_CATALOGUE.sections.filter((section) => section.id === activeSectionId).map((section) => <GraphieSectionForm key={section.id} section={section} layout={layout} values={formValues} onChange={changeFormField} editable={draftHydration === "ready" && !draftDeletingRef.current && !deleteDraftConfirmation} />)}
                   <Text accessibilityRole={draftSaveState === "failed" ? "alert" : "summary"} style={draftSaveState === "failed" ? styles.error : styles.muted}>
                     {draftSaveState === "failed" ? fr.employeeTasks.saveFailed : draftSaveState === "saving" ? fr.employeeTasks.savingDraft : fr.employeeTasks.savedLocally}
                   </Text>
@@ -1041,18 +1032,81 @@ export default function App() {
   );
 }
 
-function Field(props: { label: string; value: string; onChangeText: (value: string) => void; secureTextEntry?: boolean; autoCapitalize?: "none" | "sentences"; keyboardType?: "email-address" | "decimal-pad"; editable?: boolean; multiline?: boolean }) {
-  return <View style={styles.field}><Text style={styles.label}>{props.label}</Text><TextInput accessibilityLabel={props.label} style={[styles.input, props.multiline && { minHeight: 84, textAlignVertical: "top" }]} value={props.value} onChangeText={props.onChangeText} editable={props.editable} secureTextEntry={props.secureTextEntry} autoCapitalize={props.autoCapitalize} keyboardType={props.keyboardType} multiline={props.multiline} autoCorrect={false} /></View>;
+function Field(props: { label: string; value: string; onChangeText: (value: string) => void; secureTextEntry?: boolean; autoCapitalize?: "none" | "sentences"; keyboardType?: "email-address" | "decimal-pad"; editable?: boolean; multiline?: boolean; accessibilityLabel?: string; helpFr?: string; style?: StyleProp<ViewStyle> }) {
+  return <View style={[styles.field, props.style]}>
+    <Text style={styles.label}>{props.label}</Text>
+    {props.helpFr ? <Text style={styles.help}>{props.helpFr}</Text> : null}
+    <TextInput accessibilityLabel={props.accessibilityLabel ?? props.label} accessibilityHint={props.helpFr} style={[styles.input, props.multiline && { minHeight: 84, textAlignVertical: "top" }]} value={props.value} onChangeText={props.onChangeText} editable={props.editable} secureTextEntry={props.secureTextEntry} autoCapitalize={props.autoCapitalize} keyboardType={props.keyboardType} multiline={props.multiline} autoCorrect={false} />
+  </View>;
+}
+
+const fieldLabel = (field: CatalogueField) => `${field.labelFr}${field.unit ? ` (${field.unit})` : ""}`;
+
+function CatalogueInput(props: { field: CatalogueField; value: string; onChange: (fieldId: string, value: string) => void; editable: boolean; rowLabelFr?: string; style?: StyleProp<ViewStyle> }) {
+  const { field } = props;
+  if (field.type === "choice") return <ChoiceField field={field} value={props.value} onSelect={(value) => props.onChange(field.id, value)} editable={props.editable} />;
+  const label = fieldLabel(field);
+  return <Field
+    label={label}
+    accessibilityLabel={props.rowLabelFr ? `${props.rowLabelFr} — ${label}` : label}
+    helpFr={field.helpFr}
+    value={props.value}
+    onChangeText={(value) => props.onChange(field.id, value)}
+    editable={props.editable}
+    keyboardType={field.type === "number" ? "decimal-pad" : undefined}
+    multiline={field.type === "textarea"}
+    style={props.style}
+  />;
+}
+
+/** Renders one catalogue section in field order; table cells render as one labelled group per paper row. */
+function GraphieSectionForm(props: { section: CatalogueSection; layout: EmployeeTaskLayout; values: GraphieFormValues; onChange: (fieldId: string, value: string) => void; editable: boolean }) {
+  const { section } = props;
+  const tableByFieldId = new Map<string, CatalogueTable>();
+  for (const table of section.tables ?? []) for (const id of table.fieldIds.flat()) tableByFieldId.set(id, table);
+  const renderedTables = new Set<string>();
+  const items: ReactNode[] = [];
+  for (const field of section.fields) {
+    const table = tableByFieldId.get(field.id);
+    if (!table) {
+      items.push(<CatalogueInput key={field.id} field={field} value={props.values[field.id] ?? ""} onChange={props.onChange} editable={props.editable} />);
+    } else if (!renderedTables.has(table.id)) {
+      renderedTables.add(table.id);
+      items.push(<GraphieTable key={`table:${table.id}`} table={table} fields={section.fields} layout={props.layout} values={props.values} onChange={props.onChange} editable={props.editable} />);
+    }
+  }
+  return <View style={{ gap: 10, paddingTop: 8 }}>
+    <Text accessibilityRole="header" style={styles.heading}>{section.labelFr}</Text>
+    {items}
+  </View>;
+}
+
+function GraphieTable(props: { table: CatalogueTable; fields: readonly CatalogueField[]; layout: EmployeeTaskLayout; values: GraphieFormValues; onChange: (fieldId: string, value: string) => void; editable: boolean }) {
+  const { table } = props;
+  const fieldById = new Map(props.fields.map((field) => [field.id, field]));
+  const tablet = props.layout === "tablet";
+  return <View style={{ gap: 10 }}>
+    {table.helpFr ? <Text style={styles.help}>{table.helpFr}</Text> : null}
+    {table.fieldIds.map((row, rowIndex) => {
+      const rowLabel = table.rowLabelsFr[rowIndex]!;
+      return <View key={`${table.id}:${rowIndex}`} accessibilityLabel={rowLabel} style={[styles.tableRow, tablet && styles.tableRowTablet]}>
+        <Text accessibilityRole="header" style={[styles.tableRowLabel, tablet && styles.tableRowLabelTablet]}>{rowLabel}</Text>
+        <View style={tablet ? styles.tableCellsTablet : styles.tableCellsPhone}>
+          {row.map((id) => <CatalogueInput key={id} field={fieldById.get(id)!} rowLabelFr={rowLabel} value={props.values[id] ?? ""} onChange={props.onChange} editable={props.editable} style={tablet ? styles.tableCellTablet : undefined} />)}
+        </View>
+      </View>;
+    })}
+  </View>;
 }
 
 function ChoiceField(props: { field: CatalogueField; value: string; onSelect: (value: string) => void; editable?: boolean }) {
-  const label = `${props.field.labelFr}${props.field.unit ? ` (${props.field.unit})` : ""}`;
+  const label = fieldLabel(props.field);
   return <View style={styles.field}>
     <Text style={styles.label}>{label}</Text>
-    <View style={{ gap: 8 }}>
+    <View style={styles.choiceOptions}>
       {(props.field.options ?? []).map((option) => {
         const selected = props.value === option;
-        return <Pressable key={option} accessibilityRole="button" accessibilityLabel={`${label}: ${option}${selected ? ", sélectionné" : ""}`} accessibilityState={{ selected, disabled: !props.editable }} disabled={!props.editable} onPress={() => props.onSelect(option)} style={[styles.choiceOption, selected && styles.choiceOptionSelected, !props.editable && styles.disabled]}>
+        return <Pressable key={option} accessibilityRole="button" accessibilityLabel={`${label}: ${option}${selected ? ", sélectionné" : ""}`} accessibilityState={{ selected, disabled: !props.editable }} disabled={!props.editable} onPress={() => props.onSelect(selected ? "" : option)} style={[styles.choiceOption, selected && styles.choiceOptionSelected, !props.editable && styles.disabled]}>
           <Text style={[styles.buttonText, selected && styles.choiceOptionSelectedText]}>{option}{selected ? " · sélectionné" : ""}</Text>
         </Pressable>;
       })}
@@ -1081,7 +1135,16 @@ const styles = StyleSheet.create({
   field: { gap: 7 },
   label: { color: "#3e554b", fontSize: 13, fontWeight: "700" },
   input: { minHeight: 48, borderColor: "#cbd8d0", borderWidth: 1, borderRadius: 10, paddingHorizontal: 12, color: "#17352c", fontSize: 16 },
-  choiceOption: { minHeight: 44, justifyContent: "center", borderColor: "#cbd8d0", borderWidth: 1, borderRadius: 10, paddingHorizontal: 12, backgroundColor: "#fff" },
+  help: { color: "#5b6e65", fontSize: 13, lineHeight: 18, fontStyle: "italic" },
+  tableRow: { gap: 10, borderWidth: 1, borderColor: "#e1e9e4", borderRadius: 12, padding: 12 },
+  tableRowTablet: { flexDirection: "row", alignItems: "flex-start", gap: 14 },
+  tableRowLabel: { color: "#17352c", fontSize: 16, fontWeight: "700" },
+  tableRowLabelTablet: { width: 120, paddingTop: 30 },
+  tableCellsPhone: { gap: 10 },
+  tableCellsTablet: { flex: 1, flexDirection: "row", flexWrap: "wrap", gap: 12 },
+  tableCellTablet: { flexGrow: 1, flexBasis: 140 },
+  choiceOptions: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  choiceOption: { flexGrow: 1, minHeight: 44, justifyContent: "center", borderColor: "#cbd8d0", borderWidth: 1, borderRadius: 10, paddingHorizontal: 12, backgroundColor: "#fff" },
   choiceOptionSelected: { borderColor: "#135c4c", backgroundColor: "#dceee8" },
   choiceOptionSelectedText: { color: "#135c4c" },
   button: { minHeight: 48, justifyContent: "center", alignItems: "center", borderRadius: 10, backgroundColor: "#135c4c", paddingHorizontal: 16 },

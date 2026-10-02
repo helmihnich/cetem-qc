@@ -117,8 +117,8 @@ test("calculation context rejects unsupported catalogue, schema, and rule versio
     context,
   });
   const catalogueIdMismatch = { ...GRAPHIE_CALCULATION_IDENTITY, catalogueId: "unknown-catalogue" };
-  const catalogueMismatch = { ...GRAPHIE_CALCULATION_IDENTITY, catalogueVersion: "2.0.0" };
-  const schemaMismatch = { ...GRAPHIE_CALCULATION_IDENTITY, schemaVersion: 3 };
+  const catalogueMismatch = { ...GRAPHIE_CALCULATION_IDENTITY, catalogueVersion: "1.0.0" };
+  const schemaMismatch = { ...GRAPHIE_CALCULATION_IDENTITY, schemaVersion: 2 };
   const ruleIdMismatch = { ...GRAPHIE_CALCULATION_IDENTITY, ruleId: "other-calculation-rules" };
   const ruleMismatch = { ...GRAPHIE_CALCULATION_IDENTITY, ruleVersion: "2.0.0" };
 

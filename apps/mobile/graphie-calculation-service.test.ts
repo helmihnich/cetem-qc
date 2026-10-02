@@ -39,8 +39,8 @@ test("draft adapter forwards raw numeric text without formatting and rejects inc
 test("mobile calculation adapter rejects every mismatched or missing identity dimension", () => {
   const mismatches = [
     { catalogueId: "other-catalogue" },
-    { catalogueVersion: "2.0.0" },
-    { schemaVersion: 3 },
+    { catalogueVersion: "1.0.0" },
+    { schemaVersion: 2 },
     { ruleId: "other-rules" },
     { ruleVersion: "2.0.0" },
     { ruleVersion: undefined },

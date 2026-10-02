@@ -1,7 +1,7 @@
 /** Shared Graphie payload identity contract used by the catalogue and calculation boundary. */
 export const GRAPHIE_CATALOGUE_ID = "graphie-mobile-pov" as const;
-export const GRAPHIE_CATALOGUE_VERSION = "1.0.0" as const;
-export const GRAPHIE_FORM_SCHEMA_VERSION = 2 as const;
+export const GRAPHIE_CATALOGUE_VERSION = "2.0.0" as const;
+export const GRAPHIE_FORM_SCHEMA_VERSION = 3 as const;
 
 export const GRAPHIE_CALCULATION_RULE_ID = "cetem-workbook-explicit-formulas" as const;
 export const GRAPHIE_CALCULATION_RULE_VERSION = "1.0.0" as const;
