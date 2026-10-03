@@ -7,6 +7,7 @@
     "typecheck": "tsc --noEmit",
     "db:migrate": "tsx src/db/migrate.ts",
     "bootstrap:responsable": "tsx src/scripts/bootstrap-responsable.ts",
+    "test": "node --import tsx --test src/modules/calculations/calculations.test.ts",
     "test:calculations": "node --import tsx --test src/modules/calculations/calculations.test.ts"
   },
   "dependencies": {

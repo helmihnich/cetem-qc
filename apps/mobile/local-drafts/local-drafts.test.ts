@@ -91,7 +91,7 @@ test("preserves Story 5.3 opaque content and persists versioned form payloads wi
   const f = fixture();
   const drafts = f.repository();
   const legacy = await drafts.save("employee-a", "task-a", "opaque first content");
-  const form = { catalogueId: "graphie-mobile-pov", catalogueVersion: "2.0.0", schemaVersion: 3, ruleId: "cetem-workbook-explicit-formulas", ruleVersion: "1.0.0", values: { "controlPerformedBy.dateControle": "2026-10-01T00:00:00.000000001Z", "voltage.repeatability.row2.kvMeasured": "69,7" } };
+  const form = { catalogueId: "graphie-mobile-pov", catalogueVersion: "2.0.0", schemaVersion: 3, ruleId: "cetem-paper-form", ruleVersion: "2.0.0", values: { "controlPerformedBy.dateControle": "2026-10-01T00:00:00.000000001Z", "voltage.repeatability.row2.kvMeasured": "69,7" } };
   const revised = await drafts.save("employee-a", "task-a", form, legacy.revision);
   assert.equal(revised.revision, legacy.revision + 1);
   assert.deepEqual((await f.repository().read("employee-a", "task-a"))?.payload, form);

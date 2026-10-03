@@ -388,7 +388,7 @@ test("legacy notes and structured context survive save and restart independently
   const saved = JSON.parse(runtime.__draftRows!.get(key)!) as { payload: { catalogueId: string; catalogueVersion: string; schemaVersion: number; ruleId: string; ruleVersion: string; values: Record<string, string>; legacyContent?: string } };
   assert.deepEqual(
     { catalogueId: saved.payload.catalogueId, catalogueVersion: saved.payload.catalogueVersion, schemaVersion: saved.payload.schemaVersion, ruleId: saved.payload.ruleId, ruleVersion: saved.payload.ruleVersion },
-    { catalogueId: "graphie-mobile-pov", catalogueVersion: "2.0.0", schemaVersion: 3, ruleId: "cetem-workbook-explicit-formulas", ruleVersion: "1.0.0" },
+    { catalogueId: "graphie-mobile-pov", catalogueVersion: "2.0.0", schemaVersion: 3, ruleId: "cetem-paper-form", ruleVersion: "2.0.0" },
   );
   assert.equal(saved.payload.legacyContent, "edited legacy notes");
   assert.equal(saved.payload.values["header.reportNumber"], "current structured context");
@@ -1019,7 +1019,7 @@ test("hydration keeps an existing draft read-only until its committed revision i
   runtime.__draftRows!.set(`employee-1/${firstTask.id}`, JSON.stringify({
     id: "committed-draft", employeeId: "employee-1", taskId: firstTask.id,
     payloadSchemaVersion: 1, revision: 7,
-    payload: { catalogueId: "graphie-mobile-pov", catalogueVersion: "2.0.0", schemaVersion: 3, ruleId: "cetem-workbook-explicit-formulas", ruleVersion: "1.0.0", values: { "header.reportNumber": "durable content" } },
+    payload: { catalogueId: "graphie-mobile-pov", catalogueVersion: "2.0.0", schemaVersion: 3, ruleId: "cetem-paper-form", ruleVersion: "2.0.0", values: { "header.reportNumber": "durable content" } },
     createdAt: 10, savedAt: 20,
   }));
   let beginRead!: () => void;
@@ -1745,6 +1745,28 @@ test("a stored catalogue 1.0.0 / schema 2 draft shows the compatibility notice, 
   assert.ok(findText(tree, fr.employeeTasks.draftCompatibilityUnavailable));
   assert.equal(tree.root.findAll((node) => node.type === "TextInput").some((node) => ["v1 context", "49.2", "Fluke Biomedical", "Convention"].includes(String(node.props.value ?? ""))), false);
   assert.equal(tree.root.findAll((node) => node.type === "Pressable" && node.props.accessibilityState?.selected === true && String(node.props.accessibilityLabel ?? "").includes(":")).length, 0);
+  assert.equal(findButton(tree, "Enregistrer").props.disabled, true);
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 600)); });
+  assert.equal(runtime.__draftRows!.get(key), storedRow);
+  await act(async () => { tree.unmount(); });
+});
+
+test("a stored catalogue 2.0.0 / schema 3 draft stamped with the old workbook rule shows the compatibility notice and keeps its bytes", async () => {
+  await loadApp();
+  installMocks();
+  const key = `employee-1/${firstTask.id}`;
+  const storedRow = JSON.stringify({
+    id: "old-rule-form", employeeId: "employee-1", taskId: firstTask.id,
+    payloadSchemaVersion: 1, revision: 3, createdAt: 10, savedAt: 20,
+    payload: { catalogueId: "graphie-mobile-pov", catalogueVersion: "2.0.0", schemaVersion: 3, ruleId: "cetem-workbook-explicit-formulas", ruleVersion: "1.0.0", values: { "header.reportNumber": "old rule report", "voltage.accuracy.row1.kvMeasured": "49.2" } },
+  });
+  runtime.__draftRows!.set(key, storedRow);
+  let tree!: ReactTestRenderer;
+  await act(async () => { tree = create(<App />); });
+  await signIn(tree);
+  await act(async () => { findTaskRow(tree, firstTask.establishment).props.onPress(); });
+  assert.ok(findText(tree, fr.employeeTasks.draftCompatibilityUnavailable));
+  assert.equal(tree.root.findAll((node) => node.type === "TextInput").some((node) => ["old rule report", "49.2"].includes(String(node.props.value ?? ""))), false);
   assert.equal(findButton(tree, "Enregistrer").props.disabled, true);
   await act(async () => { await new Promise((resolve) => setTimeout(resolve, 600)); });
   assert.equal(runtime.__draftRows!.get(key), storedRow);

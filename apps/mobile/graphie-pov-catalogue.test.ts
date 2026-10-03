@@ -42,7 +42,7 @@ test("catalogue and calculation identity share one version contract: graphie-mob
     GRAPHIE_CALCULATION_CATALOGUE,
   );
   assert.deepEqual(GRAPHIE_CALCULATION_CATALOGUE, { catalogueId: "graphie-mobile-pov", catalogueVersion: "2.0.0", schemaVersion: 3 });
-  assert.deepEqual([GRAPHIE_CALCULATION_RULE_ID, GRAPHIE_CALCULATION_RULE_VERSION], ["cetem-workbook-explicit-formulas", "1.0.0"]);
+  assert.deepEqual([GRAPHIE_CALCULATION_RULE_ID, GRAPHIE_CALCULATION_RULE_VERSION], ["cetem-paper-form", "2.0.0"]);
 });
 
 test("sections follow the paper form order", () => {
@@ -206,7 +206,8 @@ test("legacy Story 5.3 content is preserved and malformed shapes stay rejected",
     { ...supported, schemaVersion: GRAPHIE_FORM_SCHEMA_VERSION + 1 },
     { ...supported, catalogueId: "unknown" },
     { ...supported, ruleId: "unknown-rule" },
-    { ...supported, ruleVersion: "2.0.0" },
+    { ...supported, ruleVersion: "1.0.0" },
+    { ...supported, ruleId: "cetem-workbook-explicit-formulas", ruleVersion: "1.0.0" },
     { catalogueId: supported.catalogueId, catalogueVersion: supported.catalogueVersion, schemaVersion: supported.schemaVersion, values: supported.values },
     { ...supported, schemaVersion: "3" },
     { ...supported, values: ["not", "a", "record"] },

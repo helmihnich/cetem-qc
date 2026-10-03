@@ -40,3 +40,33 @@ The supplied example produces D26 = 69.66, P14 approximately 0.06325, N25 = 2.70
 Explicitly defined formulas authorize automatic numerical calculations only. Individual tolerance/pass-fail results require both the applicable formula and an explicitly established CETEM BH acceptance threshold, boundary semantics and comparison rule. A defined numerical formula alone does not authorize a tolerance verdict. CETEM BH must resolve the missing rules and supply the remaining reference cases before affected behavior is accepted.
 
 Final machine conformity is always an explicit human decision by the **Responsable**. Do not aggregate calculations, individual results or insights into an automatic overall conformity decision.
+
+## Superseded by the paper form (rule `cetem-paper-form` 2.0.0)
+
+Story 6.6 replaced the workbook rule `cetem-workbook-explicit-formulas` 1.0.0 with rule `cetem-paper-form` 2.0.0. The reference is now the signed paper form *Rapport de Contrôle de Qualité d'un Appareil Mobile de Radiographie* (photos in [`source/formulaire-cetem/`](source/formulaire-cetem/)). The extraction above is kept unchanged as evidence; the workbook values remain source-regression examples only.
+
+### Workbook versus paper differences
+
+| Workbook | Paper form (applied) |
+|---|---|
+| F13:F15 = `((D-E)/D)*100`, i.e. (KV affiché − KV mesuré) / KV affiché. | (KV mesuré − KV affiché) / KV affiché × 100. The sign is inverted, so the regression examples are the negated F13:F15. |
+| B26 (`KVm_min`) and C26 (`KVm_max`) are literals 69.6 and 69.7. | KV min and KV max are MIN and MAX of the 5 KV mesuré readings. |
+| M40:M42 use a fixed factor (`0.49*L`, with an `AVERAGE` wrapper on M40). | Kerma(1m) = Kerma(dét) × (DFC / 1 m)². DFC = 0.70 m reproduces the workbook factor. K1 = Kerma(1m) / mAs, K2 = mean of K1, écart = (K1 − K2) / K2 × 100. |
+| Rows 14–16 (P14, Q14:Q16) compute a 3-row normalized reproducibility. | Not on the paper form; removed. |
+| Q40 = `(O40-O42)/O42*100` (initial linearity, `#DIV/0!`). | Not on the paper form; removed. |
+| O25 = mean of normalized Kerma/mAs. | Unused by the paper form; removed. Reproducibility and repeatability use the raw Kerma mean (N25) and P25:P29. |
+
+### Printed tolerances
+
+| Test | Compared value | Printed tolerance | Exactly at the limit | Page |
+|---|---|---|---|---|
+| Exactitude de la tension | each row's (KV mesuré − KV affiché) / KV affiché | `<= ± 10 %` | conforme | p2, `8fe5a363-a465-46e3-85b6-8930e4cd0383(1).jpg` |
+| Répétabilité de la tension | (KV min − KV moy) / KV moy and (KV max − KV moy) / KV moy | `<= ± 5%` | conforme | p2, `8fe5a363-a465-46e3-85b6-8930e4cd0383(1).jpg` |
+| Reproductibilité et répétabilité du rayonnement de sortie | each row's (Kerma − Kerma moy) / Kerma moy | `< ± 10%` | non-conforme | p3, `f9657912-e6db-4487-99d8-3d30155d7263(1).jpg` |
+| Linéarité du rayonnement de sortie | each row's (K1 − K2) / K2 | `< ± 15%` | non-conforme | p3, `f9657912-e6db-4487-99d8-3d30155d7263(1).jpg` |
+
+Values are compared at full precision, never rounded; a value within 1e-9 percentage points of the limit counts as equal to it (floating-point noise only). Each verdict is a suggestion per test; the Responsable decides the final conclusion and no overall conformity is computed.
+
+### Missing light-field tolerance
+
+« Correspondance champ lumineux / champ de rayons X » (p4, `c2805aec-41dd-4ef9-8cfc-4b1ce7b511ce(1).jpg`) prints no tolerance. Σ|écarts| (mm) and Σ|écarts| / D.F.R (%) are calculated, and the verdict stays `indisponible` / `no-tolerance` until CETEM confirms the tolerance and whether it is inclusive or exclusive.
