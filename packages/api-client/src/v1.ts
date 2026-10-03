@@ -93,6 +93,11 @@ export function createApiClient({ baseUrl, fetch: fetcher = fetch, sessionToken:
       if (!payload.response.ok) throw toRequestError(payload.response.status, payload.data);
       return employeeCredentialResponseSchema.parse(payload.data);
     },
+    async resetEmployeePassword(employeeId: string): Promise<EmployeeCredentialResponse> {
+      const payload = await request(`/employees/${encodeURIComponent(employeeId)}/password-reset`, { method: "POST", headers: { accept: "application/json", ...sessionHeaders() } });
+      if (!payload.response.ok) throw toRequestError(payload.response.status, payload.data);
+      return employeeCredentialResponseSchema.parse(payload.data);
+    },
     async replaceTemporaryPassword(input: PasswordReplacementRequest): Promise<AuthenticationResponse> {
       const session = await post("/authenticate/password", passwordReplacementRequestSchema.parse(input));
       setSessionToken(session.token);

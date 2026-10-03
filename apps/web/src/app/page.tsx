@@ -3,6 +3,7 @@
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import { fr } from "@cetem-qc/i18n";
 import { EmployeeManagement } from "./employee-management";
+import { ResponsableSignInForm } from "./sign-in-form";
 import { TaskCreation } from "./task-creation";
 import { TaskList } from "./task-list";
 
@@ -97,7 +98,7 @@ export default function HomePage() {
         <header className="topbar"><span className="eyebrow">CETEM-QC</span>{signedIn && <button className="text-button" type="button" disabled={busy} onClick={() => void signOut()}>{fr.auth.logout}</button>}</header>
         {loading ? <section className="roster-card state-message" role="status">{fr.common.loading}</section>
           : !session ? <section className="auth-card"><p className="eyebrow">ESPACE RESPONSABLE</p><h1>{fr.auth.title}</h1><p className="subtitle">{fr.auth.description}</p>
-            <form onSubmit={(event) => void signIn(event)} className="auth-form"><label>{fr.auth.email}<input type="email" autoComplete="username" required value={email} onChange={(event) => setEmail(event.target.value)} /></label><label>{fr.auth.password}<input type="password" autoComplete="current-password" required value={password} onChange={(event) => setPassword(event.target.value)} /></label><button className="primary-button" disabled={busy}>{busy ? fr.common.loading : fr.auth.signIn}</button></form>
+            <ResponsableSignInForm email={email} password={password} busy={busy} onEmailChange={setEmail} onPasswordChange={setPassword} onSubmit={(event) => void signIn(event)} />
             {notice && <p className="notice" role="status">{notice}</p>}{error && <p className="error-state" role="alert">{error}</p>}</section>
           : session.user.mustChangePassword ? <section className="auth-card"><p className="eyebrow">ESPACE RESPONSABLE</p><h1>{fr.auth.activationTitle}</h1><p className="subtitle">{fr.auth.activationDescription}</p>
             <form onSubmit={(event) => void activateAccount(event)} className="auth-form"><label>{fr.auth.currentPassword}<input type="password" autoComplete="current-password" required value={password} onChange={(event) => setPassword(event.target.value)} /></label><label>{fr.auth.newPassword}<input type="password" autoComplete="new-password" minLength={12} required value={newPassword} onChange={(event) => setNewPassword(event.target.value)} /></label><button className="primary-button" disabled={busy}>{busy ? fr.common.loading : fr.auth.activate}</button></form>{error && <p className="error-state" role="alert">{error}</p>}</section>

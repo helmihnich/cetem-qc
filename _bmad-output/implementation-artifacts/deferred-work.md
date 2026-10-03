@@ -55,3 +55,12 @@
 - source_spec: `_bmad-output/specs/spec-6-7-harden-test-harness-and-recover-unreadable-drafts/test-harness.md`
   summary: A killed test run (Ctrl-C, crash, timeout) leaves its `test_<uuid>` schema in `cetem_qc_test`. Nothing removes old schemas.
   evidence: `withPostgresTestSchema` drops its schema in `finally`, which does not run when the process is killed. Removing old schemas at startup must not race with test files running in parallel, so it needs a design (for example, an age threshold).
+
+## Deferred from: code review of 2-4-reset-a-forgotten-password-through-the-responsable (2026-10-03)
+
+- source_spec: `_bmad-output/specs/spec-2-4-reset-forgotten-password-through-responsable/SPEC.md`
+  summary: The Story 3.2 `POST /employees/{employeeId}/credential` endpoint and its web proxy are still live but no longer called by the UI. They replace a not-yet-activated Employé's password without revoking sessions and without an `identity_password_resets` row or `identity.password_reset` log line.
+  evidence: The approved 2.4 spec keeps this endpoint unchanged (Confirmed decisions; Non-goal « retiring the `/credential` regenerate endpoint »). Retiring it, or routing it through `applyPasswordReset`, changes the public contract and needs its own story.
+- source_spec: `_bmad-output/specs/spec-2-4-reset-forgotten-password-through-responsable/test-plan.md`
+  summary: The operator CLI success path is never run end to end. C4 only spawns the script against an unreachable database; C1–C3 call `resetResponsablePassword` directly, so nothing checks that the script prints a credential that verifies, with exit code 0.
+  evidence: The spawned child would need to reach the per-test schema created by `withPostgresTestSchema`, which the harness does not support yet (it would need a search_path or schema env hook in `db/pool.ts`).

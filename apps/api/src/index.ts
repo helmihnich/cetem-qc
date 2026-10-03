@@ -10,7 +10,7 @@ import {
 } from "./modules/identity-auth/authentication.js";
 import { createSession, findActiveSession, hasLiveDeactivatedSession, revokeSession } from "./modules/identity-auth/sessions.js";
 import { listOwnTeamEmployees } from "./modules/team-access/queries/list-own-team-employees.js";
-import { createOwnTeamEmployee, DuplicateEmployeeEmailError, regenerateOwnTeamEmployeeCredential, updateOwnTeamEmployeeStatus } from "./modules/team-access/employee-credentials.js";
+import { createOwnTeamEmployee, DuplicateEmployeeEmailError, regenerateOwnTeamEmployeeCredential, resetOwnTeamEmployeePassword, updateOwnTeamEmployeeStatus } from "./modules/team-access/employee-credentials.js";
 import { createAssignedTask, getAssignedEmployeeTask, listAssignedEmployeeTasks, listEligibleTaskAssignees, listOwnTeamTasks, TaskAssigneeUnavailableError } from "./modules/tasks/tasks.js";
 
 export function createApp(pool?: Pool) {
@@ -316,6 +316,34 @@ export function createApp(pool?: Pool) {
       }
       response.status(200).set("Cache-Control", "no-store").json(employeeCredentialResponseSchema.parse(result));
     } catch {
+      response.status(500).json(apiErrorSchema.parse({ error: { code: "INTERNAL_ERROR", message: "Une erreur est survenue." } }));
+    }
+  });
+
+  v1.post("/employees/:employeeId/password-reset", async (request, response) => {
+    const session = response.locals.session as NonNullable<Awaited<ReturnType<typeof findActiveSession>>>;
+    if (session.role !== "responsable") {
+      response.status(403).json(apiErrorSchema.parse({ error: { code: "FORBIDDEN", message: "Action réservée au Responsable de l’équipe." } }));
+      return;
+    }
+    const employeeNotFound = () => response.status(404).json(apiErrorSchema.parse({ error: { code: "EMPLOYEE_NOT_FOUND", message: "Employé introuvable dans votre équipe." } }));
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(request.params.employeeId ?? "")) {
+      employeeNotFound();
+      return;
+    }
+    try {
+      const result = await resetOwnTeamEmployeePassword(getPool(), session.id, request.params.employeeId!);
+      if (result.outcome === "not_found") {
+        employeeNotFound();
+        return;
+      }
+      if (result.outcome === "inactive") {
+        response.status(409).json(apiErrorSchema.parse({ error: { code: "EMPLOYEE_INACTIVE", message: "Cet Employé est désactivé. Réactivez-le avant de réinitialiser son mot de passe." } }));
+        return;
+      }
+      response.status(200).set("Cache-Control", "no-store").json(employeeCredentialResponseSchema.parse({ employee: result.employee, temporaryCredential: result.temporaryCredential }));
+    } catch {
+      // Never log here: the generated credential may still be in scope.
       response.status(500).json(apiErrorSchema.parse({ error: { code: "INTERNAL_ERROR", message: "Une erreur est survenue." } }));
     }
   });

@@ -1,9 +1,24 @@
 "use client";
 
 import { FormEvent, useState } from "react";
+import { fr } from "@cetem-qc/i18n";
 
 type Employee = { id: string; firstName: string; surname: string; email: string; active: boolean };
-type Credential = { employee: Employee; temporaryCredential: string };
+type Credential = { employee: Employee; temporaryCredential: string; title?: string; subtitle?: string };
+export type PasswordResetOutcome = { ok: true; credential: Credential } | { ok: false; message: string; stale: boolean };
+
+export async function requestPasswordReset(employeeId: string, fetchImpl: typeof fetch = fetch): Promise<PasswordResetOutcome> {
+  try {
+    const response = await fetchImpl(`/api/employees/${encodeURIComponent(employeeId)}/password-reset`, { method: "POST" });
+    const payload = await response.json() as Credential | { error?: { message?: string } } | null;
+    if (!response.ok) {
+      const stale = response.status === 404 || response.status === 409;
+      const message = payload && typeof payload === "object" && "error" in payload ? payload.error?.message : undefined;
+      return { ok: false, message: stale && message ? message : fr.employees.passwordResetFailed, stale };
+    }
+    return { ok: true, credential: { ...(payload as Credential), title: fr.employees.passwordResetTitle, subtitle: fr.employees.passwordResetSubtitle } };
+  } catch { return { ok: false, message: fr.api.unavailable, stale: false }; }
+}
 
 export function EmployeeManagement({ employees, onCreated, onRefresh }: { employees: Employee[]; onCreated: (employee: Employee) => void; onRefresh: () => Promise<void> }) {
   const [creating, setCreating] = useState(false);
@@ -16,16 +31,18 @@ export function EmployeeManagement({ employees, onCreated, onRefresh }: { employ
   const [acknowledged, setAcknowledged] = useState(false);
   const [copied, setCopied] = useState(false);
 
-  async function regenerate(employeeId: string) {
-    if (!window.confirm("L’ancien mot de passe temporaire cessera immediatement de fonctionner.")) return;
+  async function resetPassword(employeeId: string) {
+    if (!window.confirm(fr.employees.resetPasswordConfirm)) return;
     setBusy(true); setError("");
     try {
-      const response = await fetch(`/api/employees/${encodeURIComponent(employeeId)}/credential`, { method: "POST" });
-      const payload = await response.json();
-      if (!response.ok) { setError("Le mot de passe temporaire n’a pas pu etre regenere."); return; }
-      setCredential(payload as Credential); setAcknowledged(false); setCopied(false);
-    } catch { setError("Le service est momentanement indisponible."); }
-    finally { setBusy(false); }
+      const outcome = await requestPasswordReset(employeeId);
+      if (!outcome.ok) {
+        setError(outcome.message);
+        if (outcome.stale) await onRefresh();
+        return;
+      }
+      setCredential(outcome.credential); setAcknowledged(false); setCopied(false);
+    } finally { setBusy(false); }
   }
 
   async function changeStatus(employee: Employee) {
@@ -53,8 +70,8 @@ export function EmployeeManagement({ employees, onCreated, onRefresh }: { employ
   }
 
   if (credential) return <section className="roster-card" role="dialog" aria-modal="true" aria-labelledby="credential-title">
-    <p className="eyebrow">REMISE MANUELLE</p><h2 id="credential-title">Compte cree</h2>
-    <p className="subtitle">Remettez ce mot de passe temporaire en personne. Il devra etre remplace a la premiere connexion.</p>
+    <p className="eyebrow">REMISE MANUELLE</p><h2 id="credential-title">{credential.title ?? "Compte cree"}</h2>
+    <p className="subtitle">{credential.subtitle ?? "Remettez ce mot de passe temporaire en personne. Il devra etre remplace a la premiere connexion."}</p>
     <p>{credential.employee.firstName} {credential.employee.surname} · {credential.employee.email}</p>
     <label>Mot de passe temporaire<input readOnly value={credential.temporaryCredential} /></label>
     <button className="secondary-button" type="button" disabled={busy} onClick={() => void navigator.clipboard.writeText(credential.temporaryCredential).then(() => setCopied(true))}>Copier le mot de passe</button>
@@ -73,6 +90,6 @@ export function EmployeeManagement({ employees, onCreated, onRefresh }: { employ
       {error && <p role="alert" className="error-state">{error}</p>}
     </form>}
     {error && !creating && <p role="alert" className="error-state">{error}</p>}
-    <ul className="employee-actions">{employees.map((employee) => <li key={employee.email}><span>{employee.firstName} {employee.surname} · {employee.active ? "Actif" : "Inactif"}</span><span>{employee.active && <button className="text-button" disabled={busy} type="button" onClick={() => void regenerate(employee.id)}>Regenerer le mot de passe temporaire</button>}<button className="text-button" disabled={busy} type="button" onClick={() => void changeStatus(employee)}>{employee.active ? "Désactiver" : "Activer"}</button></span></li>)}</ul>
+    <ul className="employee-actions">{employees.map((employee) => <li key={employee.email}><span>{employee.firstName} {employee.surname} · {employee.active ? "Actif" : "Inactif"}</span><span>{employee.active && <button className="text-button" disabled={busy} type="button" onClick={() => void resetPassword(employee.id)}>{fr.employees.resetPassword}</button>}<button className="text-button" disabled={busy} type="button" onClick={() => void changeStatus(employee)}>{employee.active ? "Désactiver" : "Activer"}</button></span></li>)}</ul>
   </section>;
 }

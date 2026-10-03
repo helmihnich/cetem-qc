@@ -266,6 +266,24 @@ So that temporary access cannot become a reusable operational password.
 
 **Traceability:** FR-004, SEC-006, SEC-007, SEC-012, OD-01.
 
+### Story 2.4: Reset a forgotten password through the Responsable (no email)
+
+As a Responsable, and as a PoV operator,
+I want to reset a forgotten password of an Employé in my team, or of a Responsable from the server,
+So that a locked-out user regains access through a one-time temporary credential without any email server.
+
+**Acceptance Criteria:**
+
+**Given** an active Employé of the Responsable's own team, before or after activation
+**When** the Responsable selects « Réinitialiser le mot de passe » and confirms
+**Then** a new temporary credential is shown once through the Story 3.2 hand-over dialog, the password change is forced at next login (Story 2.3 flow), and all of the Employé's sessions are revoked
+**And** the server refuses an Employé caller, an activation-only session, another team's or unknown account (404, no disclosure) and a deactivated Employé (409), with no mutation
+**And** an operator-only CLI (`pnpm --filter @cetem-qc/api reset:responsable-password`) does the same for a Responsable account and is documented
+**And** the web login shows « Mot de passe oublié ? Contactez votre administrateur. », the mobile login « Mot de passe oublié ? Contactez votre Responsable. »
+**And** every reset is audited (who, whom, channel, when) and logged without ever containing the credential.
+
+**Traceability:** spec `_bmad-output/specs/spec-2-4-reset-forgotten-password-through-responsable/SPEC.md`; FR-004, SEC-001, SEC-002, SEC-003, SEC-004, SEC-011, SEC-012, OD-07, OD-08, OD-09.
+
 ## Epic 3: Responsable Team and Employé Account Management
 
 ### Story 3.1: View own-team employees

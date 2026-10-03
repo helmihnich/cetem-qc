@@ -12,6 +12,7 @@ import { authenticateWithPassword } from "./modules/identity-auth/authentication
 import { createAssignedTask, listEligibleTaskAssignees } from "./modules/tasks/tasks.js";
 import { createSession, findActiveSession } from "./modules/identity-auth/sessions.js";
 import { withPostgresTestSchema } from "./test-support/postgres.js";
+import { employeeCredentialResponseSchema } from "@cetem-qc/schemas/api/v1";
 
 const responsable = { id: "responsable-1", email: "lead@example.com", display_name: "Lead User", role: "responsable", password_hash: "", must_change_password: false, is_active: true };
 const employees: Array<{ id: string; first_name: string; surname: string; email: string; display_name: string; is_active: boolean; team_id: string; role: string; must_change_password: boolean; password_hash: string }> = [];
@@ -432,6 +433,148 @@ test("PostgreSQL task creation rejects NUL characters and blank establishments a
       assert.equal(accepted.status, 201);
       assert.equal((await accepted.json() as { task: { establishment: string } }).task.establishment, "Centre");
       assert.equal(await taskCount(), "1");
+    });
+  });
+});
+
+test("PostgreSQL password reset: Responsable-only, own-team-only, revokes sessions, forces activation and never logs the credential", async (t) => {
+  await withPostgresTestSchema(async ({ pool: scopedPool }) => {
+    const oldPassword = "employee-old-password";
+    const passwordHash = await hashPassword(oldPassword);
+    const insert = async (sql: string, values: unknown[]) => (await scopedPool.query<{ id: string }>(sql, values)).rows[0]!.id;
+    const responsableSql = "INSERT INTO identity_accounts (email, display_name, role, password_hash, must_change_password) VALUES ($1,'Owner','responsable',$2,$3) RETURNING id";
+    const employeeSql = "INSERT INTO identity_accounts (email, display_name, role, password_hash, must_change_password, team_id, first_name, surname, is_active) VALUES ($1,'Employee','employe',$2,false,$3,'Test','Employe',$4) RETURNING id";
+    const ownerEmail = `owner-${randomUUID()}@example.test`;
+    const owner = await insert(responsableSql, [ownerEmail, passwordHash, false]);
+    const otherOwner = await insert(responsableSql, [`other-owner-${randomUUID()}@example.test`, passwordHash, false]);
+    const pendingOwnerEmail = `pending-owner-${randomUUID()}@example.test`;
+    const pendingOwner = await insert(responsableSql, [pendingOwnerEmail, passwordHash, true]);
+    const ownTeam = await insert("INSERT INTO identity_teams (responsable_account_id) VALUES ($1) RETURNING id", [owner]);
+    const otherTeam = await insert("INSERT INTO identity_teams (responsable_account_id) VALUES ($1) RETURNING id", [otherOwner]);
+    await insert("INSERT INTO identity_teams (responsable_account_id) VALUES ($1) RETURNING id", [pendingOwner]);
+    const employeeEmail = `employee-${randomUUID()}@example.test`;
+    const employee = await insert(employeeSql, [employeeEmail, passwordHash, ownTeam, true]);
+    const otherEmployee = await insert(employeeSql, [`other-employee-${randomUUID()}@example.test`, passwordHash, otherTeam, true]);
+    const inactiveEmployee = await insert(employeeSql, [`inactive-employee-${randomUUID()}@example.test`, passwordHash, ownTeam, false]);
+
+    const state = async () => ({
+      accounts: (await scopedPool.query("SELECT id, password_hash, must_change_password, is_active FROM identity_accounts ORDER BY id")).rows,
+      sessions: (await scopedPool.query("SELECT id, revoked_at FROM identity_sessions ORDER BY id")).rows,
+      resets: (await scopedPool.query("SELECT * FROM identity_password_resets ORDER BY id")).rows,
+    });
+
+    const captured: string[] = [];
+    const originals = { info: console.info, error: console.error, warn: console.warn, log: console.log };
+    const capture = (...args: unknown[]) => {
+      captured.push(args.map((arg) => typeof arg === "string" ? arg : arg instanceof Error ? `${arg.message} ${arg.stack ?? ""}` : JSON.stringify(arg)).join(" "));
+    };
+    Object.assign(console, { info: capture, error: capture, warn: capture, log: capture });
+    let credential = "";
+    let resetHash = "";
+    try {
+      await withServer(scopedPool, async (root) => {
+        const authenticate = (email: string, password: string) => fetch(`${root}/authenticate`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ email, password }) });
+        const tokenFor = async (email: string, password: string) => ((await (await authenticate(email, password)).json()) as { token: string }).token;
+        const reset = (token: string, id: string) => fetch(`${root}/employees/${id}/password-reset`, { method: "POST", headers: { authorization: `Bearer ${token}` } });
+        const get = (path: string, token: string) => fetch(`${root}${path}`, { headers: { authorization: `Bearer ${token}` } });
+        const ownerToken = await tokenFor(ownerEmail, oldPassword);
+
+        await t.test("H1 Responsable resets an activated Employé end to end", async () => {
+          const employeeToken = await tokenFor(employeeEmail, oldPassword);
+          assert.equal((await get("/employee/tasks", employeeToken)).status, 200);
+          const response = await reset(ownerToken, employee);
+          assert.equal(response.status, 200);
+          assert.equal(response.headers.get("cache-control"), "no-store");
+          const body = employeeCredentialResponseSchema.parse(await response.json());
+          assert.equal(body.employee.id, employee);
+          credential = body.temporaryCredential;
+          resetHash = (await scopedPool.query<{ password_hash: string }>("SELECT password_hash FROM identity_accounts WHERE id = $1", [employee])).rows[0]!.password_hash;
+          assert.equal((await get("/employee/tasks", employeeToken)).status, 401, "the old session stops working");
+          assert.equal((await authenticate(employeeEmail, oldPassword)).status, 401, "the old password stops working");
+          const temporary = await authenticate(employeeEmail, credential);
+          assert.equal(temporary.status, 200);
+          const temporarySession = await temporary.json() as { token: string; user: { mustChangePassword: boolean } };
+          assert.equal(temporarySession.user.mustChangePassword, true);
+          assert.equal((await get("/employee/tasks", temporarySession.token)).status, 401, "activation-only session");
+          const replaced = await fetch(`${root}/authenticate/password`, {
+            method: "POST",
+            headers: { authorization: `Bearer ${temporarySession.token}`, "content-type": "application/json" },
+            body: JSON.stringify({ currentPassword: credential, newPassword: "employee-new-password" }),
+          });
+          assert.equal(replaced.status, 200);
+          const active = await replaced.json() as { token: string };
+          assert.equal((await get("/employee/tasks", active.token)).status, 200);
+        });
+
+        await t.test("H2 an Employé session gets 403 without mutation", async () => {
+          const employeeToken = await tokenFor(employeeEmail, "employee-new-password");
+          const before = await state();
+          const response = await reset(employeeToken, employee);
+          assert.equal(response.status, 403);
+          assert.equal((await response.json() as { error: { code: string } }).error.code, "FORBIDDEN");
+          assert.deepEqual(await state(), before);
+        });
+
+        await t.test("H3 an activation-only Responsable session gets 401 without mutation", async () => {
+          const pendingToken = await tokenFor(pendingOwnerEmail, oldPassword);
+          const before = await state();
+          assert.equal((await reset(pendingToken, employee)).status, 401);
+          assert.deepEqual(await state(), before);
+        });
+
+        await t.test("H4 other team, own id, a Responsable id, unknown and malformed ids get the same 404", async () => {
+          const before = await state();
+          const unknown = await reset(ownerToken, randomUUID());
+          assert.equal(unknown.status, 404);
+          const unknownBody = await unknown.json() as { error: { code: string } };
+          assert.equal(unknownBody.error.code, "EMPLOYEE_NOT_FOUND");
+          for (const id of [otherEmployee, owner, otherOwner, "not-a-uuid"]) {
+            const response = await reset(ownerToken, id);
+            assert.equal(response.status, 404, id);
+            assert.deepEqual(await response.json(), unknownBody, "no disclosure beyond an unknown id");
+          }
+          assert.deepEqual(await state(), before);
+        });
+
+        await t.test("H5 a deactivated own-team Employé gets 409 EMPLOYEE_INACTIVE", async () => {
+          const before = await state();
+          const response = await reset(ownerToken, inactiveEmployee);
+          assert.equal(response.status, 409);
+          assert.equal((await response.json() as { error: { code: string } }).error.code, "EMPLOYEE_INACTIVE");
+          assert.deepEqual(await state(), before);
+        });
+
+        await t.test("H6 an internal failure returns 500 without a credential and changes nothing", async () => {
+          await scopedPool.query("CREATE FUNCTION fail_route_reset_audit() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'forced audit failure'; END $$");
+          await scopedPool.query("CREATE TRIGGER fail_route_reset_audit BEFORE INSERT ON identity_password_resets FOR EACH ROW EXECUTE FUNCTION fail_route_reset_audit()");
+          try {
+            const before = await state();
+            const response = await reset(ownerToken, employee);
+            assert.equal(response.status, 500);
+            const body = await response.json() as Record<string, unknown> & { error: { code: string } };
+            assert.equal(body.error.code, "INTERNAL_ERROR");
+            assert.equal("temporaryCredential" in body, false);
+            assert.deepEqual(await state(), before);
+          } finally {
+            await scopedPool.query("DROP TRIGGER fail_route_reset_audit ON identity_password_resets");
+          }
+        });
+      });
+    } finally {
+      Object.assign(console, originals);
+    }
+
+    await t.test("H7 exactly one reset log line and no secret or email in any captured output", () => {
+      const events = captured.filter((line) => line.includes("identity.password_reset"));
+      assert.equal(events.length, 1);
+      assert.deepEqual(JSON.parse(events[0]!), { event: "identity.password_reset", channel: "responsable", accountId: employee, resetByAccountId: owner });
+      assert.ok(credential.length > 0 && resetHash.startsWith("scrypt:"));
+      for (const line of captured) {
+        assert.equal(line.includes(credential), false);
+        assert.equal(line.includes(resetHash), false);
+        assert.equal(line.includes("scrypt:"), false);
+        assert.equal(line.includes(employeeEmail), false);
+      }
     });
   });
 });

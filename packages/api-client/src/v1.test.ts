@@ -109,3 +109,24 @@ test("assigned task detail rejects malformed or Epic 5 fields through response v
   const { client } = clientFor({ task: { ...task, measurements: [] } });
   await assert.rejects(client.getAssignedEmployeeTask(taskId), { name: "ZodError" });
 });
+
+test("employee password reset posts to the versioned endpoint and maps the inactive conflict", async () => {
+  const employeeId = "00000000-0000-4000-8000-000000000020";
+  const expected = {
+    employee: { id: employeeId, firstName: "Test", surname: "Employe", email: "employe@example.test", active: true },
+    temporaryCredential: "temporary-credential-value",
+  };
+  const { client, calls } = clientFor(expected);
+  assert.deepEqual(await client.resetEmployeePassword(employeeId), expected);
+  assert.equal(calls[0]!.url, `https://cetem-qc.example.test/api/v1/employees/${employeeId}/password-reset`);
+  assert.equal(calls[0]!.init?.method, "POST");
+  assert.equal(calls[0]!.init?.body, undefined);
+
+  const conflict = clientFor({ error: { code: "EMPLOYEE_INACTIVE", message: "Cet Employé est désactivé. Réactivez-le avant de réinitialiser son mot de passe." } }, 409);
+  await assert.rejects(conflict.client.resetEmployeePassword(employeeId), (error: unknown) => {
+    assert.ok(error instanceof ApiRequestError);
+    assert.equal(error.status, 409);
+    assert.equal(error.code, "EMPLOYEE_INACTIVE");
+    return true;
+  });
+});

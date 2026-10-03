@@ -34,6 +34,11 @@ export const fr = {
     empty: "Aucun employé ne figure dans votre équipe pour le moment.",
     loadError: "La liste des employés n’a pas pu être chargée.",
     signIn: "Connectez-vous pour consulter votre équipe.",
+    resetPassword: "Réinitialiser le mot de passe",
+    resetPasswordConfirm: "Le mot de passe actuel de cet Employé et ses sessions ouvertes cesseront immédiatement de fonctionner.",
+    passwordResetTitle: "Mot de passe réinitialisé",
+    passwordResetSubtitle: "Remettez ce mot de passe temporaire en personne. Il devra être remplacé à la prochaine connexion.",
+    passwordResetFailed: "Le mot de passe n’a pas pu être réinitialisé.",
   },
   tasks: {
     listTitle: "Tâches de mon équipe",
@@ -132,5 +137,7 @@ export const fr = {
     offlineUnavailable: "Les données locales protégées sont verrouillées. Connectez-vous en ligne pour rétablir l'accès.",
     reauthenticateOnline: "Une connexion en ligne est nécessaire pour vérifier votre compte. Connectez-vous pour continuer.",
     accountDeactivated: "Votre compte a été désactivé. Les données locales protégées sont conservées et restent verrouillées.",
+    forgotPasswordResponsable: "Mot de passe oublié ? Contactez votre administrateur.",
+    forgotPasswordEmployee: "Mot de passe oublié ? Contactez votre Responsable.",
   },
 } as const;

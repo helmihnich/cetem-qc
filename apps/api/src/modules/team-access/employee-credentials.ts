@@ -1,7 +1,7 @@
 import type { Pool, QueryResultRow } from "pg";
 import { createHash } from "node:crypto";
 import { withTransaction } from "../../db/transaction.js";
-import { generateTemporaryCredential, hashPassword } from "../identity-auth/index.js";
+import { applyPasswordReset, generateTemporaryCredential, hashPassword, logPasswordReset } from "../identity-auth/index.js";
 
 export class DuplicateEmployeeEmailError extends Error {}
 export class EmployeeCredentialUnavailableError extends Error {}
@@ -76,6 +76,34 @@ export async function regenerateOwnTeamEmployeeCredential(pool: Pool, responsabl
     return row && { id: row.id, firstName: row.first_name, surname: row.surname, email: row.email, active: row.is_active };
   });
   return employee ? { employee, temporaryCredential: credential } : undefined;
+}
+
+export type EmployeePasswordResetResult =
+  | ({ outcome: "reset" } & EmployeeCredentialResult)
+  | { outcome: "not_found" }
+  | { outcome: "inactive" };
+
+export async function resetOwnTeamEmployeePassword(pool: Pool, responsableAccountId: string, employeeId: string): Promise<EmployeePasswordResetResult> {
+  const credential = generateTemporaryCredential();
+  const passwordHash = await hashPassword(credential);
+  const result = await withTransaction(pool, async (transaction): Promise<EmployeePasswordResetResult | { outcome: "committed"; employee: EmployeeCredentialResult["employee"] }> => {
+    const target = await transaction.query<CreatedEmployeeRow>(
+      `SELECT employee.id, employee.first_name, employee.surname, employee.email, employee.is_active
+       FROM identity_accounts employee
+       JOIN identity_teams team ON employee.team_id = team.id
+       WHERE employee.id = $1 AND team.responsable_account_id = $2 AND employee.role = 'employe'
+       FOR UPDATE OF employee`,
+      [employeeId, responsableAccountId],
+    );
+    const row = target.rows[0];
+    if (!row) return { outcome: "not_found" };
+    if (!row.is_active) return { outcome: "inactive" };
+    await applyPasswordReset(transaction, { accountId: row.id, passwordHash, channel: "responsable", resetByAccountId: responsableAccountId });
+    return { outcome: "committed", employee: { id: row.id, firstName: row.first_name, surname: row.surname, email: row.email, active: row.is_active } };
+  });
+  if (result.outcome !== "committed") return result;
+  logPasswordReset("responsable", result.employee.id, responsableAccountId);
+  return { outcome: "reset", employee: result.employee, temporaryCredential: credential };
 }
 
 export async function updateOwnTeamEmployeeStatus(

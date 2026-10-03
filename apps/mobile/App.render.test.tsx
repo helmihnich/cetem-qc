@@ -328,6 +328,16 @@ function findTaskRow(tree: ReactTestRenderer, establishment: string) {
   return tree.root.findAll((node) => node.type === "Pressable" && node.findAll((child) => child.type === "Text" && child.children.join("") === establishment).length > 0)[0]!;
 }
 
+test("M1 signed-out screen tells the Employé to contact their Responsable for a forgotten password", async () => {
+  await loadApp();
+  installMocks();
+  let tree!: ReactTestRenderer;
+  await act(async () => { tree = create(<App />); });
+  assert.ok(findText(tree, fr.auth.employeeTitle));
+  assert.ok(findText(tree, "Mot de passe oublié ? Contactez votre Responsable."));
+  await act(async () => { tree.unmount(); });
+});
+
 test("phone App renders task list, opens read-only detail, retries failures and returns to list within padded width", async () => {
   await loadApp();
   const api = installMocks();

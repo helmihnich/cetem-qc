@@ -983,6 +983,7 @@ export default function App() {
             <Field label={fr.auth.password} value={password} onChangeText={setPassword} secureTextEntry />
             {error ? <Text accessibilityRole="alert" style={styles.error}>{error}</Text> : null}
             <Button title={fr.auth.signIn} onPress={() => void signIn()} disabled={loading || !email || !password} />
+            <Text style={styles.muted}>{fr.auth.forgotPasswordEmployee}</Text>
           </View>
         ) : user.mustChangePassword ? (
           <View style={[styles.card, layout === "tablet" && styles.tabletCard]}>

@@ -10,6 +10,14 @@ Use `withTransaction` for multi-record authoritative commands. Keep each command
 
 Apply migrations first, then run `pnpm --filter @cetem-qc/api bootstrap:responsable` in a controlled operator terminal with `DATABASE_URL` supplied through the deployment secret environment. The command is single-use, prompts for the Responsable email and display name, generates a random temporary password, stores only its salted scrypt hash, and prints the credential once for manual handover. Do not redirect or capture terminal output; provide it directly to the named recipient through the approved out-of-band channel. There is no HTTP bootstrap endpoint.
 
+## Responsable password reset
+
+A Responsable who forgot their password cannot use the web reset (that one is for Employés of their own team). Apply migrations first, then run `pnpm --filter @cetem-qc/api reset:responsable-password` in a controlled operator terminal on the server, with `DATABASE_URL` supplied through the runtime secret environment. The command prompts for the Responsable email (it is never read from the command line, so it stays out of shell history), generates a random temporary credential, stores only its salted scrypt hash, forces a password change at next login and revokes all of that Responsable's open sessions. It prints the credential once. Do not redirect or capture terminal output; hand the credential over to the Responsable directly through the approved out-of-band channel.
+
+Only an active `responsable` account is reset. For an unknown, inactive or Employé email the command changes nothing, prints one generic failure message (without repeating the input) and exits with a non-zero code. Each successful reset writes one `identity_password_resets` row (`channel = 'operator'`, no actor) and one `identity.password_reset` log line with ids only; the credential is never logged.
+
+At the next login the Responsable signs in with the temporary credential, gets an activation-only session and must replace the password (the Story 2.3 flow) before any other operation works.
+
 ## Server sessions
 
 Apply the session migration before serving authentication traffic. Successful authentication returns an opaque bearer token once; PostgreSQL stores only its SHA-256 digest with an eight-hour server expiry. Authenticated server endpoints look up the unexpired session and current active account on every request. Replacing a temporary password revokes existing sessions and returns a newly issued session. `DELETE /api/v1/session` revokes the current session. This server expiry does not define or extend OD-01's separate mobile offline authorization window.

@@ -45,6 +45,7 @@ development_status:
   2-1-bootstrap-the-first-responsable-through-a-controlled-process: done
   2-2-authenticate-users-and-enforce-role-access-on-the-server: done
   2-3-enforce-temporary-credential-activation-and-session-policy: done
+  2-4-reset-a-forgotten-password-through-the-responsable: done
   epic-2-retrospective: done
 
   epic-3: done
