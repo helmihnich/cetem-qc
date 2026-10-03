@@ -137,5 +137,14 @@ export function createSqliteDraftDatabase(
         });
       });
     },
+    async deleteUnreadable(employeeId, taskId) {
+      return serialize(async () => {
+        const db = await open();
+        await db.withExclusiveTransactionAsync(async (tx) => {
+          // No read, parse or revision check: the row is unreadable by this app version. Zero rows means already gone.
+          await tx.runAsync("DELETE FROM local_drafts WHERE employee_id = ? AND task_id = ?", employeeId, taskId);
+        });
+      });
+    },
   };
 }

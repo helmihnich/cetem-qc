@@ -16,6 +16,9 @@ export function createAuthorizedDrafts(repository: DraftRepository, authorize: D
     async delete(employeeId: string, taskId: string, expectedRevision: number): Promise<void> {
       return authorize(employeeId, () => repository.delete(employeeId, taskId, expectedRevision));
     },
+    async deleteUnreadable(employeeId: string, taskId: string): Promise<void> {
+      return authorize(employeeId, () => repository.deleteUnreadable(employeeId, taskId));
+    },
     async cacheSynchronizedTask(employeeId: string, task: CachedSynchronizedTask["task"]): Promise<void> {
       return authorize(employeeId, () => repository.cacheSynchronizedTask(employeeId, task));
     },

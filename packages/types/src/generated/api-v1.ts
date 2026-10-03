@@ -272,7 +272,9 @@ export interface components {
             surname: string;
         };
         CreateTaskRequest: {
+            /** @description Trimmed before validation; must contain a non-whitespace character and no NUL character. */
             establishment: string;
+            /** @description Must not contain a NUL character. */
             service: string;
             /** @enum {string} */
             type: "graphie_mobile";

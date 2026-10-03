@@ -566,6 +566,22 @@ So that the results and suggested verdicts I see are the ones the signed report 
 
 **Traceability:** spec `_bmad-output/specs/spec-6-6-align-calculation-rules-with-cetem-paper-form/SPEC.md`; paper form photos `docs/product/source/formulaire-cetem/`; FR-025, FR-026, AD-2, AD-7. **Blocks:** Story 6.3.
 
+### Story 6.7: Harden the test harness and recover unreadable local drafts
+
+As the delivery team and as an Employé,
+I want every test and package checked by the gates, and a way to discard a local draft the app can no longer read,
+So that later stories are verified for real and no task stays blocked on a device.
+
+**Acceptance Criteria:**
+
+**Given** the local Docker PostgreSQL in `DATABASE_URL`
+**When** `pnpm -r test` and `pnpm -r typecheck` run
+**Then** every test file under `apps/*` and `packages/*` runs with no skipped PostgreSQL test, PostgreSQL tests migrate an isolated local test database/schema, clean up and refuse non-local hosts, and every TypeScript package under `packages/*` is type-checked including its tests
+**And** the mobile draft-compatibility notice offers a confirmed « Supprimer le brouillon local » that deletes the unparseable draft for that employee and task, after which (and after any explicit delete) the form shows fresh paper-form defaults
+**And** the Epic 6 context places tolerance ownership as in Story 6.6, and the open sprint action items are implemented and closed or left open with a note.
+
+**Traceability:** spec `_bmad-output/specs/spec-6-7-harden-test-harness-and-recover-unreadable-drafts/SPEC.md`; deferred-work entries from Stories 5.6 and 6.6; Epic 4/5 retrospective action items.
+
 ## Epic 7: Reliable Synchronization and Server-Accepted Submission
 
 ### Story 7.1: Queue durable synchronization operations

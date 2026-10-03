@@ -641,8 +641,17 @@ components:
       additionalProperties: false
       required: [establishment, service, type, assigneeId]
       properties:
-        establishment: { type: string, minLength: 1, maxLength: 200 }
-        service: { type: string, maxLength: 200 }
+        establishment:
+          type: string
+          minLength: 1
+          maxLength: 200
+          description: Trimmed before validation; must contain a non-whitespace character and no NUL character.
+          pattern: '^[^\u0000]*[^\s\u0000][^\u0000]*$'
+        service:
+          type: string
+          maxLength: 200
+          description: Must not contain a NUL character.
+          pattern: '^[^\u0000]*$'
         type:
           type: string
           enum: [graphie_mobile]

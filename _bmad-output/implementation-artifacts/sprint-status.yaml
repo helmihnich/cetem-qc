@@ -29,7 +29,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 # - Retrospective appends its action items to action_items; the status view surfaces open ones
 generated: 09-26-2026 18:00
-last_updated: 10-03-2026 18:00
+last_updated: 10-03-2026 20:00
 project: cetem-qc
 project_key: NOKEY
 tracking_system: file-system
@@ -75,6 +75,7 @@ development_status:
   6-4-display-authorized-calculation-results-in-responsable-review: backlog
   6-5-separate-formula-regression-fixtures-from-approved-acceptanc: backlog
   6-6-align-calculation-rules-with-the-official-cetem-paper-form: done  # must land before 6-3
+  6-7-harden-the-test-harness-and-recover-unreadable-drafts: done
   epic-6-retrospective: optional
 
   epic-7: backlog
@@ -132,41 +133,47 @@ action_items:
       test the composed create/list flow."
     owner: "Web/task UI maintainer"
     status: open
+    note: "Needs a web render-test harness that does not exist yet; out of scope for Story 6.7 (non-goal)."
     ref: "_bmad-output/implementation-artifacts/epic-4-retro-2026-09-30.md"
   - id: "epic-4-retro-item-2-reject-postgresql-incompatible-nul-chara"
     epic: 4
     action: "Reject PostgreSQL-incompatible NUL characters in task text and align
       the OpenAPI establishment constraint with trim-then-non-empty runtime behavior."
     owner: "API and contract maintainers"
-    status: open
+    status: done
+    note: "Story 6.7: createTaskRequestSchema rejects NUL in establishment and service (400 VALIDATION_ERROR, no PostgreSQL 500); OpenAPI CreateTaskRequest patterns require a non-whitespace establishment and no NUL; schema tests plus a PostgreSQL route test."
     ref: "_bmad-output/implementation-artifacts/epic-4-retro-2026-09-30.md"
   - id: "epic-4-retro-item-3-apply-openapi-first-same-story-contract"
     epic: 4
     action: "Apply OpenAPI-first same-story contract alignment and typed-client behavioral
       tests to every new Epic 5 HTTP operation."
     owner: "API/client maintainers"
-    status: open
+    status: done
+    note: "Epic 5 is closed; contracts:check and the api-client/schemas tests, which now run under pnpm -r test, enforce it."
     ref: "_bmad-output/implementation-artifacts/epic-4-retro-2026-09-30.md"
   - id: "epic-4-retro-item-4-require-direct-api-authorization-coverag"
     epic: 4
     action: "Require direct API authorization coverage and PostgreSQL integration
       for role/team/assignment predicates, transactions, and rollback."
     owner: "API maintainers and reviewers"
-    status: open
+    status: done
+    note: "Story 6.7: the existing route and PostgreSQL integration tests now run under pnpm -r test against the local database (CAP-1, CAP-2)."
     ref: "_bmad-output/implementation-artifacts/epic-4-retro-2026-09-30.md"
   - id: "epic-4-retro-item-5-require-migration-tests-to-reproduce-the"
     epic: 4
     action: "Require migration tests to reproduce the production upgrade sequence
       and require zero skipped PostgreSQL tests in final verification."
     owner: "Database/API maintainers and reviewers"
-    status: open
+    status: done
+    note: "Story 6.7: the PostgreSQL harness migrates with the production runner (staged upgrades via migrateThrough), and PostgreSQL tests fail instead of skipping (CAP-2)."
     ref: "_bmad-output/implementation-artifacts/epic-4-retro-2026-09-30.md"
   - id: "epic-4-retro-item-6-require-local-persistence-tests-for-dura"
     epic: 4
     action: "Require local persistence tests for durable saves, failure preservation,
       restart recovery, deletion, offline authorization, and no silent overwrite."
     owner: "Mobile maintainers and reviewers"
-    status: open
+    status: done
+    note: "Covered by apps/mobile/local-drafts/local-drafts.test.ts (remount, failed save/delete, revision guard, authorization lock) plus the Story 6.7 deleteUnreadable tests."
     ref: "_bmad-output/implementation-artifacts/epic-4-retro-2026-09-30.md"
   - id: "epic-4-retro-item-7-require-overlapping-out-of-order-state-t"
     epic: 4
@@ -175,6 +182,7 @@ action_items:
       user-visible states."
     owner: "Mobile maintainers and reviewers"
     status: open
+    note: "Standing review rule for future mobile stories, not a one-off task."
     ref: "_bmad-output/implementation-artifacts/epic-4-retro-2026-09-30.md"
   - id: "epic-4-retro-item-8-use-a-pre-review-verification-record-tha"
     epic: 4
@@ -183,6 +191,7 @@ action_items:
       separated from native/device evidence."
     owner: "Epic 5 story owners and reviewers"
     status: open
+    note: "Gates now cover boundaries, recursive typecheck (all packages) and git diff --check; builds and Expo exports are still not recorded."
     ref: "_bmad-output/implementation-artifacts/epic-4-retro-2026-09-30.md"
   - id: "epic-4-retro-item-9-keep-dep-01-dependent-form-portions-bloc"
     epic: 4
@@ -191,7 +200,8 @@ action_items:
       6 calculations and Epic 7 synchronization/submission out of Epic 5 unless an
       authoritative Epic 5 story requires them."
     owner: "Epic 5 story authors and product/business owner"
-    status: open
+    status: done
+    note: "Epic 5 closed; superseded by the Story 5.6 and 6.6 Product Owner decisions."
     ref: "_bmad-output/implementation-artifacts/epic-4-retro-2026-09-30.md"
   - id: "epic-5-retro-item-10-persist-story-5-5-final-specification-an"
     epic: 5
@@ -199,6 +209,7 @@ action_items:
       review scenarios and verification results."
     owner: "Mobile story owner"
     status: open
+    note: "No Story 5.5 spec in implementation-artifacts; reconstructing its closure evidence is documentation work beyond Story 6.7."
     ref: "_bmad-output/implementation-artifacts/epic-5-retro-2026-10-01.md"
   - id: "epic-5-retro-item-11-maintain-delayed-operation-authorization"
     epic: 5
@@ -207,13 +218,15 @@ action_items:
       draft preservation."
     owner: "Mobile maintainers"
     status: open
+    note: "Ongoing maintenance rule."
     ref: "_bmad-output/implementation-artifacts/epic-5-retro-2026-10-01.md"
   - id: "epic-5-retro-item-12-prepare-deterministic-source-formula-reg"
     epic: 5
     action: "Prepare deterministic source-formula regression fixtures with workbook
       provenance, separate from CETEM-approved acceptance fixtures, before Story 6.1."
     owner: "Calculation implementation owner"
-    status: open
+    status: done
+    note: "packages/domain/src/graphie-calculations.source-regression.ts (Stories 6.1 and 6.6)."
     ref: "_bmad-output/implementation-artifacts/epic-5-retro-2026-10-01.md"
   - id: "epic-5-retro-item-13-track-native-builds-device-behavior-nati"
     epic: 5
@@ -221,4 +234,5 @@ action_items:
       behavior, and seeded-v1 SQLite migration evidence in platform readiness."
     owner: "Mobile/platform maintainer"
     status: open
+    note: "Needs physical devices; tracked for Story 12.9."
     ref: "_bmad-output/implementation-artifacts/epic-5-retro-2026-10-01.md"

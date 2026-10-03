@@ -14,6 +14,7 @@ Employé (on mobile, including offline) and Responsable (on web review) see calc
 - Story 6.4: Display authorized calculation results in Responsable review
 - Story 6.5: Separate formula regression fixtures from approved acceptance fixtures
 - Story 6.6: Align calculation rules with the official CETEM paper form
+- Story 6.7: Harden the test harness and recover unreadable local drafts
 
 ## Requirements & Constraints
 
@@ -31,7 +32,7 @@ Employé (on mobile, including offline) and Responsable (on web review) see calc
 ## Technical Decisions
 
 - Calculation logic is pure, versioned code in `packages/domain`, with no React/RN/Next/Node/DB/provider dependencies. Mobile runs it offline, and the server re-runs the same implementation at acceptance. The server never silently substitutes another rule version or a last-write-wins value.
-- The API owns two modules: `calculations` runs source-derived formulas and records provenance; `rule-evaluation` owns thresholds, boundaries, special values and deterministic insights. Unresolved rules stay unavailable rather than fabricated.
+- The paper-form tolerances and per-test suggested verdicts (`GRAPHIE_TOLERANCES`, `judgeTolerance`) live in the `packages/domain` calculations module next to the formulas (Story 6.6), so mobile and server share them. The API `calculations` module runs that domain logic and records provenance. `rule-evaluation` owns only the still-unresolved rules (special values, requiredness, incomplete-test behavior, deterministic insights). Unresolved rules stay unavailable rather than fabricated.
 - Measurement payloads are validated versioned JSONB carrying `schemaVersion` and `ruleSetVersion`. Validate the payload schema/version before calculating. Retain schema, rule and formula provenance with each revision/result.
 - Current identities: catalogue `graphie-mobile-pov` `2.0.0` / schema `3` (from Story 5.6). Rule `cetem-paper-form` `2.0.0` replaces `cetem-workbook-explicit-formulas` `1.0.0` (Story 6.6). Drafts stamped with the old rule are refused safely (unsupported version, existing compatibility notice) and are not migrated.
 - Workbook-only rules (3-row reproducibility, initial-linearity baseline, fixed 0.49 linearity factor) are removed under the paper form. Linearity uses DFC instead.

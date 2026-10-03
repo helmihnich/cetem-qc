@@ -7,12 +7,22 @@ import { withTransaction } from "./transaction.js";
 const migrationsDirectory = "src/db/migrations";
 const migrationLockKey = 1_339_347_525;
 
-async function migrate(pool: Pool): Promise<void> {
+export interface MigrateOptions {
+  /** Stops after this version (e.g. "0003_identity_sessions"); tests use it to reproduce staged upgrades. */
+  through?: string;
+}
+
+export async function migrate(pool: Pool, options: MigrateOptions = {}): Promise<void> {
   await initializeMigrationTable(pool);
 
-  const files = (await readdir(migrationsDirectory))
+  const { through } = options;
+  const allFiles = (await readdir(migrationsDirectory))
     .filter((file) => /^\d{4}_[a-z0-9_]+\.sql$/.test(file))
     .sort();
+  if (through !== undefined && !allFiles.includes(`${through}.sql`)) {
+    throw new Error(`Unknown migration version ${through}`);
+  }
+  const files = allFiles.filter((file) => through === undefined || file.slice(0, -4) <= through);
 
   for (const file of files) {
     const version = file.slice(0, -4);
@@ -44,4 +54,5 @@ async function main(): Promise<void> {
   }
 }
 
-void main();
+// Run only as the db:migrate entry point; importing this module must neither connect nor migrate.
+if (typeof require !== "undefined" && require.main === module) void main();

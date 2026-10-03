@@ -82,8 +82,10 @@ const taskListItemSchema = z.object({
   state: z.literal("draft"), lastUpdatedAt: z.string().datetime(),
 }).strict();
 export const taskListResponseSchema: z.ZodType<TaskListResponseContract> = z.object({ tasks: z.array(taskListItemSchema) }).strict();
+// PostgreSQL text cannot store NUL; reject it as a validation error instead of a database failure.
+const withoutNul = /^[^\u0000]*$/;
 export const createTaskRequestSchema: z.ZodType<CreateTaskRequestContract> = z.object({
-  establishment: z.string().trim().min(1).max(200), service: z.string().max(200), type: z.literal("graphie_mobile"), assigneeId: z.string().uuid(),
+  establishment: z.string().trim().min(1).max(200).regex(withoutNul), service: z.string().max(200).regex(withoutNul), type: z.literal("graphie_mobile"), assigneeId: z.string().uuid(),
 }).strict();
 const taskSchema = z.object({
   id: z.string().uuid(), establishment: z.string(), service: z.string(), type: z.literal("graphie_mobile"),

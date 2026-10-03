@@ -87,6 +87,9 @@ export default function App() {
   const [draftHydration, setDraftHydration] = useState<"idle" | "loading" | "ready" | "failed">("idle");
   const [deleteDraftConfirmation, setDeleteDraftConfirmation] = useState<{ employeeId: string; taskId: string; draftId: string; revision: number }>();
   const [draftNotice, setDraftNotice] = useState<string>();
+  // A draft this app version can no longer parse; it can only be discarded (Story 6.7).
+  const [unreadableDraft, setUnreadableDraft] = useState<{ employeeId: string; taskId: string }>();
+  const [unreadableDeleteConfirmation, setUnreadableDeleteConfirmation] = useState<{ employeeId: string; taskId: string }>();
   const listState = getEmployeeTaskListState({ loading, error: Boolean(error), taskCount: tasks.length });
   const activeIdentityRef = useRef<string | null>(null);
   const activeScreenRef = useRef<Screen>(screen);
@@ -129,6 +132,21 @@ export default function App() {
       employeeId,
       tasks: update(current?.employeeId === employeeId ? current.tasks : []),
     }));
+  }
+
+  function clearUnreadableDraft() {
+    setUnreadableDraft(undefined);
+    setUnreadableDeleteConfirmation(undefined);
+  }
+
+  function resetFormToNewDraft() {
+    const values = createNewGraphieDraftValues();
+    formValuesRef.current = values;
+    setFormValues(values);
+    legacyContentModeRef.current = false;
+    setLegacyContentMode(false);
+    draftContentRef.current = "";
+    setDraftContent("");
   }
 
   async function revokeCachedTaskContext(employeeId: string, taskId: string, isCurrentOpen: () => boolean) {
@@ -180,6 +198,7 @@ export default function App() {
     setDraftHydration("failed");
     setDraftSaveState("idle");
     setDeleteDraftConfirmation(undefined);
+    clearUnreadableDraft();
     setLocalDrafts([]);
     setCachedTaskContext(undefined);
     activeIdentityRef.current = null;
@@ -221,6 +240,7 @@ export default function App() {
     const generation = ++draftGenerationRef.current;
     draftOperationGenerationRef.current++;
     setDeleteDraftConfirmation(undefined);
+    clearUnreadableDraft();
     setDraftHydration("loading");
     setActiveSectionId(GRAPHIE_MOBILE_POV_CATALOGUE.sections[0]!.id);
     setDraftContent("");
@@ -303,8 +323,10 @@ export default function App() {
     } catch (cause) {
       if (generation === draftGenerationRef.current && openRequestGenerationRef.current === requestGeneration && activeIdentityRef.current === employeeId) {
         setDraftHydration("failed");
-        if (cause instanceof GraphiePayloadCompatibilityError || cause instanceof LocalDraftPayloadCompatibilityError) setDraftNotice(fr.employeeTasks.draftCompatibilityUnavailable);
-        else setError(fr.employeeTasks.draftStorageUnavailable);
+        if (cause instanceof GraphiePayloadCompatibilityError || cause instanceof LocalDraftPayloadCompatibilityError) {
+          setDraftNotice(fr.employeeTasks.draftCompatibilityUnavailable);
+          setUnreadableDraft({ employeeId, taskId });
+        } else setError(fr.employeeTasks.draftStorageUnavailable);
         await redactDraftIfAuthorizationLost(employeeId);
       }
     } finally { if (generation === draftGenerationRef.current && openRequestGenerationRef.current === requestGeneration && activeIdentityRef.current === employeeId) setLoading(false); }
@@ -364,6 +386,7 @@ export default function App() {
     draftGenerationRef.current++;
     draftOperationGenerationRef.current++;
     setDeleteDraftConfirmation(undefined);
+    clearUnreadableDraft();
     setDraftHydration("idle");
     if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
     detailRequestsRef.current.invalidate();
@@ -609,6 +632,7 @@ export default function App() {
     draftGenerationRef.current++;
     draftOperationGenerationRef.current++;
     setDeleteDraftConfirmation(undefined);
+    clearUnreadableDraft();
     setDraftHydration("loading");
     setTaskCacheWarning(undefined);
     setActiveSectionId(GRAPHIE_MOBILE_POV_CATALOGUE.sections[0]!.id);
@@ -682,8 +706,10 @@ export default function App() {
       } catch (cause) {
         if (generation === draftGenerationRef.current && openRequestGenerationRef.current === requestGeneration && activeIdentityRef.current === employeeId) {
           setDraftHydration("failed");
-          if (cause instanceof GraphiePayloadCompatibilityError || cause instanceof LocalDraftPayloadCompatibilityError) setDraftNotice(fr.employeeTasks.draftCompatibilityUnavailable);
-          else setError(fr.employeeTasks.draftStorageUnavailable);
+          if (cause instanceof GraphiePayloadCompatibilityError || cause instanceof LocalDraftPayloadCompatibilityError) {
+            setDraftNotice(fr.employeeTasks.draftCompatibilityUnavailable);
+            setUnreadableDraft({ employeeId, taskId: id });
+          } else setError(fr.employeeTasks.draftStorageUnavailable);
           await redactDraftIfAuthorizationLost(employeeId);
         }
       }
@@ -723,6 +749,8 @@ export default function App() {
     draftGenerationRef.current++;
     draftOperationGenerationRef.current++;
     const generation = draftGenerationRef.current;
+    setDeleteDraftConfirmation(undefined);
+    clearUnreadableDraft();
     pendingCachedOpenRef.current = { employeeId, taskId: authorizedTask.id, generation: requestGeneration };
     setTask(authorizedTask);
     setDetailState({ taskId: authorizedTask.id, status: "ready" });
@@ -782,8 +810,9 @@ export default function App() {
     } catch (cause) {
       if (openRequestGenerationRef.current !== requestGeneration || activeIdentityRef.current !== employeeId) return;
       setDraftHydration("failed");
-      setError(cause instanceof GraphiePayloadCompatibilityError || cause instanceof LocalDraftPayloadCompatibilityError
-        ? fr.employeeTasks.draftCompatibilityUnavailable : fr.employeeTasks.draftStorageUnavailable);
+      const incompatible = cause instanceof GraphiePayloadCompatibilityError || cause instanceof LocalDraftPayloadCompatibilityError;
+      setError(incompatible ? fr.employeeTasks.draftCompatibilityUnavailable : fr.employeeTasks.draftStorageUnavailable);
+      if (incompatible) setUnreadableDraft({ employeeId, taskId: authorizedTask.id });
       await redactDraftIfAuthorizationLost(employeeId);
       pendingCachedOpenRef.current = undefined;
     }
@@ -817,11 +846,10 @@ export default function App() {
     const deletion = draftSaveQueueRef.current.then(async () => {
       await draftsRef.current.delete(employeeId, captured.taskId, captured.revision);
       if (activeDraftScopeRef.current === scopeKey) {
-        draftContentRef.current = "";
+        resetFormToNewDraft();
         setActiveDraft(undefined);
         draftRevisionRef.current = 0;
         draftRevisionByScopeRef.current.set(scopeKey, 0);
-        setDraftContent("");
         setDraftSaveState("idle");
         setDraftHydration("ready");
         setDraftNotice(fr.employeeTasks.draftDeleted);
@@ -830,6 +858,52 @@ export default function App() {
       return true;
     }).catch(async () => {
       setError(fr.employeeTasks.draftDeleteFailed);
+      await redactDraftIfAuthorizationLost(employeeId);
+      return false;
+    }).finally(() => { draftDeletingRef.current = false; });
+    draftSaveQueueRef.current = deletion.then(() => undefined);
+  }
+
+  function beginUnreadableDraftDelete() {
+    const target = unreadableDraft;
+    const selected = activeScreenRef.current;
+    if (!user || !target || target.employeeId !== user.id || selected.kind !== "detail" || selected.id !== target.taskId) return;
+    setUnreadableDeleteConfirmation(target);
+  }
+
+  function confirmUnreadableDraftDelete() {
+    const captured = unreadableDeleteConfirmation;
+    setUnreadableDeleteConfirmation(undefined);
+    const selected = activeScreenRef.current;
+    if (!captured || !user || user.id !== captured.employeeId || draftDeletingRef.current
+      || selected.kind !== "detail" || selected.id !== captured.taskId
+      || unreadableDraft?.employeeId !== captured.employeeId || unreadableDraft.taskId !== captured.taskId) return;
+    if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
+    draftOperationGenerationRef.current++;
+    draftDeletingRef.current = true;
+    const { employeeId, taskId } = captured;
+    const scopeKey = `${employeeId}\u0000${taskId}`;
+    const deletion = draftSaveQueueRef.current.then(async () => {
+      await draftsRef.current.deleteUnreadable(employeeId, taskId);
+      if (activeDraftScopeRef.current === scopeKey) {
+        draftGenerationRef.current++;
+        resetFormToNewDraft();
+        setActiveDraft(undefined);
+        draftRevisionRef.current = 0;
+        draftRevisionByScopeRef.current.set(scopeKey, 0);
+        setUnreadableDraft(undefined);
+        setDraftSaveState("idle");
+        setDraftHydration("ready");
+        setError(undefined);
+        setDraftNotice(fr.employeeTasks.draftDeleted);
+      }
+      await refreshLocalDrafts(employeeId);
+      return true;
+    }).catch(async () => {
+      if (activeDraftScopeRef.current === scopeKey) {
+        setDraftNotice(fr.employeeTasks.draftCompatibilityUnavailable);
+        setError(fr.employeeTasks.draftDeleteFailed);
+      }
       await redactDraftIfAuthorizationLost(employeeId);
       return false;
     }).finally(() => { draftDeletingRef.current = false; });
@@ -886,6 +960,7 @@ export default function App() {
     setCachedTaskContext(undefined);
     setActiveDraft(undefined);
     setDraftContent("");
+    clearUnreadableDraft();
     setLocalDrafts([]);
     setTaskCacheWarning(undefined);
     setError(lockPersisted ? undefined : fr.auth.offlineUnavailable);
@@ -1020,6 +1095,14 @@ export default function App() {
                 </View> : null}
                 {draftNotice ? <Text accessibilityRole="summary" style={styles.muted}>{draftNotice}</Text> : null}
                 {error ? <Text accessibilityRole="alert" style={styles.error}>{error}</Text> : null}
+                {unreadableDraft && unreadableDraft.employeeId === user.id && screen.id === unreadableDraft.taskId ? <View style={{ gap: 10 }}>
+                  <Button title={fr.employeeTasks.deleteDraft} secondary onPress={beginUnreadableDraftDelete} disabled={draftDeletingRef.current || Boolean(unreadableDeleteConfirmation)} />
+                  {unreadableDeleteConfirmation && unreadableDeleteConfirmation.employeeId === user.id && unreadableDeleteConfirmation.taskId === screen.id ? <View style={styles.confirmation}>
+                    <Text accessibilityRole="alert" style={styles.muted}>{fr.employeeTasks.confirmDeleteDraft}</Text>
+                    <Button title={fr.common.cancel} secondary onPress={() => setUnreadableDeleteConfirmation(undefined)} />
+                    <Button title={fr.common.confirm} onPress={confirmUnreadableDraftDelete} />
+                  </View> : null}
+                </View> : null}
                 {detailState?.status === "error" ? <Button title={fr.common.retry} onPress={() => void retryTaskDetail()} disabled={loading} /> : null}
               </>
             )}

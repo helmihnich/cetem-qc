@@ -14,6 +14,8 @@ async function fixture(options: { key?: string; existing?: boolean; userVersion?
   const cachedRows = new Map<string, { task_json: string; synchronized_at: number }>();
   let version = options.userVersion ?? (options.existing ? 2 : 0);
   let generated = 0;
+  const statements: Array<{ sql: string; params: unknown[]; inTransaction: boolean }> = [];
+  let inTransaction = false;
   const store: SecureKeyValueStore = {
     async get(key) { events.push(`secure-get:${key}`); return values.get(key) ?? null; },
     async set(key, value) { events.push(`secure-set:${key}`); values.set(key, value); },
@@ -28,7 +30,8 @@ async function fixture(options: { key?: string; existing?: boolean; userVersion?
       const match = sql.match(/PRAGMA user_version = (\d+)/);
       if (match) version = Number(match[1]);
     },
-    async getFirstAsync<T>(sql: string): Promise<T | null> {
+    async getFirstAsync<T>(sql: string, ...params: unknown[]): Promise<T | null> {
+      statements.push({ sql, params, inTransaction });
       events.push(sql.includes("user_version") ? "read-user-version" : "read-schema");
       if (sql.includes("user_version") && options.databaseReadFailure) throw new Error("file is not a database");
       if (sql.includes("user_version")) return { user_version: version } as T;
@@ -36,11 +39,13 @@ async function fixture(options: { key?: string; existing?: boolean; userVersion?
       return options.existing ? { name: "local_drafts" } as T : null;
     },
     async getAllAsync<T>(sql: string, employeeId: string): Promise<T[]> {
+      statements.push({ sql, params: [employeeId], inTransaction });
       events.push("read-data");
       if (sql.includes("synchronized_tasks")) return [...cachedRows.entries()].filter(([key]) => key.startsWith(`${employeeId}/`)).map(([, row]) => row as T);
       return [...existingRows.values()].map((payload_json) => ({ payload_json }) as T);
     },
     async runAsync(sql: string, ...params: (string | number)[]) {
+      statements.push({ sql, params, inTransaction });
       events.push("write-data");
       if (/^\s*DELETE\s+FROM\s+local_drafts\b/i.test(sql)) existingRows.clear();
       if (sql.includes("DELETE FROM synchronized_tasks")) {
@@ -60,13 +65,14 @@ async function fixture(options: { key?: string; existing?: boolean; userVersion?
       const before = version;
       const draftsBefore = new Map(existingRows);
       const cacheBefore = new Map(cachedRows);
+      inTransaction = true;
       try { await operation(db); events.push("commit-transaction"); }
       catch (error) {
         version = before;
         existingRows.clear(); for (const [key, value] of draftsBefore) existingRows.set(key, value);
         cachedRows.clear(); for (const [key, value] of cacheBefore) cachedRows.set(key, value);
         events.push("rollback-transaction"); throw error;
-      }
+      } finally { inTransaction = false; }
     },
     async closeAsync() { events.push("close"); },
   };
@@ -82,7 +88,7 @@ async function fixture(options: { key?: string; existing?: boolean; userVersion?
     generated++;
     return new Uint8Array(length).fill(0xab);
   });
-  return { database, values, events, existingRows, cachedRows, generated: () => generated };
+  return { database, values, events, existingRows, cachedRows, statements, generated: () => generated };
 }
 
 test("retrieves an existing SecureStore key and configures SQLCipher before schema access", async () => {
@@ -164,4 +170,17 @@ test("authoritative cache replacement is employee-scoped and task revocation pre
   await f.database.revokeCachedSynchronizedTask("employee-a", "task-c");
   assert.deepEqual([...f.cachedRows.keys()], ["employee-b/task-b"]);
   assert.equal(f.existingRows.get("prior"), "preserved encrypted bytes");
+});
+
+test("M4 unreadable-draft deletion is one employee/task-scoped DELETE in an exclusive transaction with no prior read", async () => {
+  const f = await fixture({ key: "a".repeat(64), existing: true });
+  await f.database.read("employee-a", "task-a");
+  const before = f.statements.length;
+  await f.database.deleteUnreadable("employee-a", "task-a");
+  const issued = f.statements.slice(before);
+  assert.deepEqual(issued.map(({ sql, params, inTransaction }) => ({ sql: sql.replace(/\s+/g, " ").trim(), params, inTransaction })), [
+    { sql: "DELETE FROM local_drafts WHERE employee_id = ? AND task_id = ?", params: ["employee-a", "task-a"], inTransaction: true },
+  ]);
+  assert.ok(!issued.some(({ sql }) => /SELECT/i.test(sql)), "the unreadable row is never read or parsed");
+  assert.ok(!f.cachedRows.size, "synchronized task cache is not touched");
 });

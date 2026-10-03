@@ -26,6 +26,10 @@ function fixture() {
       if (failDelete) throw new Error("delete failure");
       records.delete(key(employeeId, taskId));
     },
+    async deleteUnreadable(employeeId, taskId) {
+      if (failDelete) throw new Error("delete failure");
+      records.delete(key(employeeId, taskId));
+    },
     async cacheSynchronizedTask(record) { records.set(`cache/${record.employeeId}/${record.task.id}`, JSON.stringify(record)); },
     async replaceCachedSynchronizedTasks(employeeId, replacements) {
       for (const key of records.keys()) if (key.startsWith(`cache/${employeeId}/`)) records.delete(key);
@@ -289,4 +293,59 @@ test("database migration initializes an empty versioned schema and rejects unkno
   version = 77;
   await assert.rejects(initializeDraftDatabase(database));
   assert.equal(version, 77);
+});
+
+const oldRuleDraft = (employeeId: string, taskId: string) => JSON.stringify({
+  id: `draft-${employeeId}-${taskId}`, employeeId, taskId, payloadSchemaVersion: 1,
+  revision: 3, createdAt: 100, savedAt: 120,
+  payload: { catalogueId: "graphie-mobile-pov", catalogueVersion: "2.0.0", schemaVersion: 3, ruleId: "cetem-workbook-explicit-formulas", ruleVersion: "1.0.0", values: { "voltage.accuracy.row1.kvMeasured": "70" } },
+});
+
+test("M1 deleteUnreadable removes only the stored unreadable row for that employee and task", async () => {
+  const f = fixture();
+  const drafts = f.repository();
+  const target = oldRuleDraft("employee-a", "task-a");
+  f.records.set("employee-a/task-a", target);
+  await assert.rejects(drafts.read("employee-a", "task-a"), LocalDraftPayloadCompatibilityError);
+  const otherTask = await drafts.save("employee-a", "task-b", "other task draft");
+  const otherEmployee = oldRuleDraft("employee-b", "task-a");
+  f.records.set("employee-b/task-a", otherEmployee);
+  const task = { id: "task-a", establishment: "Centre A", service: "Radiologie", createdAt: "2026-10-01T00:00:00.000Z" };
+  await drafts.cacheSynchronizedTask("employee-a", task);
+
+  await drafts.deleteUnreadable("employee-a", "task-a");
+
+  assert.equal(f.records.has("employee-a/task-a"), false);
+  assert.equal(await drafts.read("employee-a", "task-a"), null);
+  assert.deepEqual(await drafts.read("employee-a", "task-b"), otherTask);
+  assert.equal(f.records.get("employee-b/task-a"), otherEmployee);
+  assert.deepEqual((await drafts.listCachedSynchronizedTasks("employee-a")).map((entry) => entry.task), [task]);
+  const fresh = await drafts.save("employee-a", "task-a", "fresh draft");
+  assert.equal(fresh.revision, 1, "a fresh draft can start after the unreadable one is gone");
+});
+
+test("M2 deleteUnreadable resolves when no row exists", async () => {
+  const f = fixture();
+  await f.repository().deleteUnreadable("employee-a", "missing-task");
+  assert.equal(f.records.size, 0);
+});
+
+test("M3 deleteUnreadable is refused while protected access is locked and keeps the row bytes", async () => {
+  const f = fixture();
+  const original = oldRuleDraft("employee-a", "task-a");
+  f.records.set("employee-a/task-a", original);
+  let unlocked = false;
+  const authorized = createAuthorizedDrafts(f.repository(), async (id, operation) => {
+    if (!unlocked || id !== "employee-a") throw new Error("Protected data locked");
+    return operation();
+  });
+  await assert.rejects(authorized.deleteUnreadable("employee-a", "task-a"), /locked/);
+  assert.equal(f.records.get("employee-a/task-a"), original);
+  f.setFailDelete(true);
+  unlocked = true;
+  await assert.rejects(authorized.deleteUnreadable("employee-a", "task-a"), /delete failure/);
+  assert.equal(f.records.get("employee-a/task-a"), original);
+  f.setFailDelete(false);
+  await authorized.deleteUnreadable("employee-a", "task-a");
+  assert.equal(f.records.has("employee-a/task-a"), false);
 });

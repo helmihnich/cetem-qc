@@ -6,7 +6,9 @@
   "exports": { ".": "./src/index.ts", "./api/v1": "./src/generated/api-v1.ts", "./generated/api-v1": "./src/generated/api-v1.ts" },
   "scripts": {
     "generate": "openapi-typescript openapi/cetem-qc-v1.yaml -o src/generated/api-v1.ts",
-    "check:generated": "node scripts/check-generated.mjs"
+    "check:generated": "node scripts/check-generated.mjs",
+    "test": "node --test \"scripts/**/*.test.mjs\"",
+    "typecheck": "tsc --noEmit"
   },
   "devDependencies": { "openapi-typescript": "7.10.1" }
 }

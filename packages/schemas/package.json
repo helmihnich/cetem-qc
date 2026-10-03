@@ -7,5 +7,9 @@
     "zod": "4.6.5"
   },
   "type": "module",
+  "scripts": {
+    "test": "node --import tsx --test \"src/**/*.test.ts\"",
+    "typecheck": "tsc --noEmit"
+  },
   "exports": { ".": "./src/index.ts", "./api/v1": "./src/api/v1.ts" }
 }

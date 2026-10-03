@@ -27,8 +27,8 @@ param(
   [string]$PermissionMode = 'auto', # use 'acceptEdits' if 'auto' is not available on your plan
   [string]$Model = '',             # '' = Claude Code default
   [int]$MaxTurns = 300,
-  [int]$RateLimitWaitMinutes = 30,
-  [int]$RateLimitMaxWaits = 16     # 16 x 30 min = up to 8 hours waiting for usage limits
+  [int]$RateLimitWaitMinutes = 30, # used only when the limit message has no reset time
+  [int]$RateLimitMaxWaits = 400    # keeps waiting through session and weekly limits (Ctrl+C to stop)
 )
 
 $ErrorActionPreference = 'Continue'
@@ -354,6 +354,24 @@ $Denied = @(
   'Read(./.env)', 'Read(.env)', 'Bash(cat .env*)', 'Bash(type .env*)'
 ) -join ','
 
+function Get-LimitWaitSeconds([string]$Text) {
+  # "You've hit your session limit · resets 2:40pm (Africa/Tunis)" -> wait until 2:40pm + 2 min
+  if ($Text -match '(?i)resets\s+(\d{1,2})(?::(\d{2}))?\s*([ap]m)') {
+    $h = [int]$Matches[1]; $m = 0
+    if ($Matches[2]) { $m = [int]$Matches[2] }
+    $ampm = $Matches[3].ToLower()
+    if ($ampm -eq 'pm' -and $h -lt 12) { $h += 12 }
+    if ($ampm -eq 'am' -and $h -eq 12) { $h = 0 }
+    $now = Get-Date
+    $t = $now.Date.AddHours($h).AddMinutes($m)
+    # reset time just passed (or clocks differ a bit): retry in 2 minutes; long past: it means tomorrow
+    if ($t -le $now -and ($now - $t).TotalMinutes -lt 60) { return 120 }
+    if ($t -le $now) { $t = $t.AddDays(1) }
+    return [int]($t - $now).TotalSeconds + 120
+  }
+  return $RateLimitWaitMinutes * 60
+}
+
 function Invoke-ClaudeStep([string]$StepId, [string]$SkillPrompt, [string]$TaskText) {
   Write-Utf8 $TaskFile $TaskText
   if (Test-Path $ResultFile) { Remove-Item $ResultFile -Force }
@@ -386,11 +404,19 @@ function Invoke-ClaudeStep([string]$StepId, [string]$SkillPrompt, [string]$TaskT
     $isError = ($code -ne 0) -or ($res -and $res.is_error)
     if ($res -and $res.total_cost_usd) { Log ('  session cost estimate: ${0:N2}' -f $res.total_cost_usd) }
 
-    if ($isError -and ($raw -match '(?i)usage limit|rate.?limit|limit reached|overloaded|529|try again later|resets at')) {
+    $limitHit = $false
+    if ($isError) {
+      if ($res -and ($res.api_error_status -eq 429 -or $res.api_error_status -eq 529)) { $limitHit = $true }
+      if ($raw -match '(?i)hit your .{0,20}limit|session limit|weekly limit|usage limit|rate.?limit|limit reached|overloaded|try again later|resets\s') { $limitHit = $true }
+    }
+    if ($limitHit) {
       $waits++
       if ($waits -gt $RateLimitMaxWaits) { Stop-NeedsYou $StepId 'Usage limit still reached after many waits.' @('Rerun later when your usage limit has reset.') }
-      Log "  usage/rate limit - waiting $RateLimitWaitMinutes min ($waits/$RateLimitMaxWaits)" 'Yellow'
-      Start-Sleep -Seconds ($RateLimitWaitMinutes * 60)
+      $limitText = $raw
+      if ($res -and $res.result) { $limitText = [string]$res.result }
+      $sec = Get-LimitWaitSeconds $limitText
+      Log ("  usage limit reached: '{0}' - waiting {1} min until {2:ddd HH:mm} ({3}/{4})" -f ($limitText.Trim() -replace '\s+',' '), [int]($sec/60), (Get-Date).AddSeconds($sec), $waits, $RateLimitMaxWaits) 'Yellow'
+      Start-Sleep -Seconds $sec
       continue
     }
     break
@@ -459,20 +485,35 @@ function Assert-Gates([hashtable]$Item, [string]$Label) {
 
 # ---------------------------------------------------------------- commit + push with secret protection
 function Test-StagedSecrets {
+  # Returns a list of problems (empty = safe). Messages never contain the secret itself.
   $bad = @()
   foreach ($n in @(git diff --cached --name-only)) {
     if ($n -match '(^|/)\.env($|\.)' -and $n -notmatch '\.env\.example$') { $bad += "secret file staged: $n" }
   }
+  $file = ''
+  foreach ($line in @(git diff --cached -U0)) {
+    if ($line -match '^\+\+\+ b/(.+)$') { $file = $Matches[1]; continue }
+    if (-not $line.StartsWith('+')) { continue }
+    if ($line -match 'AIza[0-9A-Za-z_\-]{30,}')     { $bad += "Google API key in $file" }
+    if ($line -match 'AQ\.[0-9A-Za-z_\-]{30,}')      { $bad += "Google API key (AQ.) in $file" }
+    if ($line -match 'sk-ant-[0-9A-Za-z_\-]{20,}')   { $bad += "Anthropic key in $file" }
+    # database URL with a real-looking password (10+ chars) on a non-local, non-example host
+    foreach ($m in [regex]::Matches($line, 'postgres(?:ql)?://[^\s:/@"''`]+:([^\s@"''`]+)@([^\s/:?"''`]+)')) {
+      $pw = $m.Groups[1].Value; $hostName = $m.Groups[2].Value.ToLower()
+      if ($pw -match '^(\$|<|\*|\{)' -or $pw.Length -lt 10) { continue }
+      if ($hostName -match '^(127\.|localhost$|\[::1\]$|postgres$|db$|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)') { continue }
+      if ($hostName -match '(^|\.)(example\.(com|org|net)|example|test|invalid|local)$') { continue }
+      $bad += "database URL with a password for host $hostName in $file"
+    }
+  }
+  # the strongest check: no value from your real .env may appear in the commit
   $diff = (git diff --cached -U0 | Out-String)
-  $patterns = @('AIza[0-9A-Za-z_\-]{30,}', 'AQ\.[0-9A-Za-z_\-]{30,}', 'sk-ant-[0-9A-Za-z_\-]{20,}',
-                'postgres(ql)?://[^\s:/@]+:(?!password@|\$|<|\*)[^\s@]+@(?!127\.0\.0\.1|localhost|postgres[:/]|db[:/])[^\s]+')
-  foreach ($p in $patterns) { if ($diff -match $p) { $bad += "secret-like value matches /$p/" } }
   $envFile = Join-Path $Root '.env'
   if (Test-Path $envFile) {
-    foreach ($line in (Get-Content $envFile -Encoding UTF8)) {
-      if ($line -match '^\s*[A-Za-z0-9_]+\s*=\s*(.+?)\s*$') {
-        $v = $Matches[1].Trim('"').Trim("'")
-        if ($v.Length -ge 12 -and $diff.Contains($v)) { $bad += 'a value from .env appears in the staged changes' }
+    foreach ($envLine in (Get-Content $envFile -Encoding UTF8)) {
+      if ($envLine -match '^\s*([A-Za-z0-9_]+)\s*=\s*(.+?)\s*$') {
+        $v = $Matches[2].Trim('"').Trim("'")
+        if ($v.Length -ge 12 -and $diff.Contains($v)) { $bad += "the value of $($Matches[1]) from .env appears in the staged changes" }
       }
     }
   }

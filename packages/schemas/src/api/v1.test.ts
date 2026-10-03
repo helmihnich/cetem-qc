@@ -4,7 +4,7 @@ import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import type { apiV1Components, apiV1Operations } from "@cetem-qc/types";
-import { apiErrorSchema, createEmployeeRequestSchema, employeeCredentialResponseSchema, employeeListResponseSchema, employeeTaskListQuerySchema, employeeTaskListResponseSchema, employeeTaskResponseSchema, healthQuerySchema, healthResponseSchema, taskListQuerySchema, taskListResponseSchema, updateEmployeeStatusRequestSchema, updateEmployeeStatusResponseSchema } from "./v1.js";
+import { apiErrorSchema, createEmployeeRequestSchema, createTaskRequestSchema, employeeCredentialResponseSchema, employeeListResponseSchema, employeeTaskListQuerySchema, employeeTaskListResponseSchema, employeeTaskResponseSchema, healthQuerySchema, healthResponseSchema, taskListQuerySchema, taskListResponseSchema, updateEmployeeStatusRequestSchema, updateEmployeeStatusResponseSchema } from "./v1.js";
 
 const contractPath = fileURLToPath(new URL("../../../types/openapi/cetem-qc-v1.yaml", import.meta.url));
 
@@ -117,4 +117,28 @@ test("session 500 responses reference the shared API error schema", async () => 
   const openapi = await readFile(path.resolve(contractPath), "utf8");
   assert.match(openapi, /getCurrentSession[\s\S]*?'500':[\s\S]*?\$ref: '#\/components\/schemas\/ApiError'/);
   assert.match(openapi, /logoutCurrentSession[\s\S]*?'500':[\s\S]*?\$ref: '#\/components\/schemas\/ApiError'/);
+});
+
+test("task creation rejects NUL characters and blank establishments, and trims the establishment", () => {
+  const request = { establishment: "Centre", service: "Radiologie", type: "graphie_mobile", assigneeId: "00000000-0000-4000-8000-000000000010" } as const;
+  assert.equal(createTaskRequestSchema.safeParse({ ...request, establishment: "Cen\u0000tre" }).success, false);
+  assert.equal(createTaskRequestSchema.safeParse({ ...request, service: "Radio\u0000logie" }).success, false);
+  assert.equal(createTaskRequestSchema.safeParse({ ...request, establishment: " 	 " }).success, false);
+  assert.equal(createTaskRequestSchema.parse({ ...request, establishment: " Centre " }).establishment, "Centre");
+  assert.equal(createTaskRequestSchema.safeParse({ ...request, service: "" }).success, true);
+});
+
+test("OpenAPI task creation patterns match the runtime NUL and blank-establishment rules", async () => {
+  const openapi = await readFile(path.resolve(contractPath), "utf8");
+  const block = openapi.match(/CreateTaskRequest:[\s\S]*?assigneeId:/)?.[0] ?? "";
+  const establishmentPattern = block.match(/establishment:[\s\S]*?pattern: '([^']+)'/)?.[1];
+  const servicePattern = block.match(/service:[\s\S]*?pattern: '([^']+)'/)?.[1];
+  assert.ok(establishmentPattern && servicePattern, "CreateTaskRequest declares establishment and service patterns");
+  const establishment = new RegExp(establishmentPattern);
+  const service = new RegExp(servicePattern);
+  assert.equal(establishment.test(" Centre "), true);
+  assert.equal(establishment.test("   "), false);
+  assert.equal(establishment.test("Cen\u0000tre"), false);
+  assert.equal(service.test(""), true);
+  assert.equal(service.test("Radio\u0000logie"), false);
 });

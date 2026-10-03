@@ -74,6 +74,8 @@ export interface DraftRepository {
   list(employeeId: string): Promise<LocalDraft[]>;
   save(employeeId: string, taskId: string, content: string | GraphieDraftPayload, expectedRevision?: number): Promise<LocalDraft>;
   delete(employeeId: string, taskId: string, expectedRevision: number): Promise<void>;
+  /** Deletes the draft row for one employee and task without reading or parsing it (unreadable drafts only). */
+  deleteUnreadable(employeeId: string, taskId: string): Promise<void>;
   cacheSynchronizedTask(employeeId: string, task: CachedSynchronizedTask["task"]): Promise<void>;
   replaceCachedSynchronizedTasks(employeeId: string, tasks: CachedSynchronizedTask["task"][]): Promise<void>;
   revokeCachedSynchronizedTask(employeeId: string, taskId: string): Promise<void>;
@@ -85,6 +87,7 @@ export interface DraftDatabase {
   list(employeeId: string): Promise<string[]>;
   save(record: LocalDraft, expectedRevision?: number): Promise<void>;
   delete(employeeId: string, taskId: string, expectedRevision: number): Promise<void>;
+  deleteUnreadable(employeeId: string, taskId: string): Promise<void>;
   cacheSynchronizedTask(record: CachedSynchronizedTask): Promise<void>;
   replaceCachedSynchronizedTasks(employeeId: string, records: CachedSynchronizedTask[]): Promise<void>;
   revokeCachedSynchronizedTask(employeeId: string, taskId: string): Promise<void>;
@@ -149,6 +152,9 @@ export function createDraftRepository(database: DraftDatabase, now: () => number
     },
     async delete(employeeId, taskId, expectedRevision) {
       return serialize(scope(employeeId, taskId), () => database.delete(employeeId, taskId, expectedRevision));
+    },
+    async deleteUnreadable(employeeId, taskId) {
+      return serialize(scope(employeeId, taskId), () => database.deleteUnreadable(employeeId, taskId));
     },
     async cacheSynchronizedTask(employeeId, task) {
       const record: CachedSynchronizedTask = { employeeId, task: { ...task }, synchronizedAt: now() };

@@ -5,7 +5,7 @@ import test, { mock } from "node:test";
 import { EMPLOYEE_CONTENT_HORIZONTAL_GUTTER } from "./employee-task-layout.js";
 import { createOfflineAuthorizationService } from "./offline-authorization-state.js";
 import { runOnlyWhenOnlineAuthorized } from "./server-work-authorization.js";
-import { GRAPHIE_MOBILE_POV_CATALOGUE } from "./graphie-pov-catalogue.js";
+import { GRAPHIE_MOBILE_POV_CATALOGUE, createNewGraphieDraftValues } from "./graphie-pov-catalogue.js";
 import { fr } from "@cetem-qc/i18n";
 
 const runtime = globalThis as typeof globalThis & {
@@ -36,6 +36,7 @@ const runtime = globalThis as typeof globalThis & {
   __assignedTasksByEmployee?: Map<string, Task[]>;
   __failTaskListForEmployee?: Set<string>;
   __failDraftList?: boolean;
+  __failDraftDelete?: boolean;
 };
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -127,9 +128,12 @@ mock.module("expo-sqlite", { namedExports: {
           const record = JSON.parse(String(payloadJson));
           rows.set(key(String(employeeId), String(taskId)), JSON.stringify({ ...record, id, employeeId, taskId, payloadSchemaVersion, revision, createdAt, savedAt }));
         } else if (sql.includes("DELETE FROM local_drafts")) {
+          if (runtime.__failDraftDelete) throw new Error("delete failed");
           const [employeeId, taskId, revision] = params;
           const current = rows.get(key(String(employeeId), String(taskId)));
-          if (current && (JSON.parse(current) as { revision: number }).revision === revision) { rows.delete(key(String(employeeId), String(taskId))); return { changes: 1, lastInsertRowId: 1 }; }
+          // Without a revision parameter the statement is the unconditional unreadable-draft delete.
+          const matches = current !== undefined && (!sql.includes("revision") || (JSON.parse(current) as { revision: number }).revision === revision);
+          if (matches) { rows.delete(key(String(employeeId), String(taskId))); return { changes: 1, lastInsertRowId: 1 }; }
           return { changes: 0, lastInsertRowId: 0 };
         }
         return { changes: 1, lastInsertRowId: 1 };
@@ -226,6 +230,7 @@ function installMocks() {
   runtime.__draftReadStarted = undefined;
   runtime.__draftWriteStarted = undefined;
   runtime.__failDraftList = false;
+  runtime.__failDraftDelete = false;
   runtime.__networkOnline = true;
   runtime.__sessionAvailable = true;
   const api: MockApi = {
@@ -1770,5 +1775,206 @@ test("a stored catalogue 2.0.0 / schema 3 draft stamped with the old workbook ru
   assert.equal(findButton(tree, "Enregistrer").props.disabled, true);
   await act(async () => { await new Promise((resolve) => setTimeout(resolve, 600)); });
   assert.equal(runtime.__draftRows!.get(key), storedRow);
+  await act(async () => { tree.unmount(); });
+});
+
+const unreadableDraftRows = {
+  oldRule: (taskId: string) => JSON.stringify({
+    id: "old-rule-form", employeeId: "employee-1", taskId,
+    payloadSchemaVersion: 1, revision: 3, createdAt: 10, savedAt: 20,
+    payload: { catalogueId: "graphie-mobile-pov", catalogueVersion: "2.0.0", schemaVersion: 3, ruleId: "cetem-workbook-explicit-formulas", ruleVersion: "1.0.0", values: { "header.reportNumber": "old rule report", "voltage.accuracy.row1.kvMeasured": "49.2" } },
+  }),
+  catalogueV1: (taskId: string) => JSON.stringify({
+    id: "v1-form", employeeId: "employee-1", taskId,
+    payloadSchemaVersion: 1, revision: 4, createdAt: 10, savedAt: 20,
+    payload: { catalogueId: "graphie-mobile-pov", catalogueVersion: "1.0.0", schemaVersion: 2, ruleId: "cetem-workbook-explicit-formulas", ruleVersion: "1.0.0", values: { "intervention.contexte": "v1 context", "voltage.accuracy": "49.2" } },
+  }),
+};
+const reportNumberLabel = GRAPHIE_MOBILE_POV_CATALOGUE.sections[0]!.fields.find((field) => field.id === "header.reportNumber")!.labelFr;
+
+function hasButton(tree: ReactTestRenderer, title: string) {
+  return tree.root.findAll((node) => node.type === "Pressable" && node.findAll((child) => child.type === "Text" && child.children.join("") === title).length > 0).length > 0;
+}
+
+async function assertPaperDefaultsShown(tree: ReactTestRenderer) {
+  const defaults = createNewGraphieDraftValues();
+  assert.equal(findInput(tree, reportNumberLabel)?.props.value, defaults["header.reportNumber"] ?? "");
+  assert.equal(findChoice(tree, "Nature de l'intervention: Convention, sélectionné")?.props.accessibilityState.selected, true);
+  await goToSection(tree, "instruments");
+  assert.equal(findInput(tree, "KVp mètre — Marque")?.props.value, defaults["instruments.kvpMeter.brand"]);
+  await goToSection(tree, "header");
+}
+
+test("M5 online: an old-rule draft is discarded from the compatibility notice and the form is re-seeded", async () => {
+  await loadApp();
+  installMocks();
+  const key = `employee-1/${firstTask.id}`;
+  const storedRow = unreadableDraftRows.oldRule(firstTask.id);
+  runtime.__draftRows!.set(key, storedRow);
+  runtime.__draftRows!.set(`employee-1/${secondTask.id}`, unreadableDraftRows.oldRule(secondTask.id));
+  let tree!: ReactTestRenderer;
+  await act(async () => { tree = create(<App />); });
+  await signIn(tree);
+  await act(async () => { findTaskRow(tree, firstTask.establishment).props.onPress(); });
+  assert.ok(findText(tree, fr.employeeTasks.draftCompatibilityUnavailable));
+  assert.equal(findButton(tree, fr.employeeTasks.saveDraft).props.disabled, true);
+
+  await act(async () => { findButton(tree, fr.employeeTasks.deleteDraft).props.onPress(); });
+  assert.ok(findText(tree, fr.employeeTasks.confirmDeleteDraft));
+  assert.equal(runtime.__draftRows!.get(key), storedRow, "asking for confirmation does not touch storage");
+  await act(async () => { findButton(tree, fr.common.confirm).props.onPress(); for (let tick = 0; tick < 4; tick++) await new Promise((resolve) => setTimeout(resolve, 0)); });
+
+  assert.equal(runtime.__draftRows!.has(key), false, "the unreadable row is deleted");
+  assert.ok(runtime.__draftRows!.has(`employee-1/${secondTask.id}`), "another task's draft is untouched");
+  assert.ok(findText(tree, fr.employeeTasks.draftDeleted));
+  assert.equal(findText(tree, fr.employeeTasks.draftCompatibilityUnavailable), undefined);
+  assert.equal(hasButton(tree, fr.employeeTasks.deleteDraft), false);
+  assert.equal(findButton(tree, fr.employeeTasks.saveDraft).props.disabled, false);
+  await assertPaperDefaultsShown(tree);
+  await act(async () => { assert.equal(await findButton(tree, fr.employeeTasks.saveDraft).props.onPress(), true); });
+  const saved = JSON.parse(runtime.__draftRows!.get(key)!) as { revision: number; payload: { ruleId: string; values: Record<string, string> } };
+  assert.equal(saved.revision, 1, "a fresh draft starts after the unreadable one is gone");
+  assert.equal(saved.payload.ruleId, "cetem-paper-form");
+  assert.equal(saved.payload.values["header.interventionNature"], "Convention");
+  await act(async () => { tree.unmount(); });
+});
+
+test("M6 offline: a cached catalogue 1.0.0 / schema 2 draft can be discarded without a connection", async () => {
+  await loadApp();
+  const api = installMocks();
+  const key = `employee-1/${firstTask.id}`;
+  let tree!: ReactTestRenderer;
+  await act(async () => { tree = create(<App />); });
+  await signIn(tree);
+  await act(async () => { tree.unmount(); });
+
+  runtime.__draftRows!.set(key, unreadableDraftRows.catalogueV1(firstTask.id));
+  runtime.__networkOnline = false;
+  const detailCalls = [...api.detailCalls];
+  await act(async () => { tree = create(<App />); await new Promise((resolve) => setTimeout(resolve, 0)); });
+  await act(async () => { (await waitForButton(tree, firstTask.establishment)).props.onPress(); for (let tick = 0; tick < 100; tick++) await new Promise((resolve) => setTimeout(resolve, 0)); });
+  assert.ok(findText(tree, fr.employeeTasks.draftCompatibilityUnavailable));
+  assert.equal(findButton(tree, fr.employeeTasks.saveDraft).props.disabled, true);
+
+  await act(async () => { findButton(tree, fr.employeeTasks.deleteDraft).props.onPress(); });
+  await act(async () => { findButton(tree, fr.common.confirm).props.onPress(); for (let tick = 0; tick < 4; tick++) await new Promise((resolve) => setTimeout(resolve, 0)); });
+
+  assert.equal(runtime.__draftRows!.has(key), false);
+  assert.ok(findText(tree, fr.employeeTasks.draftDeleted));
+  assert.equal(findText(tree, fr.employeeTasks.draftCompatibilityUnavailable), undefined);
+  assert.equal(findButton(tree, fr.employeeTasks.saveDraft).props.disabled, false);
+  await assertPaperDefaultsShown(tree);
+  assert.deepEqual(api.detailCalls, detailCalls, "the offline discard makes no server call");
+  await act(async () => { tree.unmount(); });
+});
+
+test("M7 cancelling the unreadable-draft discard keeps the bytes and the notice", async () => {
+  await loadApp();
+  installMocks();
+  const key = `employee-1/${firstTask.id}`;
+  const storedRow = unreadableDraftRows.oldRule(firstTask.id);
+  runtime.__draftRows!.set(key, storedRow);
+  let tree!: ReactTestRenderer;
+  await act(async () => { tree = create(<App />); });
+  await signIn(tree);
+  await act(async () => { findTaskRow(tree, firstTask.establishment).props.onPress(); });
+  await act(async () => { findButton(tree, fr.employeeTasks.deleteDraft).props.onPress(); });
+  await act(async () => { findButton(tree, fr.common.cancel).props.onPress(); });
+  assert.equal(findText(tree, fr.employeeTasks.confirmDeleteDraft), undefined);
+  assert.ok(findText(tree, fr.employeeTasks.draftCompatibilityUnavailable));
+  assert.equal(findButton(tree, fr.employeeTasks.deleteDraft).props.disabled, false);
+  assert.equal(findButton(tree, fr.employeeTasks.saveDraft).props.disabled, true);
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 600)); });
+  assert.equal(runtime.__draftRows!.get(key), storedRow);
+  await act(async () => { tree.unmount(); });
+});
+
+test("M8 a failed unreadable-draft delete reports the failure and keeps the bytes", async () => {
+  await loadApp();
+  installMocks();
+  const key = `employee-1/${firstTask.id}`;
+  const storedRow = unreadableDraftRows.oldRule(firstTask.id);
+  runtime.__draftRows!.set(key, storedRow);
+  let tree!: ReactTestRenderer;
+  await act(async () => { tree = create(<App />); });
+  await signIn(tree);
+  await act(async () => { findTaskRow(tree, firstTask.establishment).props.onPress(); });
+  runtime.__failDraftDelete = true;
+  await act(async () => { findButton(tree, fr.employeeTasks.deleteDraft).props.onPress(); });
+  await act(async () => { findButton(tree, fr.common.confirm).props.onPress(); for (let tick = 0; tick < 4; tick++) await new Promise((resolve) => setTimeout(resolve, 0)); });
+  assert.ok(findText(tree, "Le brouillon local n’a pas pu être supprimé. Il est conservé."));
+  assert.ok(findText(tree, fr.employeeTasks.draftCompatibilityUnavailable));
+  assert.equal(runtime.__draftRows!.get(key), storedRow);
+  assert.equal(findButton(tree, fr.employeeTasks.saveDraft).props.disabled, true);
+  assert.equal(findButton(tree, fr.employeeTasks.deleteDraft).props.disabled, false, "the discard can be retried");
+  await act(async () => { tree.unmount(); });
+});
+
+test("M9 after an explicit delete of a normal draft the form shows a new draft, not the deleted values", async () => {
+  await loadApp();
+  installMocks();
+  const key = `employee-1/${firstTask.id}`;
+  let tree!: ReactTestRenderer;
+  await act(async () => { tree = create(<App />); });
+  await signIn(tree);
+  await act(async () => { findTaskRow(tree, firstTask.establishment).props.onPress(); });
+  await act(async () => { findInput(tree, reportNumberLabel)!.props.onChangeText("value to delete"); });
+  await act(async () => { findChoice(tree, "Nature de l'intervention: Demande ponctuelle")!.props.onPress(); });
+  await goToSection(tree, "instruments");
+  await act(async () => { findInput(tree, "KVp mètre — Marque")!.props.onChangeText("Autre marque"); });
+  await goToSection(tree, "header");
+  await act(async () => { assert.equal(await findButton(tree, fr.employeeTasks.saveDraft).props.onPress(), true); });
+  assert.ok(runtime.__draftRows!.has(key));
+
+  await act(async () => { findButton(tree, fr.employeeTasks.deleteDraft).props.onPress(); });
+  await act(async () => { findButton(tree, fr.common.confirm).props.onPress(); for (let tick = 0; tick < 4; tick++) await new Promise((resolve) => setTimeout(resolve, 0)); });
+  assert.equal(runtime.__draftRows!.has(key), false);
+  assert.ok(findText(tree, fr.employeeTasks.draftDeleted));
+  assert.equal(tree.root.findAll((node) => node.type === "TextInput").some((node) => node.props.value === "value to delete"), false);
+  await assertPaperDefaultsShown(tree);
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 600)); });
+  assert.equal(runtime.__draftRows!.has(key), false, "the reset form is not autosaved as a new draft");
+  await act(async () => { tree.unmount(); });
+});
+
+test("M9b after an explicit delete of a legacy-content draft the form leaves legacy mode", async () => {
+  await loadApp();
+  installMocks();
+  const key = `employee-1/${firstTask.id}`;
+  runtime.__draftRows!.set(key, JSON.stringify({
+    id: "legacy-to-delete", employeeId: "employee-1", taskId: firstTask.id,
+    payloadSchemaVersion: 1, revision: 2, payload: { content: "legacy text to delete" }, createdAt: 10, savedAt: 20,
+  }));
+  let tree!: ReactTestRenderer;
+  await act(async () => { tree = create(<App />); });
+  await signIn(tree);
+  await act(async () => { findTaskRow(tree, firstTask.establishment).props.onPress(); });
+  assert.equal(findInput(tree, fr.employeeTasks.legacyDraftContent)?.props.value, "legacy text to delete");
+
+  await act(async () => { findButton(tree, fr.employeeTasks.deleteDraft).props.onPress(); });
+  await act(async () => { findButton(tree, fr.common.confirm).props.onPress(); for (let tick = 0; tick < 4; tick++) await new Promise((resolve) => setTimeout(resolve, 0)); });
+  assert.equal(runtime.__draftRows!.has(key), false);
+  assert.ok(findText(tree, fr.employeeTasks.draftDeleted));
+  assert.equal(findInput(tree, fr.employeeTasks.legacyDraftContent), undefined, "legacy-content mode is off");
+  await assertPaperDefaultsShown(tree);
+  await act(async () => { assert.equal(await findButton(tree, fr.employeeTasks.saveDraft).props.onPress(), true); });
+  const saved = JSON.parse(runtime.__draftRows!.get(key)!) as { payload: { content?: string; ruleId: string } };
+  assert.equal(saved.payload.content, undefined, "the next save stores a structured draft, not the legacy text");
+  assert.equal(saved.payload.ruleId, "cetem-paper-form");
+  await act(async () => { tree.unmount(); });
+});
+
+test("M10 a generic draft storage failure offers no discard action", async () => {
+  await loadApp();
+  installMocks();
+  const key = `employee-1/${firstTask.id}`;
+  runtime.__draftRows!.set(key, "{not json");
+  let tree!: ReactTestRenderer;
+  await act(async () => { tree = create(<App />); });
+  await signIn(tree);
+  await act(async () => { findTaskRow(tree, firstTask.establishment).props.onPress(); });
+  assert.ok(findText(tree, fr.employeeTasks.draftStorageUnavailable));
+  assert.equal(hasButton(tree, fr.employeeTasks.deleteDraft), false);
+  assert.equal(runtime.__draftRows!.get(key), "{not json");
   await act(async () => { tree.unmount(); });
 });
