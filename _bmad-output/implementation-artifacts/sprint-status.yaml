@@ -29,7 +29,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 # - Retrospective appends its action items to action_items; the status view surfaces open ones
 generated: 09-26-2026 18:00
-last_updated: 10-04-2026 07:00
+last_updated: 10-04-2026 11:20
 project: cetem-qc
 project_key: NOKEY
 tracking_system: file-system
@@ -69,7 +69,7 @@ development_status:
   5-6-align-the-graphie-mobile-form-with-the-official-cetem-paper-form: done
   epic-5-retrospective: done
 
-  epic-6: in-progress
+  epic-6: done
   6-1-implement-explicitly-defined-source-workbook-calculations: done
   6-2-share-versioned-calculation-logic-between-mobile-and-server: done
   6-3-display-authorized-calculation-results-in-the-employe-form: done
@@ -77,7 +77,7 @@ development_status:
   6-5-separate-formula-regression-fixtures-from-approved-acceptanc: done
   6-6-align-calculation-rules-with-the-official-cetem-paper-form: done  # must land before 6-3
   6-7-harden-the-test-harness-and-recover-unreadable-drafts: done
-  epic-6-retrospective: optional
+  epic-6-retrospective: done
 
   epic-7: backlog
   7-1-queue-durable-synchronization-operations: backlog
@@ -134,7 +134,8 @@ action_items:
       test the composed create/list flow."
     owner: "Web/task UI maintainer"
     status: open
-    note: "Needs a web render-test harness that does not exist yet; out of scope for Story 6.7 (non-goal)."
+    note: "Needs a web render-test harness that does not exist yet; out of scope for
+      Story 6.7 (non-goal)."
     ref: "_bmad-output/implementation-artifacts/epic-4-retro-2026-09-30.md"
   - id: "epic-4-retro-item-2-reject-postgresql-incompatible-nul-chara"
     epic: 4
@@ -142,7 +143,10 @@ action_items:
       the OpenAPI establishment constraint with trim-then-non-empty runtime behavior."
     owner: "API and contract maintainers"
     status: done
-    note: "Story 6.7: createTaskRequestSchema rejects NUL in establishment and service (400 VALIDATION_ERROR, no PostgreSQL 500); OpenAPI CreateTaskRequest patterns require a non-whitespace establishment and no NUL; schema tests plus a PostgreSQL route test."
+    note: "Story 6.7: createTaskRequestSchema rejects NUL in establishment and service
+      (400 VALIDATION_ERROR, no PostgreSQL 500); OpenAPI CreateTaskRequest patterns
+      require a non-whitespace establishment and no NUL; schema tests plus a PostgreSQL
+      route test."
     ref: "_bmad-output/implementation-artifacts/epic-4-retro-2026-09-30.md"
   - id: "epic-4-retro-item-3-apply-openapi-first-same-story-contract"
     epic: 4
@@ -150,7 +154,8 @@ action_items:
       tests to every new Epic 5 HTTP operation."
     owner: "API/client maintainers"
     status: done
-    note: "Epic 5 is closed; contracts:check and the api-client/schemas tests, which now run under pnpm -r test, enforce it."
+    note: "Epic 5 is closed; contracts:check and the api-client/schemas tests, which
+      now run under pnpm -r test, enforce it."
     ref: "_bmad-output/implementation-artifacts/epic-4-retro-2026-09-30.md"
   - id: "epic-4-retro-item-4-require-direct-api-authorization-coverag"
     epic: 4
@@ -158,7 +163,8 @@ action_items:
       for role/team/assignment predicates, transactions, and rollback."
     owner: "API maintainers and reviewers"
     status: done
-    note: "Story 6.7: the existing route and PostgreSQL integration tests now run under pnpm -r test against the local database (CAP-1, CAP-2)."
+    note: "Story 6.7: the existing route and PostgreSQL integration tests now run
+      under pnpm -r test against the local database (CAP-1, CAP-2)."
     ref: "_bmad-output/implementation-artifacts/epic-4-retro-2026-09-30.md"
   - id: "epic-4-retro-item-5-require-migration-tests-to-reproduce-the"
     epic: 4
@@ -166,7 +172,9 @@ action_items:
       and require zero skipped PostgreSQL tests in final verification."
     owner: "Database/API maintainers and reviewers"
     status: done
-    note: "Story 6.7: the PostgreSQL harness migrates with the production runner (staged upgrades via migrateThrough), and PostgreSQL tests fail instead of skipping (CAP-2)."
+    note: "Story 6.7: the PostgreSQL harness migrates with the production runner (staged
+      upgrades via migrateThrough), and PostgreSQL tests fail instead of skipping
+      (CAP-2)."
     ref: "_bmad-output/implementation-artifacts/epic-4-retro-2026-09-30.md"
   - id: "epic-4-retro-item-6-require-local-persistence-tests-for-dura"
     epic: 4
@@ -174,7 +182,9 @@ action_items:
       restart recovery, deletion, offline authorization, and no silent overwrite."
     owner: "Mobile maintainers and reviewers"
     status: done
-    note: "Covered by apps/mobile/local-drafts/local-drafts.test.ts (remount, failed save/delete, revision guard, authorization lock) plus the Story 6.7 deleteUnreadable tests."
+    note: "Covered by apps/mobile/local-drafts/local-drafts.test.ts (remount, failed
+      save/delete, revision guard, authorization lock) plus the Story 6.7 deleteUnreadable
+      tests."
     ref: "_bmad-output/implementation-artifacts/epic-4-retro-2026-09-30.md"
   - id: "epic-4-retro-item-7-require-overlapping-out-of-order-state-t"
     epic: 4
@@ -192,7 +202,8 @@ action_items:
       separated from native/device evidence."
     owner: "Epic 5 story owners and reviewers"
     status: open
-    note: "Gates now cover boundaries, recursive typecheck (all packages) and git diff --check; builds and Expo exports are still not recorded."
+    note: "Gates now cover boundaries, recursive typecheck (all packages) and git
+      diff --check; builds and Expo exports are still not recorded."
     ref: "_bmad-output/implementation-artifacts/epic-4-retro-2026-09-30.md"
   - id: "epic-4-retro-item-9-keep-dep-01-dependent-form-portions-bloc"
     epic: 4
@@ -210,7 +221,8 @@ action_items:
       review scenarios and verification results."
     owner: "Mobile story owner"
     status: open
-    note: "No Story 5.5 spec in implementation-artifacts; reconstructing its closure evidence is documentation work beyond Story 6.7."
+    note: "No Story 5.5 spec in implementation-artifacts; reconstructing its closure
+      evidence is documentation work beyond Story 6.7."
     ref: "_bmad-output/implementation-artifacts/epic-5-retro-2026-10-01.md"
   - id: "epic-5-retro-item-11-maintain-delayed-operation-authorization"
     epic: 5
@@ -227,7 +239,8 @@ action_items:
       provenance, separate from CETEM-approved acceptance fixtures, before Story 6.1."
     owner: "Calculation implementation owner"
     status: done
-    note: "packages/domain/src/graphie-calculations.source-regression.ts (Stories 6.1 and 6.6)."
+    note: "packages/domain/src/graphie-calculations.source-regression.ts (Stories
+      6.1 and 6.6)."
     ref: "_bmad-output/implementation-artifacts/epic-5-retro-2026-10-01.md"
   - id: "epic-5-retro-item-13-track-native-builds-device-behavior-nati"
     epic: 5
@@ -237,3 +250,51 @@ action_items:
     status: open
     note: "Needs physical devices; tracked for Story 12.9."
     ref: "_bmad-output/implementation-artifacts/epic-5-retro-2026-10-01.md"
+  - id: "epic-6-retro-item-14-annotate-the-workbook-specific-clauses-o"
+    epic: 6
+    action: "Annotate the workbook-specific clauses of the Story 6.1 and 6.2 acceptance
+      criteria in epics.md (0.49 factor and wrapper, normalized-Kerma reproducibility,
+      initial baseline) as superseded by Story 6.6 / rule cetem-paper-form 2.0.0."
+    owner: "Product Owner (Helmi) / story author"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-6-retro-2026-10-04.md"
+  - id: "epic-6-retro-item-15-in-stories-7-3-7-4-recalculate-accepted"
+    epic: 6
+    action: "In Stories 7.3/7.4, recalculate accepted drafts on the server through
+      the domain calculateGraphieResults path (raw strings via parseGraphieReading)
+      and enforce that the stored identity matches the identity the results were computed
+      under."
+    owner: "Epic 7 story authors / API maintainers"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-6-retro-2026-10-04.md"
+  - id: "epic-6-retro-item-16-make-every-pipeline-commit-subject-name"
+    epic: 6
+    action: "Make every pipeline commit subject name its story key and commit tooling/pipeline
+      edits (scripts/automation) separately from story work."
+    owner: "Pipeline operator (Helmi)"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-6-retro-2026-10-04.md"
+  - id: "epic-6-retro-item-17-decide-on-gate-coverage-hardening-a-guar"
+    epic: 6
+    action: "Decide on gate-coverage hardening: a guard comparing tracked test files
+      with what pnpm -r test runs, typecheck of mobile test files, and cleanup of
+      stale test_<uuid> PostgreSQL schemas."
+    owner: "Product Owner with API/mobile maintainers"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-6-retro-2026-10-04.md"
+  - id: "epic-6-retro-item-18-when-the-cetem-approved-dataset-arrives"
+    epic: 6
+    action: "When the CETEM approved dataset arrives, harden the approved-acceptance
+      runner: require complete expected.values, check value keys against graphie-inputs
+      field IDs, and decide (documentRef, id) uniqueness."
+    owner: "Calculation implementation owner"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-6-retro-2026-10-04.md"
+  - id: "epic-6-retro-item-19-request-from-cetem-the-light-field-toler"
+    epic: 6
+    action: "Request from CETEM the light-field tolerance and the approved reference
+      dataset (normal, abnormal, invalid, boundary cases); calculation acceptance
+      stays blocked (DEP-02) until then."
+    owner: "Product Owner (Helmi)"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-6-retro-2026-10-04.md"
