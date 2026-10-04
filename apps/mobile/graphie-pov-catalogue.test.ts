@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { GRAPHIE_CALCULATION_CATALOGUE, GRAPHIE_CALCULATION_RULE_ID, GRAPHIE_CALCULATION_RULE_VERSION } from "@cetem-qc/domain";
+import { GRAPHIE_CALCULATION_CATALOGUE, GRAPHIE_CALCULATION_FIELD_ID_LIST, GRAPHIE_CALCULATION_RULE_ID, GRAPHIE_CALCULATION_RULE_VERSION } from "@cetem-qc/domain";
 import { GRAPHIE_CATALOGUE_VERSION, GRAPHIE_FORM_SCHEMA_VERSION, GRAPHIE_MOBILE_POV_CATALOGUE, GraphiePayloadCompatibilityError, KERMA_REUSE_HELP_FR, createNewGraphieDraftValues, parseGraphiePayload } from "./graphie-pov-catalogue.js";
 
 const sections = GRAPHIE_MOBILE_POV_CATALOGUE.sections;
@@ -219,4 +219,11 @@ test("legacy Story 5.3 content is preserved and malformed shapes stay rejected",
     null,
     [],
   ]) assert.throws(() => parseGraphiePayload(payload), GraphiePayloadCompatibilityError);
+});
+
+test("C1 every field ID read by the domain calculation mapping is a catalogue number field", () => {
+  assert.equal(GRAPHIE_CALCULATION_FIELD_ID_LIST.length, 28);
+  for (const id of GRAPHIE_CALCULATION_FIELD_ID_LIST) {
+    assert.equal(fieldById.get(id)?.type, "number", id);
+  }
 });

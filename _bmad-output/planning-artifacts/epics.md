@@ -534,7 +534,7 @@ So that I can distinguish a number from a validated conformity result while work
 **And** an individual pass/fail appears only when its threshold, boundary and comparison rule are approved; no automatic overall conformity is computed
 **And** state uses text and appropriate semantic cues, never color alone or a fabricated pass/fail; unresolved values are not rendered as zero, N.A. or passing.
 
-**Traceability:** FR-026, FR-027, UX-DR2 (measurement-result), UX-DR6, UX-DR12. **Dependency:** DEP-01R.
+**Traceability:** spec `_bmad-output/specs/spec-6-3-display-calculation-results-in-employe-form/SPEC.md`; FR-026, FR-027, UX-DR2 (measurement-result), UX-DR6, UX-DR12. **Dependency:** DEP-01R; Stories 5.6 and 6.6 (done).
 
 ### Story 6.4: Display authorized calculation results in Responsable review
 

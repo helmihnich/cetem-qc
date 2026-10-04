@@ -404,6 +404,16 @@ function Invoke-ClaudeStep([string]$StepId, [string]$SkillPrompt, [string]$TaskT
     $isError = ($code -ne 0) -or ($res -and $res.is_error)
     if ($res -and $res.total_cost_usd) { Log ('  session cost estimate: ${0:N2}' -f $res.total_cost_usd) }
 
+    if ($isError) {
+      $errText = $raw
+      if ($res -and $res.result) { $errText = [string]$res.result }
+      if ($errText -match '(?i)failed to authenticate|oauth|not logged in|/login|invalid api key|authentication_failed|credentials') {
+        Stop-NeedsYou $StepId ("Claude Code is not logged in: " + $errText.Trim()) @(
+          'Run: claude setup-token   then save the token:  [Environment]::SetEnvironmentVariable(''CLAUDE_CODE_OAUTH_TOKEN'', ''<token>'', ''User'')  and reopen VS Code',
+          'Or run: claude   then type /login   then exit',
+          'Check with: claude auth status   (must say loggedIn true), then delete NEEDS-YOU.md and rerun')
+      }
+    }
     $limitHit = $false
     if ($isError) {
       if ($res -and ($res.api_error_status -eq 429 -or $res.api_error_status -eq 529)) { $limitHit = $true }
@@ -416,7 +426,11 @@ function Invoke-ClaudeStep([string]$StepId, [string]$SkillPrompt, [string]$TaskT
       if ($res -and $res.result) { $limitText = [string]$res.result }
       $sec = Get-LimitWaitSeconds $limitText
       Log ("  usage limit reached: '{0}' - waiting {1} min until {2:ddd HH:mm} ({3}/{4})" -f ($limitText.Trim() -replace '\s+',' '), [int]($sec/60), (Get-Date).AddSeconds($sec), $waits, $RateLimitMaxWaits) 'Yellow'
-      Start-Sleep -Seconds $sec
+      $until = (Get-Date).AddSeconds($sec)
+      while ((Get-Date) -lt $until) {
+        Start-Sleep -Seconds ([Math]::Min(1800, [Math]::Max(1, [int]($until - (Get-Date)).TotalSeconds)))
+        if ((Get-Date) -lt $until) { Log ("  still waiting for the usage limit (until {0:ddd HH:mm})" -f $until) }
+      }
       continue
     }
     break
@@ -653,8 +667,10 @@ if ($dirty.Count -gt 0 -and -not (Test-Path $CurrentFile)) {
 if (Test-Path $CurrentFile) { Log ('Resuming in-progress item: ' + (Get-Content $CurrentFile -Raw).Trim()) 'Yellow' }
 $pg = (docker ps --filter "name=$PgContainer" --format '{{.Names}}' 2>$null | Out-String).Trim()
 if (-not $pg) { Log "Docker container '$PgContainer' is not running. Start Docker Desktop and the container." 'Red'; exit 1 }
-claude auth status 2>&1 | Out-Null
-if ($LASTEXITCODE -ne 0) { Log 'Claude Code is not logged in. Run: claude  (then /login), and rerun.' 'Red'; exit 1 }
+$authOut = (claude auth status 2>&1 | Out-String)
+if ($LASTEXITCODE -ne 0 -or $authOut -match '"loggedIn"\s*:\s*false') {
+  Log 'Claude Code is not logged in. Run: claude setup-token (or claude then /login), then rerun.' 'Red'; exit 1
+}
 if ((Get-StoryStatus '6-6-align-calculation-rules-with-the-official-cetem-paper-form') -ne 'done') { Log 'Story 6.6 is not done in sprint-status.yaml.' 'Red'; exit 1 }
 
 Write-Utf8 $RulesFile $Rules

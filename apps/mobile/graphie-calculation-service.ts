@@ -1,4 +1,4 @@
-import { GRAPHIE_CALCULATION_IDENTITY, graphieCalculations } from "@cetem-qc/domain";
+import { GRAPHIE_CALCULATION_IDENTITY, graphieCalculations, graphieTestInputsFromValues } from "@cetem-qc/domain";
 import type { CalculationContext } from "@cetem-qc/domain";
 import type { GraphieDraftPayload } from "./local-drafts/model";
 
@@ -20,6 +20,21 @@ export function calculateGraphieDraft<TName extends GraphieCalculationName>(
   // Runtime validation is deliberately delegated to the domain's versioned boundary.
   const calculate = graphieCalculations[name] as (context: CalculationContext, ...args: unknown[]) => ReturnType<(typeof graphieCalculations)[TName]>;
   return calculate(context, ...args);
+}
+
+export type GraphieCalculationResults = { readonly [TName in GraphieCalculationName]: ReturnType<(typeof graphieCalculations)[TName]> };
+
+/** All 5 paper-test results for raw form values. Parsing, mapping and formulas are the domain's; nothing is stored. */
+export function calculateGraphieResults(identity: CalculationContext, values: Readonly<Record<string, string>>): GraphieCalculationResults {
+  const draft: GraphieDraftPayload = { ...identity, values: {} };
+  const inputs = graphieTestInputsFromValues(values);
+  return {
+    voltageAccuracy: calculateGraphieDraft(draft, "voltageAccuracy", inputs.voltageAccuracy),
+    voltageRepeatability: calculateGraphieDraft(draft, "voltageRepeatability", inputs.voltageRepeatability),
+    outputRepeatability: calculateGraphieDraft(draft, "outputRepeatability", inputs.outputRepeatability),
+    outputLinearity: calculateGraphieDraft(draft, "outputLinearity", inputs.outputLinearity),
+    lightFieldCorrespondence: calculateGraphieDraft(draft, "lightFieldCorrespondence", inputs.lightFieldCorrespondence),
+  };
 }
 
 export function isCurrentGraphieDraft(draft: GraphieDraftPayload): boolean {

@@ -14,6 +14,7 @@
 - source_spec: `_bmad-output/specs/spec-5-6-align-graphie-mobile-form-with-cetem-paper-form/SPEC.md`
   summary: Re-pin the Story 6.3 spec from catalogue `1.0.0` / schema `2` to `2.0.0` / `3` and list 5.6 plus the rule-set v2 story as dependencies.
   evidence: `spec-6-3-display-authorized-calculation-results-in-the-employe-form.md` still names the retired tuple (lines 8–9, 42, 112); delivery-notes.md asks for the re-pin. It edits another spec, so it is outside this review's fixes.
+  resolved: Story 6.3 spec refresh (2026-10-04) — canonical spec `_bmad-output/specs/spec-6-3-display-calculation-results-in-employe-form/` pins `graphie-mobile-pov` `2.0.0` / schema `3` / `cetem-paper-form` `2.0.0` and depends on 5.6 and 6.6; the old file now points to it.
 - source_spec: `_bmad-output/specs/spec-5-6-align-graphie-mobile-form-with-cetem-paper-form/SPEC.md`
   summary: Known limitation — a task whose stored draft is catalogue `1.0.0` / schema `2` cannot be used on that device: hydration fails, Save is disabled and Delete is hidden, because deletion needs the revision of a draft that can no longer be parsed.
   evidence: Accepted for the PoV (no deployed users; v1 drafts exist only on test devices and are cleared by resetting app data). Recommended fix: a confirmed « Supprimer le brouillon local » action on the compatibility notice, backed by a repository method that deletes an unparseable draft row for the employee/task scope.
@@ -64,3 +65,9 @@
 - source_spec: `_bmad-output/specs/spec-2-4-reset-forgotten-password-through-responsable/test-plan.md`
   summary: The operator CLI success path is never run end to end. C4 only spawns the script against an unreachable database; C1–C3 call `resetResponsablePassword` directly, so nothing checks that the script prints a credential that verifies, with exit code 0.
   evidence: The spawned child would need to reach the per-test schema created by `withPostgresTestSchema`, which the harness does not support yet (it would need a search_path or schema env hook in `db/pool.ts`).
+
+## Deferred from: code review of 6-3-display-authorized-calculation-results-in-the-employe-form (2026-10-04)
+
+- source_spec: `_bmad-output/specs/spec-6-3-display-calculation-results-in-employe-form/input-parsing-and-mapping.md`
+  summary: `parseGraphieReading` accepts only ASCII digits (`\d` without the `u` flag). Readings typed with Arabic-Indic digits (U+0660–U+0669) or the Arabic decimal separator (U+066B) would be shown as « Valeur numérique invalide », and the dependent results would be unavailable.
+  evidence: Unverified (would be medium). To settle it, check whether the `decimal-pad` keyboards on the target Android/iOS devices can emit those characters in an Arabic locale. Accepting them changes the approved input grammar, so it needs a spec update.

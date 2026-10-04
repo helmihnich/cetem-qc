@@ -1815,6 +1815,17 @@ async function assertPaperDefaultsShown(tree: ReactTestRenderer) {
   await goToSection(tree, "header");
 }
 
+async function assertResultsLiveAfterDiscard(tree: ReactTestRenderer) {
+  await goToSection(tree, "voltageAccuracy");
+  const input = findInput(tree, "KV min — kV mesuré (kV)");
+  assert.ok(input, "KV min — kV mesuré (kV)");
+  await act(async () => { input!.props.onChangeText("49,2"); });
+  const block = tree.root.findAll((node) => node.type === "View" && node.props.accessibilityLabel === fr.graphieResults.tests.voltageAccuracy)[0];
+  assert.ok(block, "the re-seeded form shows calculated results");
+  assert.ok(block!.findAll((node) => node.type === "Text").some((node) => node.children.join("") === "KV min — écart : -1,5999999999999945 %"));
+  await goToSection(tree, "header");
+}
+
 test("M5 online: an old-rule draft is discarded from the compatibility notice and the form is re-seeded", async () => {
   await loadApp();
   installMocks();
@@ -1841,6 +1852,7 @@ test("M5 online: an old-rule draft is discarded from the compatibility notice an
   assert.equal(hasButton(tree, fr.employeeTasks.deleteDraft), false);
   assert.equal(findButton(tree, fr.employeeTasks.saveDraft).props.disabled, false);
   await assertPaperDefaultsShown(tree);
+  await assertResultsLiveAfterDiscard(tree);
   await act(async () => { assert.equal(await findButton(tree, fr.employeeTasks.saveDraft).props.onPress(), true); });
   const saved = JSON.parse(runtime.__draftRows!.get(key)!) as { revision: number; payload: { ruleId: string; values: Record<string, string> } };
   assert.equal(saved.revision, 1, "a fresh draft starts after the unreadable one is gone");
@@ -1874,6 +1886,7 @@ test("M6 offline: a cached catalogue 1.0.0 / schema 2 draft can be discarded wit
   assert.equal(findText(tree, fr.employeeTasks.draftCompatibilityUnavailable), undefined);
   assert.equal(findButton(tree, fr.employeeTasks.saveDraft).props.disabled, false);
   await assertPaperDefaultsShown(tree);
+  await assertResultsLiveAfterDiscard(tree);
   assert.deepEqual(api.detailCalls, detailCalls, "the offline discard makes no server call");
   await act(async () => { tree.unmount(); });
 });
@@ -1986,5 +1999,289 @@ test("M10 a generic draft storage failure offers no discard action", async () =>
   assert.ok(findText(tree, fr.employeeTasks.draftStorageUnavailable));
   assert.equal(hasButton(tree, fr.employeeTasks.deleteDraft), false);
   assert.equal(runtime.__draftRows!.get(key), "{not json");
+  await act(async () => { tree.unmount(); });
+});
+
+// Story 6.3 — calculated results in the Employé form. Readings are workbook source-regression values, not CETEM acceptance cases.
+const results = fr.graphieResults;
+
+function resultBlock(tree: ReactTestRenderer, heading: string) {
+  return tree.root.findAll((node) => node.type === "View" && node.props.accessibilityLabel === heading)[0];
+}
+
+function blockTexts(tree: ReactTestRenderer, heading: string): string[] {
+  const block = resultBlock(tree, heading);
+  assert.ok(block, `expected result block ${heading}`);
+  return block!.findAll((node) => node.type === "Text").map((node) => node.children.join(""));
+}
+
+async function typeInto(tree: ReactTestRenderer, entries: readonly (readonly [string, string, string])[]) {
+  for (const [section, label, value] of entries) {
+    await goToSection(tree, section);
+    const input = findInput(tree, label);
+    assert.ok(input, label);
+    await act(async () => { input!.props.onChangeText(value); });
+  }
+}
+
+async function openNewFormOffline() {
+  const api = installMocks();
+  let tree!: ReactTestRenderer;
+  await act(async () => { tree = create(<App />); });
+  await signIn(tree);
+  await act(async () => { tree.unmount(); });
+  runtime.__networkOnline = false;
+  await act(async () => { tree = create(<App />); await new Promise((resolve) => setTimeout(resolve, 0)); });
+  await act(async () => { (await waitForButton(tree, firstTask.establishment)).props.onPress(); for (let tick = 0; tick < 100; tick++) await new Promise((resolve) => setTimeout(resolve, 0)); });
+  return { tree, calls: () => [api.listCalls, api.sessionCalls, api.detailCalls.length] };
+}
+
+async function openFirstTaskOnline(width = 390) {
+  installMocks();
+  runtime.__mobileTestWidth = width;
+  let tree!: ReactTestRenderer;
+  await act(async () => { tree = create(<App />); });
+  await signIn(tree);
+  await act(async () => { findTaskRow(tree, firstTask.establishment).props.onPress(); });
+  return tree;
+}
+
+const accuracyReadings = [
+  ["voltageAccuracy", "KV min — kV mesuré (kV)", "49,2"],
+  ["voltageAccuracy", "KV — kV mesuré (kV)", "69,6"],
+  ["voltageAccuracy", "KV max — kV affiché (kV)", "120"],
+  ["voltageAccuracy", "KV max — kV mesuré (kV)", "119,8"],
+] as const;
+const repeatabilityReadings = [
+  ...["69,7", "69,6", "69,7", "69,6", "69,7"].map((value, index) => ["repeatability", `Mesure ${index + 1} — kV mesuré (kV)`, value] as const),
+  ...["2,677", "2,708", "2,705", "2,708", "2,705"].map((value, index) => ["repeatability", `Mesure ${index + 1} — Kerma (mGy)`, value] as const),
+];
+const linearityReadings = [
+  ["linearity", "DFC (distance foyer–chambre) (m)", "0,7"],
+  ["linearity", "Mesure 2 — mAs (mAs)", "40"],
+  ["linearity", "Mesure 3 — mAs (mAs)", "160"],
+  ...["0,672", "2,708", "11"].map((value, index) => ["linearity", `Mesure ${index + 1} — Kerma (dét) (mGy)`, value] as const),
+] as const;
+const lightFieldReadings = ["2", "-3", "1", "-4"].map((value, index) => ["lightField", `Écart ${index + 1} (mm)`, value] as const);
+const allReadings = [...accuracyReadings, ...repeatabilityReadings, ...linearityReadings, ...lightFieldReadings];
+const resultSections = [
+  ["voltageAccuracy", [results.tests.voltageAccuracy]],
+  ["repeatability", [results.tests.voltageRepeatability, results.tests.outputRepeatability]],
+  ["linearity", [results.tests.outputLinearity]],
+  ["lightField", [results.tests.lightFieldCorrespondence]],
+] as const;
+
+test("R1 offline new form: one kV mesuré shows its écart, provenance and an unavailable verdict without any server call", async () => {
+  await loadApp();
+  const { tree, calls } = await openNewFormOffline();
+  const before = calls();
+  await typeInto(tree, [accuracyReadings[0]]);
+  const texts = blockTexts(tree, results.tests.voltageAccuracy);
+  assert.ok(texts.includes("KV min — écart : -1,5999999999999945 %"), texts.join("\n"));
+  assert.ok(texts.includes("KV max — écart : Indisponible — mesure manquante"));
+  assert.ok(texts.includes("— Verdict indisponible : mesure manquante"));
+  const verdictLabel = resultBlock(tree, results.tests.voltageAccuracy)!.findAll((node) => node.type === "Text" && node.children.join("").startsWith("— Verdict indisponible"))[0]!.props.accessibilityLabel;
+  assert.equal(verdictLabel, "Verdict suggéré : indisponible — mesure manquante");
+  assert.ok(texts.includes("Tolérance : |écart| ≤ 10 %"));
+  assert.equal(texts.find((text) => text.startsWith("Règle ")), "Règle cetem-paper-form 2.0.0 — formulaire CETEM, page 2, Exactitude de la tension");
+  assert.ok(texts.includes(results.responsableDecides));
+  assert.deepEqual(calls(), before, "no API call while typing or calculating");
+  await act(async () => { tree.unmount(); });
+});
+
+test("R2 R3 R10 voltage accuracy suggests Conforme within 10 % and Non conforme at 11 %, with spelled-out verdict labels", async () => {
+  await loadApp();
+  const tree = await openFirstTaskOnline();
+  await typeInto(tree, accuracyReadings);
+  let texts = blockTexts(tree, results.tests.voltageAccuracy);
+  assert.ok(texts.includes("✓ Conforme (suggestion)"), texts.join("\n"));
+  assert.ok(texts.includes("Tolérance : |écart| ≤ 10 %"));
+  assert.ok(texts.includes("KV — écart : -0,5714285714285796 %"));
+  const verdict = () => resultBlock(tree, results.tests.voltageAccuracy)!.findAll((node) => node.type === "Text" && /\(suggestion\)$/.test(node.children.join("")))[0]!;
+  assert.equal(verdict().props.accessibilityLabel, "Verdict suggéré : conforme");
+
+  await typeInto(tree, [["voltageAccuracy", "KV max — kV mesuré (kV)", "133,2"]]);
+  texts = blockTexts(tree, results.tests.voltageAccuracy);
+  assert.ok(texts.includes("✗ Non conforme (suggestion)"), texts.join("\n"));
+  assert.ok(!texts.includes("✓ Conforme (suggestion)"));
+  assert.equal(verdict().props.accessibilityLabel, "Verdict suggéré : non conforme");
+  await act(async () => { tree.unmount(); });
+});
+
+test("R4 R5 R6 repeatability, linearity and light-field blocks show their values, tolerances and verdicts", async () => {
+  await loadApp();
+  const tree = await openFirstTaskOnline();
+  await typeInto(tree, [...repeatabilityReadings, ...linearityReadings, ...lightFieldReadings]);
+
+  await goToSection(tree, "repeatability");
+  const voltage = blockTexts(tree, results.tests.voltageRepeatability);
+  assert.ok(voltage.includes("kV mesuré moy : 69,66 kV"), voltage.join("\n"));
+  assert.ok(voltage.includes("kV mesuré min : 69,6 kV"));
+  assert.ok(voltage.includes("kV mesuré max : 69,7 kV"));
+  assert.ok(voltage.includes("Écart min / moy : -0,08613264427218242 %"));
+  assert.ok(voltage.includes("Tolérance : |écart| ≤ 5 %"));
+  assert.ok(voltage.includes("✓ Conforme (suggestion)"));
+  const output = blockTexts(tree, results.tests.outputRepeatability);
+  assert.ok(output.includes("Kerma moy : 2,7006 mGy"), output.join("\n"));
+  assert.equal(output.filter((text) => /^Mesure [1-5] — écart : -?\d/.test(text)).length, 5);
+  assert.ok(output.includes("Mesure 1 — écart : -0,8738798785455107 %"));
+  assert.ok(output.includes("Tolérance : |écart| < 10 %"));
+  assert.ok(output.includes("Règle cetem-paper-form 2.0.0 — formulaire CETEM, page 3, Reproductibilité et répétabilité"));
+  const blockHeadings: string[] = [results.tests.voltageRepeatability, results.tests.outputRepeatability];
+  const order = tree.root.findAll((node) => node.type === "TextInput" || (node.type === "View" && blockHeadings.includes(node.props.accessibilityLabel)))
+    .map((node) => String(node.props.accessibilityLabel));
+  assert.ok(order.indexOf("Mesure 5 — Kerma (mGy)") < order.indexOf(results.tests.voltageRepeatability), "blocks sit below the table");
+  assert.ok(order.indexOf(results.tests.voltageRepeatability) < order.indexOf(results.tests.outputRepeatability));
+  assert.ok(order.indexOf(results.tests.outputRepeatability) < order.indexOf("Commentaire — répétabilité de la tension"), "blocks sit before the comment fields");
+
+  await goToSection(tree, "linearity");
+  const linearity = blockTexts(tree, results.tests.outputLinearity);
+  assert.ok(linearity.includes("K2 : 0,03326283333333333 mGy/mAs"), linearity.join("\n"));
+  assert.equal(linearity.filter((text) => /^Mesure [1-3] — écart : -?\d/.test(text)).length, 3);
+  assert.equal(linearity.filter((text) => /^Mesure [1-3] — Kerma \(1m\) : .* mGy · K1 : .* mGy\/mAs$/.test(text)).length, 3);
+  assert.ok(linearity.includes("Tolérance : |écart| < 15 %"));
+  assert.ok(linearity.includes("✓ Conforme (suggestion)"));
+
+  await goToSection(tree, "lightField");
+  const light = blockTexts(tree, results.tests.lightFieldCorrespondence);
+  assert.ok(light.includes("Σ|écarts| : 10 mm"), light.join("\n"));
+  assert.ok(light.includes("Résultat : 1 % de la D.F.R"));
+  assert.ok(light.includes("— Verdict indisponible : aucune tolérance imprimée sur le formulaire officiel"));
+  assert.equal(light.some((text) => text.startsWith("Tolérance")), false);
+  assert.ok(light.includes("Règle cetem-paper-form 2.0.0 — formulaire CETEM, page 4, Géométrie du faisceau — correspondance champ lumineux / champ de rayons X"));
+  await act(async () => { tree.unmount(); });
+});
+
+test("R7 an unparseable number keeps its raw text, shows a field hint and an unavailable result, and still saves", async () => {
+  await loadApp();
+  const tree = await openFirstTaskOnline();
+  await typeInto(tree, [["voltageAccuracy", "KV min — kV mesuré (kV)", "abc"]]);
+  const input = findInput(tree, "KV min — kV mesuré (kV)")!;
+  assert.equal(input.props.value, "abc");
+  assert.match(String(input.props.accessibilityHint), /Valeur numérique invalide/);
+  const fieldTexts = input.parent!.findAll((node) => node.type === "Text").map((node) => node.children.join(""));
+  assert.ok(fieldTexts.includes(results.invalidNumber), "hint is shown under the input");
+  assert.equal(tree.root.findAll((node) => node.type === "Text" && node.children.join("") === results.invalidNumber).length, 1);
+  const texts = blockTexts(tree, results.tests.voltageAccuracy);
+  assert.ok(texts.includes("KV min — écart : Indisponible — valeur numérique invalide"), texts.join("\n"));
+  assert.ok(texts.includes("— Verdict indisponible : valeur numérique invalide"));
+  await act(async () => { assert.equal(await findButton(tree, "Enregistrer").props.onPress(), true); });
+  const saved = JSON.parse(runtime.__draftRows!.get(`employee-1/${firstTask.id}`)!) as { payload: { values: Record<string, string> } };
+  assert.equal(saved.payload.values["voltage.accuracy.row1.kvMeasured"], "abc");
+  await act(async () => { tree.unmount(); });
+});
+
+test("R8 results are not saved and reappear identically after save, restart offline and resume", async () => {
+  await loadApp();
+  let tree = await openFirstTaskOnline();
+  await typeInto(tree, allReadings);
+  const snapshot = async () => {
+    const all: Record<string, string[]> = {};
+    for (const [section, headings] of resultSections) {
+      await goToSection(tree, section);
+      for (const heading of headings) all[heading] = blockTexts(tree, heading);
+    }
+    return all;
+  };
+  const before = await snapshot();
+  await act(async () => { assert.equal(await findButton(tree, "Enregistrer").props.onPress(), true); });
+  const saved = JSON.parse(runtime.__draftRows!.get(`employee-1/${firstTask.id}`)!) as { payload: { values: Record<string, string> } };
+  assert.deepEqual(saved.payload.values, {
+    ...createNewGraphieDraftValues(),
+    "voltage.accuracy.row1.kvMeasured": "49,2", "voltage.accuracy.row2.kvMeasured": "69,6",
+    "voltage.accuracy.row3.kvDisplayed": "120", "voltage.accuracy.row3.kvMeasured": "119,8",
+    ...Object.fromEntries(["69,7", "69,6", "69,7", "69,6", "69,7"].map((value, index) => [`voltage.repeatability.row${index + 1}.kvMeasured`, value])),
+    ...Object.fromEntries(["2,677", "2,708", "2,705", "2,708", "2,705"].map((value, index) => [`voltage.repeatability.row${index + 1}.kerma`, value])),
+    "output.linearity.dfc": "0,7", "output.linearity.row2.mas": "40", "output.linearity.row3.mas": "160",
+    "output.linearity.row1.kerma": "0,672", "output.linearity.row2.kerma": "2,708", "output.linearity.row3.kerma": "11",
+    "lightField.gap1": "2", "lightField.gap2": "-3", "lightField.gap3": "1", "lightField.gap4": "-4",
+  }, "only the typed strings and paper defaults are stored; no derived keys or reformatted values");
+  await act(async () => { tree.unmount(); });
+
+  runtime.__networkOnline = false;
+  await act(async () => { tree = create(<App />); await new Promise((resolve) => setTimeout(resolve, 0)); });
+  await act(async () => { (await waitForButton(tree, firstTask.id)).props.onPress(); for (let tick = 0; tick < 100; tick++) await new Promise((resolve) => setTimeout(resolve, 0)); });
+  assert.deepEqual(await snapshot(), before);
+  for (const [section, label, value] of allReadings) {
+    await goToSection(tree, section);
+    assert.equal(findInput(tree, label)?.props.value, value, label);
+  }
+  await act(async () => { tree.unmount(); });
+});
+
+test("R9 no screen states an overall conformity and every block defers the final decision to the Responsable", async () => {
+  await loadApp();
+  const tree = await openFirstTaskOnline();
+  const check = async () => {
+    for (const section of GRAPHIE_MOBILE_POV_CATALOGUE.sections) {
+      await goToSection(tree, section.id);
+      const texts = tree.root.findAll((node) => node.type === "Text").map((node) => node.children.join(""));
+      for (const forbidden of ["Machine conforme", "Appareil conforme", "Conclusion générale", "concluant", "tests conformes", "tests réussis"]) {
+        assert.equal(texts.some((text) => text.includes(forbidden)), false, `${section.id}: ${forbidden}`);
+      }
+      const headings: readonly string[] = resultSections.find(([id]) => id === section.id)?.[1] ?? [];
+      assert.equal(texts.filter((text) => text === results.responsableDecides).length, headings.length, section.id);
+      for (const heading of headings) {
+        for (const line of blockTexts(tree, heading)) {
+          assert.doesNotMatch(line, / : (0|N\.A|)( (%|kV|mGy|mGy\/mAs|mm|% de la D\.F\.R))?$/, `${heading}: ${line}`);
+          if (line.includes("Indisponible")) assert.match(line, /Indisponible — \S/, line);
+        }
+      }
+    }
+  };
+  await check();
+  await typeInto(tree, allReadings);
+  await check();
+  await act(async () => { tree.unmount(); });
+});
+
+test("R11 a draft stamped with the old rule keeps the compatibility notice and renders no result block", async () => {
+  await loadApp();
+  installMocks();
+  runtime.__draftRows!.set(`employee-1/${firstTask.id}`, unreadableDraftRows.oldRule(firstTask.id));
+  let tree!: ReactTestRenderer;
+  await act(async () => { tree = create(<App />); });
+  await signIn(tree);
+  await act(async () => { findTaskRow(tree, firstTask.establishment).props.onPress(); });
+  assert.ok(findText(tree, fr.employeeTasks.draftCompatibilityUnavailable));
+  for (const [section, headings] of resultSections) {
+    await goToSection(tree, section);
+    for (const heading of headings) assert.equal(resultBlock(tree, heading), undefined, heading);
+    assert.equal(findText(tree, results.responsableDecides), undefined);
+  }
+  await act(async () => { tree.unmount(); });
+});
+
+test("R11 an unsupported-version result is presented as no block", async () => {
+  await loadApp();
+  const { presentGraphieResult } = await import("./graphie-test-result.js");
+  const { calculateGraphieResults } = await import("./graphie-calculation-service.js");
+  const { GRAPHIE_CALCULATION_IDENTITY } = await import("@cetem-qc/domain");
+  const oldRule = { ...GRAPHIE_CALCULATION_IDENTITY, ruleId: "cetem-workbook-explicit-formulas", ruleVersion: "1.0.0" };
+  const values = Object.fromEntries(allReadings.map(([, , value], index) => [`unused.${index}`, value]));
+  const calculated = calculateGraphieResults(oldRule, values);
+  for (const name of Object.keys(calculated) as (keyof typeof calculated)[]) {
+    assert.equal(presentGraphieResult(name, calculated[name]), undefined, name);
+  }
+});
+
+test("R12 tablet layout renders every result block in full, without truncation", async () => {
+  await loadApp();
+  const tree = await openFirstTaskOnline(1024);
+  await typeInto(tree, [...accuracyReadings, ...linearityReadings]);
+  for (const [section, headings] of resultSections) {
+    await goToSection(tree, section);
+    for (const heading of headings) {
+      const block = resultBlock(tree, heading);
+      assert.ok(block, heading);
+      assert.equal(block!.findAll((node) => node.type === "TextInput").length, 0, "blocks are read-only");
+      for (const text of block!.findAll((node) => node.type === "Text")) {
+        assert.equal(text.props.numberOfLines, undefined);
+        assert.equal(text.props.ellipsizeMode, undefined);
+      }
+    }
+  }
+  await goToSection(tree, "voltageAccuracy");
+  assert.ok(blockTexts(tree, results.tests.voltageAccuracy).includes("KV max — écart : -0,16666666666666904 %"));
   await act(async () => { tree.unmount(); });
 });
