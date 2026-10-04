@@ -16,7 +16,10 @@ import { expoSecureKeyValueStore } from "./offline-authorization-storage";
 import { createDraftRepository } from "./local-drafts/model";
 import { createSqliteDraftDatabase } from "./local-drafts/sqlite-draft-database";
 import { createAuthorizedDrafts } from "./local-drafts/authorized-drafts";
-import { DraftListCorruptionError, LocalDraftPayloadCompatibilityError, type LocalDraft } from "./local-drafts/model";
+import { DraftListCorruptionError, LocalDraftPayloadCompatibilityError, PendingSubmissionError, SubmissionNotAllowedError, type LocalDraft, type OutboxItem } from "./local-drafts/model";
+import { createSyncEngine } from "./sync/sync-engine";
+import { createAppSyncTransport } from "./sync/app-sync-transport";
+import { deriveTaskSyncState, type TaskSyncState } from "./sync/task-sync-state";
 import { runOnlyWhenOnlineAuthorized, ServerWorkAuthorizationError } from "./server-work-authorization";
 import { GRAPHIE_CALCULATION_RULE_ID, GRAPHIE_CALCULATION_RULE_VERSION, GRAPHIE_MOBILE_POV_CATALOGUE, GraphiePayloadCompatibilityError, createNewGraphieDraftValues, parseGraphiePayload, type CatalogueField, type CatalogueSection, type CatalogueTable, type GraphieFormValues } from "./graphie-pov-catalogue";
 import type { EmployeeTaskLayout } from "./employee-task-layout";
@@ -95,6 +98,29 @@ export default function App() {
   // A draft this app version can no longer parse; it can only be discarded (Story 6.7).
   const [unreadableDraft, setUnreadableDraft] = useState<{ employeeId: string; taskId: string }>();
   const [unreadableDeleteConfirmation, setUnreadableDeleteConfirmation] = useState<{ employeeId: string; taskId: string }>();
+  // Durable outbox rows of the signed-in employee; every presented sync and submission state is derived from them (Story 7.2).
+  const [outbox, setOutbox] = useState<{ employeeId: string; items: OutboxItem[] }>();
+  const outboxGenerationRef = useRef(0);
+  const [submitConfirmation, setSubmitConfirmation] = useState<{ employeeId: string; taskId: string }>();
+  const [submitting, setSubmitting] = useState(false);
+  const submittingRef = useRef(false);
+  // Bumped when a submission request fails, so that the autosave it cancelled is scheduled again.
+  const [autosaveRearm, setAutosaveRearm] = useState(0);
+  // The employee whose run is active; another identity never sees it as running (Story 7.2).
+  const [syncRunningFor, setSyncRunningFor] = useState<string>();
+  const authorizationStateRef = useRef(authorization);
+  authorizationStateRef.current = authorization;
+  const syncEngineRef = useRef<ReturnType<typeof createSyncEngine> | null | undefined>(undefined);
+  if (syncEngineRef.current === undefined) {
+    const transport = createAppSyncTransport();
+    syncEngineRef.current = transport ? createSyncEngine({
+      store: draftsRef.current,
+      transport,
+      now: Date.now,
+      sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+      isAuthorized: (employeeId) => isSyncAuthorized(employeeId),
+    }) : null;
+  }
   // Results are derived on every render from the raw strings; they are never written to the draft.
   const calculationResults = useMemo(
     () => (draftHydration === "ready" && formIdentity ? calculateGraphieResults(formIdentity, formValues) : undefined),
@@ -124,6 +150,121 @@ export default function App() {
   const resumableDrafts = localDrafts.filter((draft) => isOnline || cachedTasks.some((item) => item.id === draft.taskId));
   const unavailableOfflineDrafts = !isOnline && localDrafts.length > resumableDrafts.length;
   activeDraftScopeRef.current = user && screen.kind === "detail" ? `${user.id}\u0000${screen.id}` : null;
+  const outboxItems = outbox && outbox.employeeId === user?.id ? outbox.items : [];
+  const taskSyncStateOf = (taskId: string): TaskSyncState => deriveTaskSyncState(outboxItems.filter((item) => item.taskId === taskId));
+  const currentSyncState = screen.kind === "detail" ? taskSyncStateOf(screen.id) : undefined;
+  const locked = currentSyncState?.locked ?? false;
+  const lockedRef = useRef(locked);
+  lockedRef.current = locked;
+  const formEditable = draftHydration === "ready" && !draftDeletingRef.current && !deleteDraftConfirmation && !locked && !submitting;
+  // A locked task shows its last saved state, never « Enregistrement en cours… ».
+  const presentedSaveState = locked && draftSaveState === "saving" ? "saved" : draftSaveState;
+
+  async function isSyncAuthorized(employeeId: string) {
+    const current = authorizationStateRef.current;
+    if (!isOnlineRef.current || current.status !== "online-authorized" || current.identity?.id !== employeeId) return false;
+    // The server confirmed this session; the stored grant must still be valid (not expired, logged out or locked).
+    const stored = await authorizationRef.current.evaluate(employeeId).catch(() => undefined);
+    return stored?.status === "offline-authorized" && authorizationStateRef.current.status === "online-authorized";
+  }
+
+  /** Re-reads the durable outbox; a read failure keeps the previous state and returns false. */
+  async function refreshOutbox(identityId = user?.id) {
+    if (!identityId) return false;
+    const generation = ++outboxGenerationRef.current;
+    try {
+      const items = await draftsRef.current.listOutbox(identityId);
+      if (generation !== outboxGenerationRef.current || activeIdentityRef.current !== identityId) return true;
+      setOutbox({ employeeId: identityId, items });
+      return true;
+    } catch {
+      // Never fall back to « Brouillon »: the last derived state stays on screen.
+      return false;
+    }
+  }
+
+  /** Opening a task needs its submission state first, so that a pending submission is never shown as an editable draft. */
+  async function readOutboxBeforeOpen(employeeId: string) {
+    if (!await refreshOutbox(employeeId)) throw new Error("Outbox unavailable.");
+  }
+
+  async function runSync(employeeId: string) {
+    const engine = syncEngineRef.current;
+    if (!engine || !await isSyncAuthorized(employeeId)) return false;
+    setSyncRunningFor(employeeId);
+    try {
+      await engine.run(employeeId);
+    } catch {
+      // A failed run keeps every item, snapshot and draft; the refreshed rows tell the state.
+    } finally {
+      setSyncRunningFor((current) => current === employeeId ? undefined : current);
+      await refreshOutbox(employeeId);
+    }
+    return true;
+  }
+
+  async function retrySync() {
+    if (!user) return;
+    const employeeId = user.id;
+    if (!isOnlineRef.current) { setError(fr.auth.offlineUnavailable); return; }
+    if (!syncEngineRef.current) return;
+    if (!await isSyncAuthorized(employeeId)) {
+      if (activeIdentityRef.current === employeeId) setError(fr.auth.reauthenticateOnline);
+      return;
+    }
+    setError(undefined);
+    await runSync(employeeId);
+  }
+
+  function beginSubmit() {
+    if (!user || screen.kind !== "detail" || draftHydration !== "ready" || locked || submittingRef.current || draftDeletingRef.current) return;
+    setSubmitConfirmation({ employeeId: user.id, taskId: screen.id });
+  }
+
+  function confirmSubmit() {
+    const captured = submitConfirmation;
+    setSubmitConfirmation(undefined);
+    const selected = activeScreenRef.current;
+    if (!captured || !user || user.id !== captured.employeeId || submittingRef.current || lockedRef.current || draftDeletingRef.current
+      || selected.kind !== "detail" || selected.id !== captured.taskId) return;
+    if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
+    submittingRef.current = true;
+    setSubmitting(true);
+    setDraftNotice(undefined);
+    const { employeeId, taskId } = captured;
+    const scopeKey = `${employeeId}\u0000${taskId}`;
+    const request = draftSaveQueueRef.current.then(async () => {
+      try {
+        const { draft } = await draftsRef.current.requestSubmission(employeeId, taskId, {
+          catalogueId: GRAPHIE_MOBILE_POV_CATALOGUE.id,
+          catalogueVersion: GRAPHIE_MOBILE_POV_CATALOGUE.version,
+          schemaVersion: GRAPHIE_MOBILE_POV_CATALOGUE.schemaVersion,
+          ruleId: GRAPHIE_CALCULATION_RULE_ID,
+          ruleVersion: GRAPHIE_CALCULATION_RULE_VERSION,
+          values: { ...formValuesRef.current },
+          ...(legacyContentModeRef.current ? { legacyContent: draftContentRef.current } : {}),
+        }, draftRevisionByScopeRef.current.get(scopeKey) ?? 0);
+        draftRevisionByScopeRef.current.set(scopeKey, draft.revision);
+        if (activeDraftScopeRef.current === scopeKey) {
+          draftRevisionRef.current = draft.revision;
+          setActiveDraft(draft);
+          setDraftSaveState("saved");
+        }
+        await refreshOutbox(employeeId);
+        await refreshLocalDrafts(employeeId);
+        void runSync(employeeId);
+      } catch (cause) {
+        if (cause instanceof PendingSubmissionError) await refreshOutbox(employeeId);
+        else if (cause instanceof SubmissionNotAllowedError) {
+          if (activeIdentityRef.current === employeeId) { setError(fr.employeeTasks.submissionNotAllowed); setAutosaveRearm((value) => value + 1); }
+        } else {
+          if (activeIdentityRef.current === employeeId) { setError(fr.employeeTasks.submissionFailed); setAutosaveRearm((value) => value + 1); }
+          await redactDraftIfAuthorizationLost(employeeId);
+        }
+      }
+    }).finally(() => { submittingRef.current = false; setSubmitting(false); });
+    draftSaveQueueRef.current = request.then(() => undefined);
+  }
 
   function isCurrentOpen(generation: number, employeeId: string, taskId: string) {
     const selected = activeScreenRef.current;
@@ -178,6 +319,7 @@ export default function App() {
     const [draftResult, cacheResult] = await Promise.allSettled([
       draftsRef.current.list(identityId),
       draftsRef.current.listCachedSynchronizedTasks(identityId),
+      refreshOutbox(identityId),
     ]);
     if (generation !== localRefreshGenerationRef.current || activeIdentityRef.current !== identityId) return;
     if (draftResult.status === "fulfilled") setLocalDrafts(draftResult.value);
@@ -208,7 +350,7 @@ export default function App() {
     setActiveDraft(undefined);
     setDraftHydration("failed");
     setDraftSaveState("idle");
-    setDeleteDraftConfirmation(undefined);
+    setDeleteDraftConfirmation(undefined); setSubmitConfirmation(undefined);
     clearUnreadableDraft();
     setLocalDrafts([]);
     setCachedTaskContext(undefined);
@@ -221,7 +363,7 @@ export default function App() {
   }
 
   function changeDraftContent(value: string) {
-    if (draftHydration !== "ready" || draftDeletingRef.current || deleteDraftConfirmation || !user) return;
+    if (draftHydration !== "ready" || draftDeletingRef.current || deleteDraftConfirmation || !user || lockedRef.current || submittingRef.current) return;
     draftGenerationRef.current++;
     draftContentRef.current = value;
     setDraftContent(value);
@@ -229,7 +371,7 @@ export default function App() {
   }
 
   function changeFormField(fieldId: string, value: string) {
-    if (draftHydration !== "ready" || draftDeletingRef.current || deleteDraftConfirmation || !user) return;
+    if (draftHydration !== "ready" || draftDeletingRef.current || deleteDraftConfirmation || !user || lockedRef.current || submittingRef.current) return;
     const next = { ...formValuesRef.current, [fieldId]: value };
     formValuesRef.current = next;
     setFormValues(next);
@@ -250,7 +392,7 @@ export default function App() {
     setDraftNotice(undefined);
     const generation = ++draftGenerationRef.current;
     draftOperationGenerationRef.current++;
-    setDeleteDraftConfirmation(undefined);
+    setDeleteDraftConfirmation(undefined); setSubmitConfirmation(undefined);
     clearUnreadableDraft();
     setDraftHydration("loading");
     setActiveSectionId(GRAPHIE_MOBILE_POV_CATALOGUE.sections[0]!.id);
@@ -317,6 +459,7 @@ export default function App() {
         setDetailState({ taskId, status: "ready" });
       }
       if (openRequestGenerationRef.current !== requestGeneration || activeIdentityRef.current !== employeeId) return;
+      await readOutboxBeforeOpen(employeeId);
       const draft = await draftsRef.current.read(user.id, taskId);
       if (generation !== draftGenerationRef.current || openRequestGenerationRef.current !== requestGeneration || activeIdentityRef.current !== employeeId) return;
       setActiveDraft(draft ?? undefined);
@@ -346,7 +489,7 @@ export default function App() {
   }
 
   function saveDraft(): Promise<boolean> {
-    if (!user || screen.kind !== "detail" || draftHydration !== "ready" || draftDeletingRef.current) return Promise.resolve(false);
+    if (!user || screen.kind !== "detail" || draftHydration !== "ready" || draftDeletingRef.current || lockedRef.current || submittingRef.current) return Promise.resolve(false);
     if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
     const employeeId = user.id;
     const taskId = screen.id;
@@ -379,7 +522,13 @@ export default function App() {
         await refreshLocalDrafts(employeeId);
       }
       return true;
-    }).catch(() => {
+    }).catch(async (cause) => {
+      if (cause instanceof PendingSubmissionError) {
+        // The task was submitted meanwhile: it is read-only now, which is not a save failure.
+        if (activeDraftScopeRef.current === scopeKey) setDraftSaveState("saved");
+        await refreshOutbox(employeeId);
+        return false;
+      }
       if (generation === draftGenerationRef.current) {
         setDraftSaveState("failed");
       }
@@ -392,13 +541,13 @@ export default function App() {
 
   async function leaveTaskDetail() {
     openRequestGenerationRef.current++;
-    if (draftSaveState === "saving" && !(await saveDraft())) {
+    if (draftSaveState === "saving" && !lockedRef.current && !(await saveDraft())) {
       setError(fr.employeeTasks.saveFailed);
       return;
     }
     draftGenerationRef.current++;
     draftOperationGenerationRef.current++;
-    setDeleteDraftConfirmation(undefined);
+    setDeleteDraftConfirmation(undefined); setSubmitConfirmation(undefined);
     clearUnreadableDraft();
     setDraftHydration("idle");
     if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
@@ -408,11 +557,11 @@ export default function App() {
   }
 
   useEffect(() => {
-    if (screen.kind !== "detail" || draftHydration !== "ready" || draftSaveState === "idle" || !user || draftDeletingRef.current) return;
+    if (screen.kind !== "detail" || draftHydration !== "ready" || draftSaveState === "idle" || !user || draftDeletingRef.current || locked || submittingRef.current) return;
     const generation = draftGenerationRef.current;
     autosaveTimerRef.current = setTimeout(() => { if (generation === draftGenerationRef.current) saveDraft(); }, 500);
     return () => { if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current); };
-  }, [draftContent, formValues, draftHydration, screen, user?.id]);
+  }, [draftContent, formValues, draftHydration, screen, user?.id, locked, autosaveRearm]);
 
   useEffect(() => {
     if (!user) { localRefreshGenerationRef.current++; setLocalDrafts([]); setCachedTaskContext(undefined); return; }
@@ -644,7 +793,7 @@ export default function App() {
     detailRequestsRef.current.invalidate();
     draftGenerationRef.current++;
     draftOperationGenerationRef.current++;
-    setDeleteDraftConfirmation(undefined);
+    setDeleteDraftConfirmation(undefined); setSubmitConfirmation(undefined);
     clearUnreadableDraft();
     setDraftHydration("loading");
     setTaskCacheWarning(undefined);
@@ -702,6 +851,7 @@ export default function App() {
       }
       const generation = draftGenerationRef.current;
       try {
+        await readOutboxBeforeOpen(employeeId);
         const draft = await draftsRef.current.read(employeeId, id);
         if (generation === draftGenerationRef.current && openRequestGenerationRef.current === requestGeneration && activeIdentityRef.current === employeeId) {
           setActiveDraft(draft ?? undefined);
@@ -764,7 +914,7 @@ export default function App() {
     draftGenerationRef.current++;
     draftOperationGenerationRef.current++;
     const generation = draftGenerationRef.current;
-    setDeleteDraftConfirmation(undefined);
+    setDeleteDraftConfirmation(undefined); setSubmitConfirmation(undefined);
     clearUnreadableDraft();
     pendingCachedOpenRef.current = { employeeId, taskId: authorizedTask.id, generation: requestGeneration };
     setTask(authorizedTask);
@@ -784,6 +934,7 @@ export default function App() {
     setError(undefined);
     setLoading(false);
     try {
+      await readOutboxBeforeOpen(employeeId);
       const draft = await draftsRef.current.read(employeeId, authorizedTask.id);
       if (generation !== draftGenerationRef.current || !isCurrentOpen(requestGeneration, employeeId, authorizedTask.id)) return;
       if (isOnlineRef.current) { pendingCachedOpenRef.current = undefined; await openTask(authorizedTask.id); return; }
@@ -836,8 +987,9 @@ export default function App() {
   }
 
   function beginDraftDelete() {
-    if (!user || !activeDraft || draftHydration !== "ready") return;
+    if (!user || !activeDraft || draftHydration !== "ready" || lockedRef.current || submittingRef.current) return;
     if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
+    setSubmitConfirmation(undefined);
     setDeleteDraftConfirmation({ employeeId: user.id, taskId: activeDraft.taskId, draftId: activeDraft.id, revision: activeDraft.revision });
   }
 
@@ -959,7 +1111,7 @@ export default function App() {
     openRequestGenerationRef.current++;
     localRefreshGenerationRef.current++;
     taskListGenerationRef.current++;
-    if (screen.kind === "detail" && (draftSaveState === "saving" || draftSaveState === "failed")) {
+    if (screen.kind === "detail" && !lockedRef.current && (draftSaveState === "saving" || draftSaveState === "failed")) {
       const saved = await saveDraft();
       if (!saved) { setError(fr.employeeTasks.saveFailed); return; }
     }
@@ -1034,7 +1186,7 @@ export default function App() {
                   <Pressable key={item.id} accessibilityRole="button" onPress={() => void openTask(item.id)} style={[styles.taskRow, layout === "tablet" && styles.tabletTaskRow]}>
                     <View style={styles.taskCopy}>
                       <Text style={styles.taskTitle}>{item.establishment}</Text>
-                      <Text style={styles.muted}>{item.service} · {fr.employeeTasks.draft}</Text>
+                      <Text style={styles.muted}>{item.service} · {taskListStateLabel(taskSyncStateOf(item.id))}</Text>
                     </View>
                     <Text style={styles.chevron}>›</Text>
                   </Pressable>
@@ -1050,12 +1202,12 @@ export default function App() {
                 {resumableDrafts.length > 0 ? <View style={{ gap: 10 }}>
                   <Text style={styles.heading}>{fr.employeeTasks.resumeDraft}</Text>
                   {resumableDrafts.map((draft) => <Pressable key={draft.id} accessibilityRole="button" onPress={() => void openLocalDraft(draft.taskId)} style={styles.taskRow}>
-                    <View style={styles.taskCopy}><Text style={styles.taskTitle}>{draft.taskId}</Text><Text style={styles.muted}>{fr.employeeTasks.savedLocally}</Text></View>
+                    <View style={styles.taskCopy}><Text style={styles.taskTitle}>{draft.taskId}</Text><Text style={styles.muted}>{fr.employeeTasks.savedLocally}</Text><Text style={styles.muted}>{taskListStateLabel(taskSyncStateOf(draft.taskId))}</Text></View>
                   </Pressable>)}
                 </View> : null}
                 {unavailableOfflineDrafts ? <Text accessibilityRole="summary" style={styles.muted}>{fr.employeeTasks.offlineDraftPreserved}</Text> : null}
                 {cachedTasks.filter((item) => !localDrafts.some((draft) => draft.taskId === item.id)).map((item) => <Pressable key={item.id} accessibilityRole="button" onPress={() => void openCachedTask(item)} style={styles.taskRow}>
-                  <View style={styles.taskCopy}><Text style={styles.taskTitle}>{item.establishment}</Text><Text style={styles.muted}>{fr.employeeTasks.synchronizedNotSubmitted}</Text></View>
+                  <View style={styles.taskCopy}><Text style={styles.taskTitle}>{item.establishment}</Text><Text style={styles.muted}>{taskListStateLabel(taskSyncStateOf(item.id))}</Text></View>
                 </Pressable>)}
               </>
             ) : (
@@ -1068,27 +1220,34 @@ export default function App() {
                   <Detail label={fr.employeeTasks.type} value={fr.employeeTasks.graphieMobile} />
                   <Detail label={fr.employeeTasks.establishment} value={displayedTask.establishment} />
                   <Detail label={fr.employeeTasks.service} value={displayedTask.service || "—"} />
-                  <Detail label={fr.employeeTasks.state} value={fr.employeeTasks.draft} />
+                  <Detail label={fr.employeeTasks.state} value={lifecycleLabel(currentSyncState?.lifecycle ?? "draft")} />
                   <Detail label={fr.employeeTasks.createdAt} value={new Date(displayedTask.createdAt).toLocaleDateString("fr-FR")} />
                   <View style={{ width: "100%", gap: 10, paddingTop: 12 }}>
                     {taskCacheWarning ? <Text accessibilityRole="alert" style={styles.error}>{taskCacheWarning}</Text> : null}
-                    <Text style={styles.muted}>{fr.employeeTasks.syncStatus}: {fr.employeeTasks.synchronizedNotSubmitted}</Text>
+                    {currentSyncState ? <TaskSyncStatus state={currentSyncState} running={syncRunningFor === user.id} onRetry={() => void retrySync()} /> : null}
                     <Text style={styles.muted}>{fr.employeeTasks.connectivity}: {isOnline ? fr.employeeTasks.online : fr.employeeTasks.offline}</Text>
-                    <Text style={styles.muted}>{fr.employeeTasks.localPersistence}: {draftSaveState === "saving" ? fr.employeeTasks.savingLocally : draftSaveState === "saved" ? fr.employeeTasks.savedLocally : draftSaveState === "failed" ? fr.employeeTasks.saveFailed : fr.employeeTasks.notSavedLocally}</Text>
+                    <Text style={styles.muted}>{fr.employeeTasks.localPersistence}: {presentedSaveState === "saving" ? fr.employeeTasks.savingLocally : presentedSaveState === "saved" ? fr.employeeTasks.savedLocally : presentedSaveState === "failed" ? fr.employeeTasks.saveFailed : fr.employeeTasks.notSavedLocally}</Text>
+                    {locked ? <Text accessibilityRole="summary" style={styles.muted}>{fr.employeeTasks.readOnlyPending}</Text> : null}
                     <Text style={styles.heading}>{fr.employeeTasks.sectionNavigation}</Text>
                     <View style={styles.sectionNavigation}>{GRAPHIE_MOBILE_POV_CATALOGUE.sections.map((section) => <Pressable key={section.id} accessibilityRole="button" accessibilityState={{ selected: section.id === activeSectionId }} onPress={() => { setActiveSectionId(section.id); if (draftSaveState === "saving") void saveDraft(); }} style={styles.sectionButton}><Text style={styles.muted}>{section.labelFr}</Text></Pressable>)}</View>
                     {draftHydration === "loading" ? <Text accessibilityRole="summary" style={styles.muted}>{fr.common.loading}</Text> : null}
-                    {legacyContentMode ? <Field label={fr.employeeTasks.legacyDraftContent} value={draftContent} onChangeText={changeDraftContent} editable={draftHydration === "ready" && !draftDeletingRef.current && !deleteDraftConfirmation} multiline /> : null}
-                    {GRAPHIE_MOBILE_POV_CATALOGUE.sections.filter((section) => section.id === activeSectionId).map((section) => <GraphieSectionForm key={section.id} section={section} layout={layout} values={formValues} results={calculationResults} onChange={changeFormField} editable={draftHydration === "ready" && !draftDeletingRef.current && !deleteDraftConfirmation} />)}
-                    <Text accessibilityRole={draftSaveState === "failed" ? "alert" : "summary"} style={draftSaveState === "failed" ? styles.error : styles.muted}>
-                      {draftSaveState === "failed" ? fr.employeeTasks.saveFailed : draftSaveState === "saving" ? fr.employeeTasks.savingDraft : draftSaveState === "saved" ? fr.employeeTasks.savedLocally : fr.workflow.draft}
+                    {legacyContentMode ? <Field label={fr.employeeTasks.legacyDraftContent} value={draftContent} onChangeText={changeDraftContent} editable={formEditable} multiline /> : null}
+                    {GRAPHIE_MOBILE_POV_CATALOGUE.sections.filter((section) => section.id === activeSectionId).map((section) => <GraphieSectionForm key={section.id} section={section} layout={layout} values={formValues} results={calculationResults} onChange={changeFormField} editable={formEditable} />)}
+                    <Text accessibilityRole={presentedSaveState === "failed" ? "alert" : "summary"} style={presentedSaveState === "failed" ? styles.error : styles.muted}>
+                      {presentedSaveState === "failed" ? fr.employeeTasks.saveFailed : presentedSaveState === "saving" ? fr.employeeTasks.savingDraft : presentedSaveState === "saved" ? fr.employeeTasks.savedLocally : fr.workflow.draft}
                     </Text>
-                    <Button title={fr.employeeTasks.saveDraft} onPress={() => saveDraft()} disabled={draftHydration !== "ready" || draftDeletingRef.current} />
-                    {activeDraft ? <Button title={fr.employeeTasks.deleteDraft} secondary onPress={beginDraftDelete} disabled={draftHydration !== "ready" || draftDeletingRef.current} /> : null}
+                    <Button title={fr.employeeTasks.saveDraft} onPress={() => saveDraft()} disabled={draftHydration !== "ready" || draftDeletingRef.current || locked || submitting} />
+                    {activeDraft && !locked ? <Button title={fr.employeeTasks.deleteDraft} secondary onPress={beginDraftDelete} disabled={draftHydration !== "ready" || draftDeletingRef.current || submitting} /> : null}
                     {deleteDraftConfirmation && activeDraft?.id === deleteDraftConfirmation.draftId ? <View style={styles.confirmation}>
                       <Text accessibilityRole="alert" style={styles.muted}>{fr.employeeTasks.confirmDeleteDraft}</Text>
                       <Button title={fr.common.cancel} secondary onPress={cancelDraftDelete} />
                       <Button title={fr.common.confirm} onPress={confirmDraftDelete} />
+                    </View> : null}
+                    {draftHydration === "ready" && !locked && !draftDeletingRef.current && !deleteDraftConfirmation ? <Button title={fr.employeeTasks.submit} onPress={beginSubmit} disabled={submitting || Boolean(submitConfirmation)} /> : null}
+                    {submitConfirmation && submitConfirmation.employeeId === user.id && submitConfirmation.taskId === screen.id && !locked ? <View style={styles.confirmation}>
+                      <Text accessibilityRole="alert" style={styles.muted}>{fr.employeeTasks.confirmSubmit}</Text>
+                      <Button title={fr.common.cancel} secondary onPress={() => setSubmitConfirmation(undefined)} />
+                      <Button title={fr.common.confirm} onPress={confirmSubmit} disabled={submitting} />
                     </View> : null}
                   </View>
                 </View> : null}
@@ -1096,15 +1255,18 @@ export default function App() {
                   <Text style={styles.heading}>{fr.employeeTasks.resumeDraft}</Text>
                   <Detail label={fr.employeeTasks.taskId} value={activeDraft.taskId} />
                   {draftHydration === "loading" ? <Text accessibilityRole="summary" style={styles.muted}>{fr.common.loading}</Text> : null}
-                  {legacyContentMode ? <Field label={fr.employeeTasks.legacyDraftContent} value={draftContent} onChangeText={changeDraftContent} editable={draftHydration === "ready" && !draftDeletingRef.current && !deleteDraftConfirmation} multiline /> : null}
+                  <Detail label={fr.employeeTasks.state} value={lifecycleLabel(currentSyncState?.lifecycle ?? "draft")} />
+                  {currentSyncState ? <TaskSyncStatus state={currentSyncState} running={syncRunningFor === user.id} onRetry={() => void retrySync()} /> : null}
+                  {locked ? <Text accessibilityRole="summary" style={styles.muted}>{fr.employeeTasks.readOnlyPending}</Text> : null}
+                  {legacyContentMode ? <Field label={fr.employeeTasks.legacyDraftContent} value={draftContent} onChangeText={changeDraftContent} editable={formEditable} multiline /> : null}
                   <Text style={styles.heading}>{fr.employeeTasks.sectionNavigation}</Text>
                   <View style={styles.sectionNavigation}>{GRAPHIE_MOBILE_POV_CATALOGUE.sections.map((section) => <Pressable key={section.id} accessibilityRole="button" accessibilityState={{ selected: section.id === activeSectionId }} onPress={() => { setActiveSectionId(section.id); if (draftSaveState === "saving") void saveDraft(); }} style={styles.sectionButton}><Text style={styles.muted}>{section.labelFr}</Text></Pressable>)}</View>
-                  {GRAPHIE_MOBILE_POV_CATALOGUE.sections.filter((section) => section.id === activeSectionId).map((section) => <GraphieSectionForm key={section.id} section={section} layout={layout} values={formValues} results={calculationResults} onChange={changeFormField} editable={draftHydration === "ready" && !draftDeletingRef.current && !deleteDraftConfirmation} />)}
-                  <Text accessibilityRole={draftSaveState === "failed" ? "alert" : "summary"} style={draftSaveState === "failed" ? styles.error : styles.muted}>
-                    {draftSaveState === "failed" ? fr.employeeTasks.saveFailed : draftSaveState === "saving" ? fr.employeeTasks.savingDraft : fr.employeeTasks.savedLocally}
+                  {GRAPHIE_MOBILE_POV_CATALOGUE.sections.filter((section) => section.id === activeSectionId).map((section) => <GraphieSectionForm key={section.id} section={section} layout={layout} values={formValues} results={calculationResults} onChange={changeFormField} editable={formEditable} />)}
+                  <Text accessibilityRole={presentedSaveState === "failed" ? "alert" : "summary"} style={presentedSaveState === "failed" ? styles.error : styles.muted}>
+                    {presentedSaveState === "failed" ? fr.employeeTasks.saveFailed : presentedSaveState === "saving" ? fr.employeeTasks.savingDraft : fr.employeeTasks.savedLocally}
                   </Text>
-                  <Button title={fr.employeeTasks.saveDraft} onPress={() => saveDraft()} disabled={draftHydration !== "ready" || draftDeletingRef.current} />
-                  <Button title={fr.employeeTasks.deleteDraft} secondary onPress={beginDraftDelete} disabled={draftHydration !== "ready" || draftDeletingRef.current} />
+                  <Button title={fr.employeeTasks.saveDraft} onPress={() => saveDraft()} disabled={draftHydration !== "ready" || draftDeletingRef.current || locked || submitting} />
+                  {!locked ? <Button title={fr.employeeTasks.deleteDraft} secondary onPress={beginDraftDelete} disabled={draftHydration !== "ready" || draftDeletingRef.current || submitting} /> : null}
                   {deleteDraftConfirmation && activeDraft.id === deleteDraftConfirmation.draftId ? <View style={styles.confirmation}>
                     <Text accessibilityRole="alert" style={styles.muted}>{fr.employeeTasks.confirmDeleteDraft}</Text>
                     <Button title={fr.common.cancel} secondary onPress={cancelDraftDelete} />
@@ -1150,6 +1312,44 @@ const calculationIdentityOf = (source: CalculationContext): CalculationContext =
   ruleId: source.ruleId,
   ruleVersion: source.ruleVersion,
 });
+
+function lifecycleLabel(lifecycle: TaskSyncState["lifecycle"]) {
+  return lifecycle === "submission-pending" ? fr.employeeTasks.submissionPending
+    : lifecycle === "submitted" ? fr.employeeTasks.submitted
+      : lifecycle === "acceptance-blocked" ? fr.employeeTasks.acceptanceBlocked
+        : lifecycle === "conflict" ? fr.employeeTasks.syncConflict : fr.employeeTasks.draft;
+}
+
+const TRANSFER_LABELS: Record<TaskSyncState["transfer"], string> = {
+  "none": fr.employeeTasks.notSynchronized,
+  "queued": fr.employeeTasks.syncQueued,
+  "in-flight": fr.employeeTasks.syncInFlight,
+  "retry-paused": fr.employeeTasks.syncFailed,
+  "blocked": fr.employeeTasks.syncBlocked,
+  "draft-synchronized": fr.employeeTasks.draftSynchronized,
+  "draft-rejected": fr.employeeTasks.draftSyncRejected,
+  "draft-conflict": fr.employeeTasks.syncConflict,
+};
+const FAILED_TRANSFERS: ReadonlySet<TaskSyncState["transfer"]> = new Set(["retry-paused", "blocked", "draft-rejected", "draft-conflict"]);
+
+/** Task list rows: the lifecycle, plus the transfer state while an item is unresolved or failed. */
+function taskListStateLabel(state: TaskSyncState) {
+  const showTransfer = state.transfer !== "none" && state.transfer !== "draft-synchronized";
+  return showTransfer ? `${lifecycleLabel(state.lifecycle)} · ${TRANSFER_LABELS[state.transfer]}` : lifecycleLabel(state.lifecycle);
+}
+
+/** The « Synchronisation » line; resolved submissions need no line because the « État » already says it all. */
+function TaskSyncStatus(props: { state: TaskSyncState; running: boolean; onRetry: () => void }) {
+  const { state } = props;
+  if (state.lifecycle !== "draft" && state.lifecycle !== "submission-pending") return null;
+  const unresolved = state.transfer === "queued" || state.transfer === "in-flight" || state.transfer === "retry-paused" || state.transfer === "blocked";
+  const transfer = props.running && unresolved ? "in-flight" : state.transfer;
+  const failed = FAILED_TRANSFERS.has(transfer);
+  return <View style={{ gap: 10 }}>
+    <Text accessibilityRole={failed ? "alert" : "summary"} style={failed ? styles.error : styles.muted}>{fr.employeeTasks.syncStatus}: {TRANSFER_LABELS[transfer]}</Text>
+    {state.canRetry && !props.running ? <Button title={fr.employeeTasks.retrySync} onPress={props.onRetry} /> : null}
+  </View>;
+}
 
 const fieldLabel = (field: CatalogueField) => `${field.labelFr}${field.unit ? ` (${field.unit})` : ""}`;
 

@@ -104,3 +104,9 @@
 - source_spec: `_bmad-output/specs/spec-7-1-queue-durable-synchronization-operations/outbox-model.md`
   summary: After a `conflict` outcome, later unresolved items of the same task keep the stale base revision and will predictably conflict as well.
   evidence: Only `accepted` moves later items' base revision. Conflict recovery is Story 8.1.
+
+## Deferred from: code review of spec-7-2-show-synchronization-and-submission-state-distinctly (2026-10-04)
+
+- source_spec: `_bmad-output/specs/spec-7-2-show-synchronization-and-submission-state-distinctly/SPEC.md`
+  summary: A submission requested while a run is already active joins that run (`engine.run` returns the active promise), whose task list was read before the new `submit` item existed. The item stays « En attente de synchronisation » with no retry button until the next trigger.
+  evidence: Not reachable in 7.2 (the App transport is `null`). Story 7.3 adds the automatic triggers (app start, reconnect, foreground, after save); it should also start a follow-up run when a trigger arrives during an active run.

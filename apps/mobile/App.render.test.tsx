@@ -7,6 +7,8 @@ import { createOfflineAuthorizationService } from "./offline-authorization-state
 import { runOnlyWhenOnlineAuthorized } from "./server-work-authorization.js";
 import { GRAPHIE_MOBILE_POV_CATALOGUE, createNewGraphieDraftValues } from "./graphie-pov-catalogue.js";
 import { fr } from "@cetem-qc/i18n";
+import { GRAPHIE_CALCULATION_IDENTITY } from "@cetem-qc/domain";
+import type { SyncRequest, SyncResult, SyncTransport } from "./sync/sync-engine.js";
 
 const runtime = globalThis as typeof globalThis & {
   __mobileTestWidth?: number;
@@ -39,6 +41,9 @@ const runtime = globalThis as typeof globalThis & {
   __failTaskListForEmployee?: Set<string>;
   __failDraftList?: boolean;
   __failDraftDelete?: boolean;
+  __syncTransport?: SyncTransport | null;
+  __failOutboxList?: boolean;
+  __failOutboxInsert?: boolean;
 };
 type OutboxTestRow = {
   operation_id: string; idempotency_key: string; employee_id: string; task_id: string; sequence: number; kind: string;
@@ -58,6 +63,7 @@ function outboxStatement(kind: "first" | "all" | "run", sql: string, params: unk
     if (sql.includes("INSERT INTO audit_snapshots")) {
       snapshots.set(String(params[0]), { employee_id: String(params[1]), payload_json: String(params[5]) });
     } else if (sql.includes("INSERT INTO outbox_operations")) {
+      if (runtime.__failOutboxInsert) throw new Error("outbox write failed");
       const [operation_id, idempotency_key, employee_id, task_id, sequence, kind, snapshot_id, base_revision, created_at, updated_at] = params;
       outbox.set(String(operation_id), {
         operation_id: String(operation_id), idempotency_key: String(idempotency_key), employee_id: String(employee_id), task_id: String(task_id),
@@ -66,9 +72,26 @@ function outboxStatement(kind: "first" | "all" | "run", sql: string, params: unk
       });
     } else if (sql.includes("DELETE FROM outbox_operations")) outbox.delete(employeeId!);
     else if (sql.includes("DELETE FROM audit_snapshots")) snapshots.delete(employeeId!);
+    else if (sql.includes("INSERT INTO task_sync_state")) { /* The server revision is not read back by the App double. */ }
+    else if (sql.includes("UPDATE outbox_operations SET status = 'in-flight'")) {
+      const row = outbox.get(String(params[1]))!;
+      Object.assign(row, { status: "in-flight", attempt_count: row.attempt_count + 1, updated_at: Number(params[0]) });
+    } else if (sql.includes("UPDATE outbox_operations SET status = 'resolved'")) {
+      Object.assign(outbox.get(String(params[4]))!, { status: "resolved", outcome: String(params[0]), outcome_json: String(params[1]), resolved_at: Number(params[2]), updated_at: Number(params[3]) });
+    } else if (sql.includes("UPDATE outbox_operations SET status = ?")) {
+      Object.assign(outbox.get(String(params[3]))!, { status: String(params[0]), last_error: String(params[1]), updated_at: Number(params[2]) });
+    } else if (sql.includes("UPDATE outbox_operations SET base_revision")) {
+      const [revision, at, employee, task, sequence, base] = params;
+      for (const row of outbox.values()) {
+        if (row.employee_id === employee && row.task_id === task && row.status !== "resolved" && row.sequence > Number(sequence) && row.base_revision === base) {
+          Object.assign(row, { base_revision: Number(revision), updated_at: Number(at) });
+        }
+      }
+    }
     else throw new Error(`Unsupported outbox statement in the App double: ${sql}`);
     return { handled: true, value: { changes: 1, lastInsertRowId: 1 } };
   }
+  if (runtime.__failOutboxList && kind === "all" && sql.includes("ORDER BY sequence")) throw new Error("outbox read failed");
   const rows = [...outbox.values()].filter((row) => row.employee_id === employeeId).sort((a, b) => a.sequence - b.sequence);
   if (sql.includes("MAX(sequence)")) return { handled: true, value: { next_sequence: Math.max(0, ...[...outbox.values()].map((row) => row.sequence)) + 1 } };
   if (sql.includes("FROM task_sync_state")) return { handled: true, value: null };
@@ -216,6 +239,8 @@ mock.module("@cetem-qc/api-client/v1", {
     createApiClient: () => runtime.__mobileTestApi,
   },
 });
+// Story 7.2: the real module returns null (no run, items stay queued); tests may install a fake transport per mount.
+mock.module("./sync/app-sync-transport.js", { namedExports: { createAppSyncTransport: () => runtime.__syncTransport ?? null } });
 let App: typeof import("./App.js")["default"] | undefined;
 async function loadApp() {
   App ??= (await import("./App.js")).default;
@@ -289,6 +314,9 @@ function installMocks() {
   runtime.__draftWriteStarted = undefined;
   runtime.__failDraftList = false;
   runtime.__failDraftDelete = false;
+  runtime.__syncTransport = undefined;
+  runtime.__failOutboxList = false;
+  runtime.__failOutboxInsert = false;
   runtime.__networkOnline = true;
   runtime.__sessionAvailable = true;
   const api: MockApi = {
@@ -2367,5 +2395,469 @@ test("R12 tablet layout renders every result block in full, without truncation",
   }
   await goToSection(tree, "voltageAccuracy");
   assert.ok(blockTexts(tree, results.tests.voltageAccuracy).includes("KV max — écart : -0,16666666666666904 %"));
+  await act(async () => { tree.unmount(); });
+});
+
+// Story 7.2 — synchronization and submission state, derived from durable outbox rows.
+const reportField = () => GRAPHIE_MOBILE_POV_CATALOGUE.sections[0]!.fields.find((item) => item.id === "header.reportNumber")!;
+const graphiePayload = (values: Record<string, string>) => ({
+  catalogueId: GRAPHIE_CALCULATION_IDENTITY.catalogueId, catalogueVersion: GRAPHIE_CALCULATION_IDENTITY.catalogueVersion,
+  schemaVersion: GRAPHIE_CALCULATION_IDENTITY.schemaVersion, ruleId: GRAPHIE_CALCULATION_IDENTITY.ruleId,
+  ruleVersion: GRAPHIE_CALCULATION_IDENTITY.ruleVersion, values,
+});
+
+async function settle(ticks = 20) {
+  for (let tick = 0; tick < ticks; tick++) await new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+function seedDraft(taskId: string, values: Record<string, string> = createNewGraphieDraftValues()) {
+  const draft = { id: `draft-${taskId}`, employeeId: "employee-1", taskId, payloadSchemaVersion: 1, revision: 1, createdAt: 10, savedAt: 20, payload: graphiePayload(values) };
+  runtime.__draftRows!.set(`employee-1/${taskId}`, JSON.stringify(draft));
+  return draft;
+}
+
+function seedOutbox(taskId: string, sequence: number, kind: "sync-draft" | "submit", status: string, outcome: string | null = null) {
+  const operationId = `seed-op-${taskId}-${sequence}`;
+  const snapshotId = `seed-snapshot-${taskId}-${sequence}`;
+  const snapshot = { id: `draft-${taskId}`, employeeId: "employee-1", taskId, payloadSchemaVersion: 1, revision: 1, createdAt: 10, savedAt: 20, payload: graphiePayload(createNewGraphieDraftValues()) };
+  runtime.__snapshotRows!.set(snapshotId, { employee_id: "employee-1", payload_json: JSON.stringify(snapshot) });
+  runtime.__outboxRows!.set(operationId, {
+    operation_id: operationId, idempotency_key: `seed-key-${taskId}-${sequence}`, employee_id: "employee-1", task_id: taskId, sequence, kind,
+    snapshot_id: snapshotId, base_revision: 0, status, attempt_count: status === "queued" ? 0 : 1, last_error: null,
+    outcome: status === "resolved" ? outcome : null, outcome_json: status === "resolved" ? "{}" : null,
+    created_at: sequence, updated_at: sequence, resolved_at: status === "resolved" ? sequence : null,
+  });
+}
+
+const submitRows = (taskId: string) => [...runtime.__outboxRows!.values()].filter((row) => row.task_id === taskId && row.kind === "submit");
+const syncLine = (tree: ReactTestRenderer, label: string) => findText(tree, `${fr.employeeTasks.syncStatus}: ${label}`);
+const allTexts = (tree: ReactTestRenderer) => tree.root.findAll((node) => node.type === "Text").map((node) => node.children.join(""));
+type FakeResponse = SyncResult | "throw" | { ok: true };
+function fakeTransport(responses: FakeResponse[], fallback: FakeResponse) {
+  const transport = {
+    sent: [] as SyncRequest[],
+    responses,
+    fallback,
+    async send(request: SyncRequest): Promise<SyncResult> {
+      transport.sent.push(structuredClone(request));
+      const response = transport.responses.shift() ?? transport.fallback;
+      if (response === "throw") throw new Error("network down");
+      return response as SyncResult;
+    },
+  };
+  return transport;
+}
+
+async function openFirstTask(tree: ReactTestRenderer) {
+  await act(async () => { findTaskRow(tree, firstTask.establishment).props.onPress(); await settle(); });
+}
+
+async function requestSubmission(tree: ReactTestRenderer) {
+  await act(async () => { findButton(tree, fr.employeeTasks.submit).props.onPress(); });
+  await act(async () => { findButton(tree, fr.common.confirm).props.onPress(); await settle(); });
+}
+
+test("Story 7.2 R1 the task detail shows lifecycle, synchronization, connectivity and local save as separate derived lines", async () => {
+  await loadApp();
+  type Case = { rows: [kind: "sync-draft" | "submit", status: string, outcome?: string][]; state: string; transfer?: string; alert?: boolean; retry?: boolean; locked?: boolean };
+  const cases: Case[] = [
+    { rows: [], state: fr.employeeTasks.draft, transfer: fr.employeeTasks.notSynchronized },
+    { rows: [["sync-draft", "queued"]], state: fr.employeeTasks.draft, transfer: fr.employeeTasks.syncQueued },
+    { rows: [["sync-draft", "resolved", "accepted"]], state: fr.employeeTasks.draft, transfer: fr.employeeTasks.draftSynchronized },
+    { rows: [["sync-draft", "resolved", "rejected"]], state: fr.employeeTasks.draft, transfer: fr.employeeTasks.draftSyncRejected, alert: true },
+    { rows: [["sync-draft", "resolved", "conflict"]], state: fr.employeeTasks.draft, transfer: fr.employeeTasks.syncConflict, alert: true },
+    { rows: [["sync-draft", "retry-paused"]], state: fr.employeeTasks.draft, transfer: fr.employeeTasks.syncFailed, alert: true, retry: true },
+    { rows: [["sync-draft", "blocked"], ["submit", "queued"]], state: fr.employeeTasks.submissionPending, transfer: fr.employeeTasks.syncBlocked, alert: true, retry: true, locked: true },
+    { rows: [["submit", "queued"]], state: fr.employeeTasks.submissionPending, transfer: fr.employeeTasks.syncQueued, locked: true },
+    { rows: [["submit", "in-flight"]], state: fr.employeeTasks.submissionPending, transfer: fr.employeeTasks.syncInFlight, locked: true },
+    { rows: [["submit", "retry-paused"]], state: fr.employeeTasks.submissionPending, transfer: fr.employeeTasks.syncFailed, alert: true, retry: true, locked: true },
+    { rows: [["submit", "blocked"]], state: fr.employeeTasks.submissionPending, transfer: fr.employeeTasks.syncBlocked, alert: true, retry: true, locked: true },
+    { rows: [["sync-draft", "resolved", "accepted"], ["submit", "resolved", "accepted"]], state: fr.employeeTasks.submitted, locked: true },
+    { rows: [["submit", "resolved", "rejected"]], state: fr.employeeTasks.acceptanceBlocked, locked: true },
+    { rows: [["submit", "resolved", "conflict"]], state: fr.employeeTasks.syncConflict, locked: true },
+  ];
+  for (const item of cases) {
+    installMocks();
+    item.rows.forEach(([kind, status, outcome], index) => seedOutbox(firstTask.id, index + 1, kind, status, outcome ?? null));
+    let tree!: ReactTestRenderer;
+    await act(async () => { tree = create(<App />); });
+    await signIn(tree);
+    await openFirstTask(tree);
+    const label = `${item.state} / ${item.transfer ?? "no line"}`;
+    const stateDetail = tree.root.findAll((node) => node.type === "View" && node.findAll((child) => child.type === "Text" && child.children.join("") === fr.employeeTasks.state).length > 0
+      && node.findAll((child) => child.type === "Text" && child.children.join("") === item.state).length > 0)[0];
+    assert.ok(stateDetail, `« État » shows ${label}`);
+    const syncLines = allTexts(tree).filter((text) => text.startsWith(`${fr.employeeTasks.syncStatus}: `));
+    if (item.transfer) {
+      assert.deepEqual(syncLines, [`${fr.employeeTasks.syncStatus}: ${item.transfer}`], label);
+      assert.equal(syncLine(tree, item.transfer)!.props.accessibilityRole, item.alert ? "alert" : "summary", label);
+    } else assert.deepEqual(syncLines, [], `resolved submissions need no synchronization line: ${label}`);
+    assert.ok(findText(tree, `${fr.employeeTasks.connectivity}: ${fr.employeeTasks.online}`));
+    assert.equal(allTexts(tree).filter((text) => text.startsWith(`${fr.employeeTasks.localPersistence}: `)).length, 1, label);
+    assert.ok(allTexts(tree).every((text) => !text.includes("Dernier état serveur") && !text.includes("synchronisé ;")), label);
+    assert.equal(hasButton(tree, fr.employeeTasks.retrySync), Boolean(item.retry), label);
+    assert.equal(hasButton(tree, fr.employeeTasks.submit), !item.locked, label);
+    assert.equal(findInput(tree, reportField().labelFr)!.props.editable, !item.locked, label);
+    assert.equal(Boolean(findText(tree, fr.employeeTasks.readOnlyPending)), Boolean(item.locked), label);
+    await act(async () => { tree.unmount(); });
+  }
+});
+
+test("Story 7.2 R2 Soumettre offline asks for confirmation, records one submit item and stays read-only after a restart", async () => {
+  await loadApp();
+  installMocks();
+  let tree!: ReactTestRenderer;
+  await act(async () => { tree = create(<App />); });
+  await signIn(tree);
+  await act(async () => { tree.unmount(); });
+  runtime.__networkOnline = false;
+  try {
+    await act(async () => { tree = create(<App />); await settle(1); });
+    await act(async () => { (await waitForButton(tree, firstTask.establishment)).props.onPress(); await settle(100); });
+    assert.ok(findText(tree, `${fr.employeeTasks.connectivity}: ${fr.employeeTasks.offline}`));
+
+    await act(async () => { findButton(tree, fr.employeeTasks.submit).props.onPress(); });
+    assert.ok(findText(tree, fr.employeeTasks.confirmSubmit));
+    await act(async () => { findButton(tree, fr.common.cancel).props.onPress(); await settle(); });
+    assert.equal(findText(tree, fr.employeeTasks.confirmSubmit), undefined);
+    assert.equal(submitRows(firstTask.id).length, 0, "cancelling writes nothing");
+    assert.equal(runtime.__draftRows!.size, 0, "cancelling writes no draft");
+
+    const field = reportField();
+    await act(async () => { findInput(tree, field.labelFr)!.props.onChangeText("R2-offline-report"); });
+    await requestSubmission(tree);
+    const rows = submitRows(firstTask.id);
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0]!.status, "queued");
+    const draft = JSON.parse(runtime.__draftRows!.get(`employee-1/${firstTask.id}`)!) as { revision: number; payload: { values: Record<string, string> } };
+    assert.equal(draft.payload.values[field.id], "R2-offline-report", "confirming flushed the pending edit");
+    const snapshot = JSON.parse(runtime.__snapshotRows!.get(rows[0]!.snapshot_id)!.payload_json) as { revision: number; payload: unknown };
+    assert.deepEqual({ revision: snapshot.revision, payload: snapshot.payload }, { revision: draft.revision, payload: draft.payload });
+    assert.ok(findText(tree, fr.employeeTasks.submissionPending));
+    assert.ok(syncLine(tree, fr.employeeTasks.syncQueued));
+    assert.equal(findInput(tree, field.labelFr)!.props.editable, false);
+    assert.equal(findButton(tree, fr.employeeTasks.saveDraft).props.disabled, true);
+    await act(async () => { assert.equal(await findButton(tree, fr.employeeTasks.saveDraft).props.onPress(), false); });
+    assert.equal(hasButton(tree, fr.employeeTasks.deleteDraft), false);
+    assert.equal(hasButton(tree, fr.employeeTasks.submit), false);
+    assert.ok(findText(tree, fr.employeeTasks.readOnlyPending));
+    await act(async () => { tree.unmount(); });
+
+    await act(async () => { tree = create(<App />); await settle(1); });
+    await act(async () => { (await waitForButton(tree, firstTask.id)).props.onPress(); await settle(100); });
+    assert.ok(findText(tree, fr.employeeTasks.submissionPending), "the restart shows the same durable state");
+    assert.equal(findInput(tree, field.labelFr)!.props.value, "R2-offline-report");
+    assert.equal(findInput(tree, field.labelFr)!.props.editable, false);
+    assert.equal(hasButton(tree, fr.employeeTasks.submit), false);
+    assert.equal(submitRows(firstTask.id).length, 1);
+    await act(async () => { tree.unmount(); });
+  } finally {
+    runtime.__networkOnline = true;
+  }
+});
+
+test("Story 7.2 R3 a double or repeated confirmation creates one submit item", async () => {
+  await loadApp();
+  installMocks();
+  let tree!: ReactTestRenderer;
+  await act(async () => { tree = create(<App />); });
+  await signIn(tree);
+  await openFirstTask(tree);
+  await act(async () => { findButton(tree, fr.employeeTasks.submit).props.onPress(); });
+  await act(async () => {
+    const submit = findButton(tree, fr.employeeTasks.submit);
+    const confirm = findButton(tree, fr.common.confirm);
+    confirm.props.onPress();
+    confirm.props.onPress();
+    submit.props.onPress();
+    confirm.props.onPress();
+    await settle();
+  });
+  assert.equal(submitRows(firstTask.id).length, 1);
+  assert.ok(findText(tree, fr.employeeTasks.submissionPending));
+  assert.equal(hasButton(tree, fr.employeeTasks.submit), false);
+  await act(async () => { tree.unmount(); });
+});
+
+test("Story 7.2 R4 a retryable transfer keeps the data, offers a retry and sends the same idempotency key until accepted", async () => {
+  await loadApp();
+  installMocks();
+  const transport = fakeTransport([], { type: "retryable", code: "HTTP_503" });
+  runtime.__syncTransport = transport;
+  let tree!: ReactTestRenderer;
+  await act(async () => { tree = create(<App />); });
+  await signIn(tree);
+  await openFirstTask(tree);
+  await act(async () => { findInput(tree, reportField().labelFr)!.props.onChangeText("R4-report"); });
+  await requestSubmission(tree);
+  const [row] = submitRows(firstTask.id);
+  const snapshotBefore = runtime.__snapshotRows!.get(row!.snapshot_id)!.payload_json;
+  // Five attempts with the engine's technical waits of 1, 2, 4 and 8 seconds.
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 15_600)); await settle(); });
+  assert.equal(transport.sent.length, 5);
+  assert.ok(transport.sent.every((request) => request.idempotencyKey === row!.idempotency_key && request.kind === "submit"));
+  assert.equal(submitRows(firstTask.id)[0]!.status, "retry-paused");
+  assert.equal(runtime.__snapshotRows!.get(row!.snapshot_id)!.payload_json, snapshotBefore, "the snapshot is unchanged by the failure");
+  assert.ok(findText(tree, fr.employeeTasks.submissionPending));
+  assert.equal(syncLine(tree, fr.employeeTasks.syncFailed)?.props.accessibilityRole, "alert");
+  assert.equal(findText(tree, fr.employeeTasks.submitted), undefined);
+
+  transport.fallback = { type: "accepted", serverRevision: 3 };
+  await act(async () => { findButton(tree, fr.employeeTasks.retrySync).props.onPress(); await settle(); });
+  assert.equal(transport.sent.length, 6);
+  assert.equal(transport.sent[5]!.idempotencyKey, transport.sent[0]!.idempotencyKey);
+  assert.ok(findText(tree, fr.employeeTasks.submitted));
+  assert.equal(allTexts(tree).filter((text) => text.startsWith(`${fr.employeeTasks.syncStatus}: `)).length, 0);
+  assert.equal(hasButton(tree, fr.employeeTasks.retrySync), false);
+  assert.equal(findInput(tree, reportField().labelFr)!.props.editable, false);
+  assert.equal(hasButton(tree, fr.employeeTasks.submit), false);
+  await act(async () => { tree.unmount(); });
+});
+
+test("Story 7.2 R5 a non-union success, a thrown send or being online never renders the task as submitted", async () => {
+  await loadApp();
+  installMocks();
+  const transport = fakeTransport([{ ok: true }, "throw"], { ok: true });
+  runtime.__syncTransport = transport;
+  let tree!: ReactTestRenderer;
+  await act(async () => { tree = create(<App />); });
+  await signIn(tree);
+  await openFirstTask(tree);
+  await requestSubmission(tree);
+  assert.equal(transport.sent.length, 1);
+  assert.ok(findText(tree, fr.employeeTasks.submissionPending));
+  assert.equal(syncLine(tree, fr.employeeTasks.syncBlocked)?.props.accessibilityRole, "alert");
+  await act(async () => { findButton(tree, fr.employeeTasks.retrySync).props.onPress(); await new Promise((resolve) => setTimeout(resolve, 1_200)); await settle(); });
+  assert.equal(transport.sent.length, 3, "the thrown send is retried, then the non-union success blocks again");
+  assert.ok(findText(tree, fr.employeeTasks.submissionPending));
+  assert.equal(findText(tree, fr.employeeTasks.submitted), undefined);
+  await act(async () => { runtime.__networkListener?.({ isConnected: true, isInternetReachable: true }); await settle(); });
+  assert.ok(findText(tree, fr.employeeTasks.submissionPending), "connectivity alone changes nothing");
+  assert.equal(findText(tree, fr.employeeTasks.submitted), undefined);
+  assert.equal(submitRows(firstTask.id)[0]!.status, "blocked");
+  await act(async () => { tree.unmount(); });
+});
+
+test("Story 7.2 R6 retry does not send while offline or when the stored authorization is no longer valid", async () => {
+  await loadApp();
+  const actualNow = Date.now;
+  runtime.__testNow = actualNow();
+  Date.now = () => runtime.__testNow!;
+  try {
+    installMocks();
+    seedOutbox(firstTask.id, 1, "submit", "blocked");
+    const transport = fakeTransport([], { type: "accepted", serverRevision: 1 });
+    runtime.__syncTransport = transport;
+    let tree!: ReactTestRenderer;
+    await act(async () => { tree = create(<App />); });
+    await signIn(tree);
+    await act(async () => { tree.unmount(); });
+
+    runtime.__networkOnline = false;
+    await act(async () => { tree = create(<App />); await settle(1); });
+    await act(async () => { (await waitForButton(tree, firstTask.establishment)).props.onPress(); await settle(100); });
+    await act(async () => { findButton(tree, fr.employeeTasks.retrySync).props.onPress(); await settle(); });
+    assert.equal(transport.sent.length, 0, "no send while offline");
+    assert.ok(findText(tree, fr.auth.offlineUnavailable));
+    assert.ok(syncLine(tree, fr.employeeTasks.syncBlocked));
+    await act(async () => { tree.unmount(); });
+
+    // A fresh online session whose stored grant then expires.
+    installMocks();
+    seedOutbox(firstTask.id, 1, "submit", "blocked");
+    runtime.__syncTransport = transport;
+    await act(async () => { tree = create(<App />); });
+    await signIn(tree);
+    await openFirstTask(tree);
+    runtime.__testNow += 8 * 24 * 60 * 60 * 1000;
+    await act(async () => { findButton(tree, fr.employeeTasks.retrySync).props.onPress(); await settle(); });
+    assert.equal(transport.sent.length, 0, "no send without a valid online authorization");
+    assert.ok(findText(tree, fr.auth.reauthenticateOnline));
+    assert.equal(runtime.__outboxRows!.get(`seed-op-${firstTask.id}-1`)!.status, "blocked");
+    await act(async () => { tree.unmount(); });
+  } finally {
+    Date.now = actualNow;
+    delete runtime.__testNow;
+  }
+});
+
+test("Story 7.2 R7 without a transport the submission starts no run and stays queued on the device", async () => {
+  await loadApp();
+  installMocks();
+  let tree!: ReactTestRenderer;
+  await act(async () => { tree = create(<App />); });
+  await signIn(tree);
+  await openFirstTask(tree);
+  await requestSubmission(tree);
+  const [row] = submitRows(firstTask.id);
+  assert.deepEqual({ status: row!.status, attempts: row!.attempt_count }, { status: "queued", attempts: 0 });
+  assert.ok(findText(tree, fr.employeeTasks.submissionPending));
+  assert.equal(syncLine(tree, fr.employeeTasks.syncQueued)?.props.accessibilityRole, "summary");
+  assert.equal(hasButton(tree, fr.employeeTasks.retrySync), false);
+  await act(async () => { tree.unmount(); });
+});
+
+test("Story 7.2 R8 every task list row shows its derived lifecycle instead of a fixed label", async () => {
+  await loadApp();
+  installMocks();
+  runtime.__assignedTasksByEmployee!.set("employee-1", [firstTask, secondTask, thirdTask]);
+  seedDraft(firstTask.id);
+  seedOutbox(firstTask.id, 1, "submit", "queued");
+  seedOutbox(secondTask.id, 2, "submit", "resolved", "accepted");
+  let tree!: ReactTestRenderer;
+  await act(async () => { tree = create(<App />); });
+  await signIn(tree);
+  await act(async () => { await settle(); });
+  const pending = `${fr.employeeTasks.submissionPending} · ${fr.employeeTasks.syncQueued}`;
+  assert.ok(findText(tree, `${firstTask.service} · ${pending}`));
+  assert.ok(findText(tree, `${secondTask.service} · ${fr.employeeTasks.submitted}`));
+  assert.ok(findText(tree, `${thirdTask.service} · ${fr.employeeTasks.draft}`));
+  const resumable = findTaskRow(tree, firstTask.id);
+  assert.equal(resumable.findAll((node) => node.type === "Text" && node.children.join("") === pending).length, 1, "the resumable draft row shows the derived state");
+  const cachedSecond = tree.root.findAll((node) => node.type === "Pressable" && node.findAll((child) => child.type === "Text" && child.children.join("") === secondTask.establishment).length > 0)
+    .filter((node) => node.findAll((child) => child.type === "Text" && child.children.join("") === fr.employeeTasks.submitted).length > 0);
+  assert.equal(cachedSecond.length, 1, "the cached task row shows the derived state");
+  assert.ok(allTexts(tree).every((text) => !text.includes("Dernier état serveur")));
+  await act(async () => { tree.unmount(); });
+});
+
+test("Story 7.2 R9 a legacy-content draft cannot be submitted and nothing is written", async () => {
+  await loadApp();
+  installMocks();
+  const key = `employee-1/${firstTask.id}`;
+  runtime.__draftRows!.set(key, JSON.stringify({
+    id: "legacy-form", employeeId: "employee-1", taskId: firstTask.id,
+    payloadSchemaVersion: 1, revision: 1, createdAt: 10, savedAt: 20,
+    payload: { content: "R9 legacy notes" },
+  }));
+  const before = runtime.__draftRows!.get(key);
+  let tree!: ReactTestRenderer;
+  await act(async () => { tree = create(<App />); });
+  await signIn(tree);
+  await openFirstTask(tree);
+  await requestSubmission(tree);
+  assert.equal(findText(tree, fr.employeeTasks.submissionNotAllowed)?.props.accessibilityRole, "alert");
+  assert.equal(submitRows(firstTask.id).length, 0);
+  assert.equal(runtime.__draftRows!.get(key), before);
+  assert.equal(findInput(tree, reportField().labelFr)!.props.editable, true, "a refused request does not lock the draft");
+  await act(async () => { tree.unmount(); });
+});
+
+test("Story 7.2 R10 edits attempted through the handlers while locked write nothing and show no save failure", async () => {
+  await loadApp();
+  installMocks();
+  seedDraft(firstTask.id, { ...createNewGraphieDraftValues(), "header.reportNumber": "R10-report" });
+  seedOutbox(firstTask.id, 1, "submit", "queued");
+  const draftBefore = runtime.__draftRows!.get(`employee-1/${firstTask.id}`);
+  let tree!: ReactTestRenderer;
+  await act(async () => { tree = create(<App />); });
+  await signIn(tree);
+  await openFirstTask(tree);
+  const field = findInput(tree, reportField().labelFr)!;
+  assert.equal(field.props.value, "R10-report");
+  assert.equal(field.props.editable, false);
+  await act(async () => { field.props.onChangeText("R10-forbidden-edit"); });
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 650)); await settle(); });
+  assert.equal(runtime.__draftRows!.get(`employee-1/${firstTask.id}`), draftBefore, "no local_drafts revision");
+  assert.equal(runtime.__outboxRows!.size, 1, "no outbox row");
+  assert.equal(findInput(tree, reportField().labelFr)!.props.value, "R10-report");
+  assert.equal(findText(tree, fr.employeeTasks.saveFailed), undefined);
+  assert.equal(findText(tree, fr.employeeTasks.savingDraft), undefined);
+  await act(async () => { findButton(tree, fr.employeeTasks.back).props.onPress(); await settle(); });
+  assert.equal(findText(tree, fr.employeeTasks.saveFailed), undefined, "leaving a locked task does not try to save it");
+  await act(async () => { tree.unmount(); });
+});
+
+test("Story 7.2 R11 an active run reads « en cours » without a retry, and a sign-out during it never leaves the next session busy", async () => {
+  await loadApp();
+  installMocks();
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  let sends = 0;
+  runtime.__syncTransport = { async send() { sends++; await gate; return { type: "blocking", code: "HTTP_503" }; } };
+  let tree!: ReactTestRenderer;
+  await act(async () => { tree = create(<App />); });
+  await signIn(tree);
+  await openFirstTask(tree);
+  await requestSubmission(tree);
+  assert.equal(sends, 1, "the run is waiting on the transport");
+  assert.ok(syncLine(tree, fr.employeeTasks.syncInFlight), "the line reads « Synchronisation en cours… » while the run is active");
+  assert.equal(hasButton(tree, fr.employeeTasks.retrySync), false);
+
+  await act(async () => { findButton(tree, fr.auth.logout).props.onPress(); await settle(); });
+  seedOutbox(secondTask.id, 50, "submit", "blocked");
+  await act(async () => { release(); await settle(); });
+  await signIn(tree);
+  await act(async () => { await settle(); });
+  await act(async () => { findTaskRow(tree, secondTask.establishment).props.onPress(); await settle(); });
+  assert.equal(syncLine(tree, fr.employeeTasks.syncBlocked)?.props.accessibilityRole, "alert", "no run is active any more");
+  assert.equal(hasButton(tree, fr.employeeTasks.retrySync), true);
+  await act(async () => { tree.unmount(); });
+});
+
+test("Story 7.2 R12 a submission request that cannot be written shows a French alert and changes nothing", async () => {
+  await loadApp();
+  installMocks();
+  let tree!: ReactTestRenderer;
+  await act(async () => { tree = create(<App />); });
+  await signIn(tree);
+  await openFirstTask(tree);
+  runtime.__failOutboxInsert = true;
+  await requestSubmission(tree);
+  assert.equal(findText(tree, fr.employeeTasks.submissionFailed)?.props.accessibilityRole, "alert");
+  assert.equal(submitRows(firstTask.id).length, 0);
+  assert.equal(runtime.__draftRows!.has(`employee-1/${firstTask.id}`), false, "the draft write was rolled back with the request");
+  assert.ok(findText(tree, fr.employeeTasks.draft));
+  assert.equal(findInput(tree, reportField().labelFr)!.props.editable, true);
+  assert.equal(hasButton(tree, fr.employeeTasks.submit), true);
+  await act(async () => { tree.unmount(); });
+});
+
+test("Story 7.2 R13 an outbox read failure never shows a pending submission as an editable draft", async () => {
+  await loadApp();
+  installMocks();
+  seedDraft(firstTask.id, { ...createNewGraphieDraftValues(), "header.reportNumber": "R13-report" });
+  seedOutbox(firstTask.id, 1, "submit", "queued");
+  runtime.__failOutboxList = true;
+  let tree!: ReactTestRenderer;
+  await act(async () => { tree = create(<App />); });
+  await signIn(tree);
+  await act(async () => { await settle(); });
+  await openFirstTask(tree);
+  assert.ok(findText(tree, fr.employeeTasks.draftStorageUnavailable), "the open fails instead of guessing « Brouillon »");
+  assert.notEqual(findInput(tree, reportField().labelFr)?.props.editable, true);
+  assert.equal(hasButton(tree, fr.employeeTasks.submit), false);
+
+  runtime.__failOutboxList = false;
+  await act(async () => { findButton(tree, fr.employeeTasks.back).props.onPress(); await settle(); });
+  await openFirstTask(tree);
+  assert.ok(findText(tree, fr.employeeTasks.submissionPending));
+  assert.equal(findInput(tree, reportField().labelFr)!.props.editable, false);
+  runtime.__failOutboxList = true;
+  await act(async () => { findButton(tree, fr.employeeTasks.back).props.onPress(); await settle(); });
+  assert.ok(findText(tree, `${firstTask.service} · ${fr.employeeTasks.submissionPending} · ${fr.employeeTasks.syncQueued}`), "a failed refresh keeps the last derived state");
+  await act(async () => { tree.unmount(); });
+});
+
+test("Story 7.2 R14 a refused submission keeps autosaving the pending edit", async () => {
+  await loadApp();
+  installMocks();
+  const key = `employee-1/${firstTask.id}`;
+  runtime.__draftRows!.set(key, JSON.stringify({
+    id: "legacy-form", employeeId: "employee-1", taskId: firstTask.id,
+    payloadSchemaVersion: 1, revision: 1, createdAt: 10, savedAt: 20,
+    payload: { content: "R14 legacy notes" },
+  }));
+  let tree!: ReactTestRenderer;
+  await act(async () => { tree = create(<App />); });
+  await signIn(tree);
+  await openFirstTask(tree);
+  await act(async () => { findInput(tree, fr.employeeTasks.legacyDraftContent)!.props.onChangeText("R14 edited notes"); });
+  await requestSubmission(tree);
+  assert.ok(findText(tree, fr.employeeTasks.submissionNotAllowed));
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 650)); await settle(); });
+  assert.ok(runtime.__draftRows!.get(key)!.includes("R14 edited notes"), "the edit is saved after the refusal");
+  assert.equal(findText(tree, fr.employeeTasks.savingDraft), undefined);
+  assert.equal(submitRows(firstTask.id).length, 0);
   await act(async () => { tree.unmount(); });
 });

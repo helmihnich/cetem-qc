@@ -632,7 +632,7 @@ So that I know which copy is authoritative.
 **And** retryable transfer failures preserve the draft and expose a retry action; transport success alone never changes the audit to Submitted
 **And** a pending submission remains visibly pending and locally read-only until a definitive server outcome.
 
-**Traceability:** FR-021, FR-042, UX-DR2 (status-badge, sync-status, alert-message, loading-state), UX-DR4, UX-DR5, UX-DR13.
+**Traceability:** spec `_bmad-output/specs/spec-7-2-show-synchronization-and-submission-state-distinctly/SPEC.md`; FR-021, FR-042, UX-DR2 (status-badge, sync-status, alert-message, loading-state), UX-DR4, UX-DR5, UX-DR13. **Dependency:** Story 7.1 (done).
 
 ### Story 7.3: Accept submissions transactionally and idempotently
 
