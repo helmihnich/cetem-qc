@@ -43,7 +43,7 @@ Final machine conformity is always an explicit human decision by the **Responsab
 
 ## Superseded by the paper form (rule `cetem-paper-form` 2.0.0)
 
-Story 6.6 replaced the workbook rule `cetem-workbook-explicit-formulas` 1.0.0 with rule `cetem-paper-form` 2.0.0. The reference is now the signed paper form *Rapport de Contrôle de Qualité d'un Appareil Mobile de Radiographie* (photos in [`source/formulaire-cetem/`](source/formulaire-cetem/)). The extraction above is kept unchanged as evidence; the workbook values remain source-regression examples only.
+Story 6.6 replaced the workbook rule `cetem-workbook-explicit-formulas` 1.0.0 with rule `cetem-paper-form` 2.0.0. The reference is now the signed paper form *Rapport de Contrôle de Qualité d'un Appareil Mobile de Radiographie* (photos in [`source/formulaire-cetem/`](source/formulaire-cetem/)). The extraction above is kept unchanged as evidence; the workbook values remain source-regression examples only. How source-regression fixtures differ from CETEM-approved acceptance fixtures is described in [graphie-calculation-fixtures.md](graphie-calculation-fixtures.md).
 
 ### Workbook versus paper differences
 

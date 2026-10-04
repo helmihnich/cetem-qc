@@ -566,7 +566,7 @@ So that reproducing workbook evidence is not mistaken for business approval.
 **And** no workbook example is represented as an approved acceptance verdict unless CETEM explicitly approves it
 **And** calculation/verdict acceptance remains marked blocked until the approved dataset includes relevant normal, abnormal, invalid and boundary cases.
 
-**Traceability:** FR-025, FR-026, DR-002, AD-7. **Dependency:** DEP-02.
+**Traceability:** spec `_bmad-output/specs/spec-6-5-separate-regression-and-acceptance-fixtures/SPEC.md`; FR-025, FR-026, DR-002, AD-7. **Dependency:** DEP-02 (the approved dataset ships empty; acceptance stays blocked until CETEM supplies it).
 
 ### Story 6.6: Align calculation rules with the official CETEM paper form
 

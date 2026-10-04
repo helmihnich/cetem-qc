@@ -77,3 +77,15 @@
 - source_spec: `_bmad-output/specs/spec-6-4-display-calculation-results-in-responsable-review/review-view.md`
   summary: `GraphieCalculationReview` does not check that `evidence.identity` matches the identity the `evidence.results` snapshot was calculated under. A supported identity paired with old-rule results would show « Version de règle non prise en charge » next to a supported identity, and an old identity paired with current-rule results would show verdicts with no warning.
   evidence: Not reachable today. No producer exists yet, and `calculateGraphieResults` builds the results from that same identity. Stories 7.3/7.4 (server snapshot) and 9.1 (W4 wiring) should keep identity and results consistent, either with a server invariant or with a view-level check.
+
+## Deferred from: code review of SPEC-6-5-separate-regression-and-acceptance-fixtures (2026-10-04)
+
+- source_spec: `_bmad-output/specs/spec-6-5-separate-regression-and-acceptance-fixtures/fixture-categories.md`
+  summary: `runApprovedAcceptanceFixture` accepts an empty or partial `expected.values`, so an approved case can pass on its verdict alone, and result paths it omits are never compared.
+  evidence: Not reachable today because the dataset is empty. What counts as a complete expectation depends on the shape of the CETEM-signed dataset (DEP-02).
+- source_spec: `_bmad-output/specs/spec-6-5-separate-regression-and-acceptance-fixtures/fixture-categories.md`
+  summary: Keys in an approved case's `values` are not checked against the paper-form field IDs of its test. A typo becomes `missing-input` instead of failing the guard.
+  evidence: Add the check when the first CETEM dataset is entered. The field IDs are in `graphie-inputs.ts`.
+- source_spec: `_bmad-output/specs/spec-6-5-separate-regression-and-acceptance-fixtures/fixture-categories.md`
+  summary: `assertApprovedFixtures` requires ids to be unique across the whole dataset. If two CETEM approval documents number their cases the same way, the ids would clash, and the doc forbids renumbering.
+  evidence: Depends on how CETEM numbers its cases. If needed, key uniqueness on `(documentRef, id)`.

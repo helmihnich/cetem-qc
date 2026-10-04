@@ -124,7 +124,7 @@ test("R5 fixtures keep only paper-backed workbook cells", () => {
   assert.doesNotMatch(fixtureSource, /0\.49/);
 });
 
-// ---------------------------------------------------------------- Boundary cases (B1–B15)
+// ---------------------------------------------------------------- Boundary cases (B1–B15) — rule-derived developer checks (printed tolerances, Story 6.6), not CETEM acceptance
 
 test("B1/B2 voltage accuracy exactly ±10 % is conforme (≤)", () => {
   const plus = accuracy([50, 55], [70, 70], [100, 100]);
@@ -211,7 +211,7 @@ test("B15 tolerance comparisons are written exactly as the contract expressions"
   assert.doesNotMatch(domainSource, /Math\.round|toFixed|toPrecision/);
 });
 
-// ---------------------------------------------------------------- Unavailable and precedence (U1–U9)
+// ---------------------------------------------------------------- Unavailable and precedence (U1–U11) — rule-derived developer checks (printed tolerances, Story 6.6), not CETEM acceptance
 
 test("U1/U2 a missing row makes the verdict indisponible even when another row fails", () => {
   const missing = accuracy([50, 49.2], [70, 69.6], [null, 119.8]);
@@ -349,7 +349,7 @@ test("negative readings are not rejected", () => {
   assert.equal(num(lightField(-1, 2, -3, 1, -4).values.resultPercent), -1);
 });
 
-// ---------------------------------------------------------------- Versioning and provenance (V1–V5)
+// ---------------------------------------------------------------- Versioning and provenance (V1–V5) — rule-derived developer checks (printed tolerances, Story 6.6), not CETEM acceptance
 
 const calls = {
   voltageAccuracy: (context: CalculationContext) => graphieCalculations.voltageAccuracy(context, { rows: [{ kvDisplayed: 50, kvMeasured: 49.2 }, { kvDisplayed: 70, kvMeasured: 69.6 }, { kvDisplayed: 120, kvMeasured: 119.8 }] }),

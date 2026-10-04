@@ -74,7 +74,7 @@ development_status:
   6-2-share-versioned-calculation-logic-between-mobile-and-server: done
   6-3-display-authorized-calculation-results-in-the-employe-form: done
   6-4-display-authorized-calculation-results-in-responsable-review: done
-  6-5-separate-formula-regression-fixtures-from-approved-acceptanc: backlog
+  6-5-separate-formula-regression-fixtures-from-approved-acceptanc: done
   6-6-align-calculation-rules-with-the-official-cetem-paper-form: done  # must land before 6-3
   6-7-harden-the-test-harness-and-recover-unreadable-drafts: done
   epic-6-retrospective: optional
