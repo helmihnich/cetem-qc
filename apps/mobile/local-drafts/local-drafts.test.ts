@@ -37,6 +37,11 @@ function fixture() {
     },
     async revokeCachedSynchronizedTask(employeeId, taskId) { records.delete(`cache/${employeeId}/${taskId}`); },
     async listCachedSynchronizedTasks(employeeId) { return [...records.entries()].filter(([id]) => id.startsWith(`cache/${employeeId}/`)).map(([, raw]) => raw); },
+    // Outbox behaviour is covered against the SQLite double in outbox.test.ts; this fake has no outbox items.
+    async requestSubmission() { throw new Error("outbox not supported by this fake"); },
+    async listOutbox() { return []; },
+    async readOutboxSnapshot() { return null; },
+    async recordOutboxTransition() { throw new Error("outbox not supported by this fake"); },
   };
   let time = 100;
   let id = 0;
@@ -282,13 +287,13 @@ test("database migration initializes an empty versioned schema and rejects unkno
     },
   };
   await initializeDraftDatabase(database);
-  assert.equal(version, 2);
+  assert.equal(version, 3);
   assert.match(statements[0] ?? "", /CREATE TABLE local_drafts/);
   version = 0;
   failMigration = true;
   await assert.rejects(initializeDraftDatabase(database));
   assert.equal(version, 0, "failed schema migration rolls back its version change");
-  assert.equal(statements.length, 2, "failed schema migration leaves prior schema statements intact");
+  assert.equal(statements.length, 3, "failed schema migration leaves prior schema statements intact");
   failMigration = false;
   version = 77;
   await assert.rejects(initializeDraftDatabase(database));

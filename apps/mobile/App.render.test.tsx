@@ -19,6 +19,8 @@ const runtime = globalThis as typeof globalThis & {
   __testNow?: number;
   __draftRows?: Map<string, string>;
   __cachedTaskRows?: Map<string, string>;
+  __outboxRows?: Map<string, OutboxTestRow>;
+  __snapshotRows?: Map<string, { employee_id: string; payload_json: string }>;
   __employeeId?: string;
   __holdDraftWrite?: Promise<void>;
   __draftWriteStarted?: () => void;
@@ -38,6 +40,50 @@ const runtime = globalThis as typeof globalThis & {
   __failDraftList?: boolean;
   __failDraftDelete?: boolean;
 };
+type OutboxTestRow = {
+  operation_id: string; idempotency_key: string; employee_id: string; task_id: string; sequence: number; kind: string;
+  snapshot_id: string; base_revision: number; status: string; attempt_count: number; last_error: string | null;
+  outcome: string | null; outcome_json: string | null; created_at: number; updated_at: number; resolved_at: number | null;
+};
+let testUuid = 0;
+// Minimal outbox tables for the App double; the real SQL is exercised in local-drafts and sync tests.
+function outboxStatement(kind: "first" | "all" | "run", sql: string, params: unknown[]): { handled: boolean; value?: unknown } {
+  if (!/outbox_operations|audit_snapshots|task_sync_state/.test(sql)) return { handled: false };
+  runtime.__outboxRows ??= new Map();
+  runtime.__snapshotRows ??= new Map();
+  const outbox = runtime.__outboxRows;
+  const snapshots = runtime.__snapshotRows;
+  const [employeeId, second] = params.map(String);
+  if (kind === "run") {
+    if (sql.includes("INSERT INTO audit_snapshots")) {
+      snapshots.set(String(params[0]), { employee_id: String(params[1]), payload_json: String(params[5]) });
+    } else if (sql.includes("INSERT INTO outbox_operations")) {
+      const [operation_id, idempotency_key, employee_id, task_id, sequence, kind, snapshot_id, base_revision, created_at, updated_at] = params;
+      outbox.set(String(operation_id), {
+        operation_id: String(operation_id), idempotency_key: String(idempotency_key), employee_id: String(employee_id), task_id: String(task_id),
+        sequence: Number(sequence), kind: String(kind), snapshot_id: String(snapshot_id), base_revision: Number(base_revision), status: "queued",
+        attempt_count: 0, last_error: null, outcome: null, outcome_json: null, created_at: Number(created_at), updated_at: Number(updated_at), resolved_at: null,
+      });
+    } else if (sql.includes("DELETE FROM outbox_operations")) outbox.delete(employeeId!);
+    else if (sql.includes("DELETE FROM audit_snapshots")) snapshots.delete(employeeId!);
+    else throw new Error(`Unsupported outbox statement in the App double: ${sql}`);
+    return { handled: true, value: { changes: 1, lastInsertRowId: 1 } };
+  }
+  const rows = [...outbox.values()].filter((row) => row.employee_id === employeeId).sort((a, b) => a.sequence - b.sequence);
+  if (sql.includes("MAX(sequence)")) return { handled: true, value: { next_sequence: Math.max(0, ...[...outbox.values()].map((row) => row.sequence)) + 1 } };
+  if (sql.includes("FROM task_sync_state")) return { handled: true, value: null };
+  if (sql.includes("JOIN audit_snapshots")) {
+    const row = rows.find((item) => item.operation_id === second);
+    return { handled: true, value: row ? { payload_json: snapshots.get(row.snapshot_id)?.payload_json } : null };
+  }
+  if (sql.includes("operation_id = ?")) return { handled: true, value: rows.find((item) => item.operation_id === second) ?? null };
+  let matches = sql.includes("task_id = ?") ? rows.filter((row) => row.task_id === second) : rows;
+  if (sql.includes("kind = 'submit'")) matches = matches.filter((row) => row.kind === "submit");
+  if (sql.includes("kind = 'sync-draft'")) matches = matches.filter((row) => row.kind === "sync-draft");
+  if (sql.includes("status <> 'resolved'")) matches = matches.filter((row) => row.status !== "resolved");
+  if (sql.includes("attempt_count = 0")) matches = matches.filter((row) => row.attempt_count === 0);
+  return { handled: true, value: kind === "first" ? matches[0] ?? null : matches };
+}
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 mock.module("react-native", {
@@ -72,7 +118,7 @@ mock.module("expo-secure-store", {
 });
 mock.module("expo-crypto", { namedExports: {
   getRandomBytesAsync: async (size: number) => new Uint8Array(size).fill(7),
-  randomUUID: () => "test-draft-id",
+  randomUUID: () => `test-uuid-${++testUuid}`,
 } });
 mock.module("expo-sqlite", { namedExports: {
   openDatabaseAsync: async () => {
@@ -82,6 +128,8 @@ mock.module("expo-sqlite", { namedExports: {
     const db = {
       execAsync: async () => undefined,
       getFirstAsync: async (sql: string, ...params: string[]) => {
+        const outboxResult = outboxStatement("first", sql, params);
+        if (outboxResult.handled) return outboxResult.value;
         if (sql.includes("user_version")) return { user_version: 2 };
         if (sql.includes("sqlite_master")) return { name: sql.includes("synchronized_tasks") ? "synchronized_tasks" : "local_drafts" };
         if (sql.includes("payload_json")) {
@@ -95,7 +143,9 @@ mock.module("expo-sqlite", { namedExports: {
         const parsed = JSON.parse(row) as { payload_json?: string; revision?: number };
         return sql.includes("payload_json") ? { payload_json: parsed.payload_json ?? row } : { revision: parsed.revision ?? (JSON.parse(parsed.payload_json ?? row) as { revision: number }).revision };
       },
-      getAllAsync: async (sql: string, employeeId: string) => {
+      getAllAsync: async (sql: string, employeeId: string, ...rest: string[]) => {
+        const outboxResult = outboxStatement("all", sql, [employeeId, ...rest]);
+        if (outboxResult.handled) return outboxResult.value;
         if (runtime.__failDraftList) throw new Error("list failed");
         if (sql.includes("synchronized_tasks")) return [...(runtime.__cachedTaskRows ?? new Map()).entries()]
           .filter(([key]) => key.startsWith(`${employeeId}/`))
@@ -105,6 +155,8 @@ mock.module("expo-sqlite", { namedExports: {
         return [...rows.values()].filter((raw) => (JSON.parse(raw) as { employeeId: string }).employeeId === employeeId).map((payload_json) => ({ payload_json }));
       },
       runAsync: async (sql: string, ...params: (string | number)[]) => {
+        const outboxResult = outboxStatement("run", sql, params);
+        if (outboxResult.handled) return outboxResult.value;
         if (sql.includes("DELETE FROM synchronized_tasks")) {
           const [employeeId, taskId] = params.map(String);
           for (const key of runtime.__cachedTaskRows?.keys() ?? []) {
@@ -141,9 +193,13 @@ mock.module("expo-sqlite", { namedExports: {
       withExclusiveTransactionAsync: async (operation: (tx: unknown) => Promise<void>) => {
         const before = new Map(rows);
         const cacheBefore = new Map(runtime.__cachedTaskRows);
+        const outboxBefore = new Map([...(runtime.__outboxRows ?? new Map<string, OutboxTestRow>())].map(([id, row]) => [id, { ...row }]));
+        const snapshotsBefore = new Map(runtime.__snapshotRows);
         try { await operation(db); } catch (error) {
           rows.clear(); for (const [id, value] of before) rows.set(id, value);
           runtime.__cachedTaskRows = new Map(cacheBefore);
+          runtime.__outboxRows = outboxBefore;
+          runtime.__snapshotRows = snapshotsBefore;
           throw error;
         }
       },
@@ -213,6 +269,8 @@ function installMocks() {
   runtime.__secureValues = new Map();
   runtime.__draftRows = new Map();
   runtime.__cachedTaskRows = new Map();
+  runtime.__outboxRows = new Map();
+  runtime.__snapshotRows = new Map();
   runtime.__employeeId = "employee-1";
   runtime.__holdDraftRead = undefined;
   runtime.__holdDraftWrite = undefined;
@@ -563,6 +621,32 @@ test("offline timer autosave commits locally without API calls and survives rest
   assert.deepEqual(api.detailCalls, [firstTask.id], "only online draft resume revalidates task assignment");
   await act(async () => { tree.unmount(); });
   runtime.__networkOnline = false;
+});
+
+test("P3 autosave records one durable sync-draft outbox item per task without changing the editor", async () => {
+  await loadApp();
+  installMocks();
+  let tree!: ReactTestRenderer;
+  await act(async () => { tree = create(<App />); });
+  await signIn(tree);
+  await act(async () => { findTaskRow(tree, firstTask.establishment).props.onPress(); });
+  const field = GRAPHIE_MOBILE_POV_CATALOGUE.sections[0]!.fields.find((item) => item.id === "header.reportNumber")!;
+  await act(async () => { findInput(tree, field.labelFr)!.props.onChangeText("first autosave"); });
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 650)); });
+  await act(async () => { findInput(tree, field.labelFr)!.props.onChangeText("second autosave"); });
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 650)); });
+  assert.ok(findText(tree, fr.employeeTasks.savedLocally), "the existing local acknowledgement is unchanged");
+  const items = [...runtime.__outboxRows!.values()].filter((row) => row.employee_id === "employee-1" && row.task_id === firstTask.id);
+  assert.deepEqual(items.map((row) => ({ kind: row.kind, status: row.status, attempts: row.attempt_count })), [{ kind: "sync-draft", status: "queued", attempts: 0 }],
+    "the never-attempted item of the first autosave is superseded by the second");
+  assert.notEqual(items[0]!.operation_id, items[0]!.idempotency_key);
+  const saved = JSON.parse(runtime.__draftRows!.get(`employee-1/${firstTask.id}`)!) as { revision: number; payload: { values: Record<string, string> } };
+  const snapshot = JSON.parse(runtime.__snapshotRows!.get(items[0]!.snapshot_id)!.payload_json) as { revision: number; payload: { values: Record<string, string> } };
+  assert.equal(saved.revision, 2, "both autosaves committed");
+  assert.equal(snapshot.revision, saved.revision);
+  assert.deepEqual(snapshot.payload, saved.payload);
+  assert.equal(snapshot.payload.values[field.id], "second autosave");
+  await act(async () => { tree.unmount(); });
 });
 
 test("offline timer autosave still locks and preserves protected data after authorization expiry", async () => {

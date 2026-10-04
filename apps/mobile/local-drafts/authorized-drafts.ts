@@ -1,4 +1,4 @@
-import type { DraftRepository, GraphieDraftPayload, LocalDraft, CachedSynchronizedTask } from "./model";
+import type { DraftRepository, GraphieDraftPayload, LocalDraft, CachedSynchronizedTask, OutboxItem, OutboxTransition, SubmissionRequest, TaskSyncStatus } from "./model";
 
 export type DraftAuthorization = <T>(employeeId: string, operation: () => Promise<T>) => Promise<T>;
 
@@ -32,6 +32,21 @@ export function createAuthorizedDrafts(repository: DraftRepository, authorize: D
     },
     async listCachedSynchronizedTasks(employeeId: string): Promise<CachedSynchronizedTask[]> {
       return authorize(employeeId, () => repository.listCachedSynchronizedTasks(employeeId));
+    },
+    async requestSubmission(employeeId: string, taskId: string, payload: GraphieDraftPayload, expectedRevision?: number): Promise<SubmissionRequest> {
+      return authorize(employeeId, () => repository.requestSubmission(employeeId, taskId, payload, expectedRevision));
+    },
+    async listOutbox(employeeId: string): Promise<OutboxItem[]> {
+      return authorize(employeeId, () => repository.listOutbox(employeeId));
+    },
+    async getTaskSyncStatus(employeeId: string, taskId: string): Promise<TaskSyncStatus> {
+      return authorize(employeeId, () => repository.getTaskSyncStatus(employeeId, taskId));
+    },
+    async readOutboxSnapshot(employeeId: string, operationId: string): Promise<LocalDraft> {
+      return authorize(employeeId, () => repository.readOutboxSnapshot(employeeId, operationId));
+    },
+    async recordOutboxTransition(employeeId: string, operationId: string, transition: OutboxTransition): Promise<OutboxItem> {
+      return authorize(employeeId, () => repository.recordOutboxTransition(employeeId, operationId, transition));
     },
   };
 }

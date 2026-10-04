@@ -1,4 +1,5 @@
-const DATABASE_VERSION = 2;
+const DATABASE_VERSION = 3;
+const OUTBOX_TABLES = ["audit_snapshots", "outbox_operations", "task_sync_state"] as const;
 
 type MigrationTransaction = {
   getFirstAsync<T>(sql: string): Promise<T | null>;
@@ -17,6 +18,10 @@ export async function initializeDraftDatabase(db: MigrationDatabase): Promise<vo
     if (table?.name !== "local_drafts") throw new Error("Local draft database schema is incomplete.");
     const cache = await db.getFirstAsync<{ name: string }>("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'synchronized_tasks'");
     if (cache?.name !== "synchronized_tasks") throw new Error("Local synchronized-task schema is incomplete.");
+    for (const name of OUTBOX_TABLES) {
+      const outbox = await db.getFirstAsync<{ name: string }>(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = '${name}'`);
+      if (outbox?.name !== name) throw new Error("Local outbox schema is incomplete.");
+    }
     return;
   }
   await db.withExclusiveTransactionAsync(async (tx) => {
@@ -49,6 +54,50 @@ export async function initializeDraftDatabase(db: MigrationDatabase): Promise<vo
           PRIMARY KEY (employee_id, task_id)
         );
         PRAGMA user_version = 2;
+      `);
+    }
+    if (versionInside < 3) {
+      // Creates tables only: existing draft and cached-task rows are never touched.
+      await tx.execAsync(`
+        CREATE TABLE audit_snapshots (
+          snapshot_id TEXT PRIMARY KEY,
+          employee_id TEXT NOT NULL,
+          task_id TEXT NOT NULL,
+          kind TEXT NOT NULL CHECK (kind IN ('sync-draft', 'submit')),
+          draft_revision INTEGER NOT NULL CHECK (draft_revision > 0),
+          payload_json TEXT NOT NULL,
+          created_at INTEGER NOT NULL
+        );
+        CREATE TRIGGER audit_snapshots_insert_only BEFORE UPDATE ON audit_snapshots
+        BEGIN SELECT RAISE(ABORT, 'audit snapshots are insert-only'); END;
+        CREATE TABLE outbox_operations (
+          operation_id TEXT PRIMARY KEY,
+          idempotency_key TEXT NOT NULL UNIQUE,
+          employee_id TEXT NOT NULL,
+          task_id TEXT NOT NULL,
+          sequence INTEGER NOT NULL,
+          kind TEXT NOT NULL CHECK (kind IN ('sync-draft', 'submit')),
+          snapshot_id TEXT NOT NULL UNIQUE REFERENCES audit_snapshots(snapshot_id),
+          base_revision INTEGER NOT NULL CHECK (base_revision >= 0),
+          status TEXT NOT NULL CHECK (status IN ('queued', 'in-flight', 'retry-paused', 'blocked', 'resolved')),
+          attempt_count INTEGER NOT NULL DEFAULT 0,
+          last_error TEXT,
+          outcome TEXT CHECK (outcome IN ('accepted', 'rejected', 'conflict')),
+          outcome_json TEXT,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          resolved_at INTEGER,
+          CHECK ((status = 'resolved') = (outcome IS NOT NULL))
+        );
+        CREATE INDEX outbox_employee_task_seq ON outbox_operations(employee_id, task_id, sequence);
+        CREATE TABLE task_sync_state (
+          employee_id TEXT NOT NULL,
+          task_id TEXT NOT NULL,
+          server_revision INTEGER NOT NULL CHECK (server_revision >= 0),
+          updated_at INTEGER NOT NULL,
+          PRIMARY KEY (employee_id, task_id)
+        );
+        PRAGMA user_version = 3;
       `);
     }
   });

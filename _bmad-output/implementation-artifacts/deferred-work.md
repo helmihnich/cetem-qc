@@ -89,3 +89,18 @@
 - source_spec: `_bmad-output/specs/spec-6-5-separate-regression-and-acceptance-fixtures/fixture-categories.md`
   summary: `assertApprovedFixtures` requires ids to be unique across the whole dataset. If two CETEM approval documents number their cases the same way, the ids would clash, and the doc forbids renumbering.
   evidence: Depends on how CETEM numbers its cases. If needed, key uniqueness on `(documentRef, id)`.
+
+## Deferred from: Story 7.1 spec (2026-10-04)
+
+- source_spec: `_bmad-output/specs/spec-7-1-queue-durable-synchronization-operations/SPEC.md`
+  summary: No story in `epics.md` owns the server command that receives `sync-draft` outbox operations (FR-021 « Synchronize saved drafts », AD-5 « synchronized editable drafts »). Story 7.3 covers only submission acceptance.
+  evidence: Story 7.1 queues `sync-draft` items behind a transport port. Without a server command they stay `queued` on the device, which is safe but means drafts never synchronize. The 7.3 author or the Product Owner should place it in 7.3 or in a new story (see delivery-notes.md).
+
+## Deferred from: code review of spec-7-1-queue-durable-synchronization-operations (2026-10-04)
+
+- source_spec: `_bmad-output/specs/spec-7-1-queue-durable-synchronization-operations/sync-engine.md`
+  summary: Every `blocking` result stops the whole run, including task-level codes such as `TASK_NOT_ASSIGNED`. The blocked item has the lowest sequence, so each later run stops on it again and the employee's other tasks never sync.
+  evidence: The spec lists `TASK_NOT_ASSIGNED` as blocking. Story 7.3 (HTTP mapping) or 8.4 (deactivation/unassignment) should map task-level refusals to a per-task skip.
+- source_spec: `_bmad-output/specs/spec-7-1-queue-durable-synchronization-operations/outbox-model.md`
+  summary: After a `conflict` outcome, later unresolved items of the same task keep the stale base revision and will predictably conflict as well.
+  evidence: Only `accepted` moves later items' base revision. Conflict recovery is Story 8.1.

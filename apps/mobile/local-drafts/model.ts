@@ -21,6 +21,73 @@ export type CachedSynchronizedTask = {
   synchronizedAt: number;
 };
 
+export type OutboxKind = "sync-draft" | "submit";
+export type OutboxStatus = "queued" | "in-flight" | "retry-paused" | "blocked" | "resolved";
+export type OutboxOutcome = "accepted" | "rejected" | "conflict";
+
+/** A durable synchronization operation, without its snapshot payload. */
+export type OutboxItem = {
+  operationId: string;
+  idempotencyKey: string;
+  employeeId: string;
+  taskId: string;
+  sequence: number;
+  kind: OutboxKind;
+  snapshotId: string;
+  baseRevision: number;
+  status: OutboxStatus;
+  attemptCount: number;
+  lastError: string | null;
+  outcome: OutboxOutcome | null;
+  outcomeMetadata: { serverRevision?: number; detail?: unknown } | null;
+  createdAt: number;
+  updatedAt: number;
+  resolvedAt: number | null;
+};
+
+export type NewOutboxOperation = {
+  operationId: string;
+  idempotencyKey: string;
+  snapshotId: string;
+  kind: OutboxKind;
+  /** The saved draft envelope, stored as an insert-only snapshot. */
+  snapshot: LocalDraft;
+  createdAt: number;
+};
+
+export type OutboxTransition = { at: number } & (
+  | { type: "attempt-start" }
+  | { type: "retryable"; code: string; pause: boolean }
+  | { type: "blocking"; code: string }
+  | { type: "outcome"; outcome: OutboxOutcome; serverRevision?: number; detail?: unknown });
+
+export type TaskSyncStatus = { hasPendingSubmission: boolean; unresolvedCount: number; lastOutcome: OutboxOutcome | null };
+
+export type SubmissionRequest = { draft: LocalDraft; operation: OutboxItem };
+
+export const isUnresolved = (item: OutboxItem) => item.status !== "resolved";
+
+export class PendingSubmissionError extends Error {
+  constructor() {
+    super("A submission is pending for this task.");
+    this.name = "PendingSubmissionError";
+  }
+}
+
+export class SubmissionNotAllowedError extends Error {
+  constructor() {
+    super("This local draft cannot be submitted.");
+    this.name = "SubmissionNotAllowedError";
+  }
+}
+
+export class OutboxOperationNotFoundError extends Error {
+  constructor() {
+    super("Outbox operation not found or already resolved.");
+    this.name = "OutboxOperationNotFoundError";
+  }
+}
+
 export class LocalDraftPayloadCompatibilityError extends Error {
   constructor() {
     super("Saved local draft payload metadata is unsupported.");
@@ -80,18 +147,30 @@ export interface DraftRepository {
   replaceCachedSynchronizedTasks(employeeId: string, tasks: CachedSynchronizedTask["task"][]): Promise<void>;
   revokeCachedSynchronizedTask(employeeId: string, taskId: string): Promise<void>;
   listCachedSynchronizedTasks(employeeId: string): Promise<CachedSynchronizedTask[]>;
+  /** Saves the payload and records an immutable submission snapshot plus a `submit` operation atomically. */
+  requestSubmission(employeeId: string, taskId: string, payload: GraphieDraftPayload, expectedRevision?: number): Promise<SubmissionRequest>;
+  listOutbox(employeeId: string): Promise<OutboxItem[]>;
+  getTaskSyncStatus(employeeId: string, taskId: string): Promise<TaskSyncStatus>;
+  readOutboxSnapshot(employeeId: string, operationId: string): Promise<LocalDraft>;
+  recordOutboxTransition(employeeId: string, operationId: string, transition: OutboxTransition): Promise<OutboxItem>;
 }
 
 export interface DraftDatabase {
   read(employeeId: string, taskId: string): Promise<string | null>;
   list(employeeId: string): Promise<string[]>;
-  save(record: LocalDraft, expectedRevision?: number): Promise<void>;
+  /** Writes the draft and, when given, its outbox operation in one transaction. Refused while a submission is pending. */
+  save(record: LocalDraft, expectedRevision?: number, operation?: NewOutboxOperation): Promise<void>;
+  /** `record` is null when the stored draft is unchanged; the snapshot must then match the stored revision. */
+  requestSubmission(record: LocalDraft | null, expectedRevision: number | undefined, operation: NewOutboxOperation): Promise<OutboxItem>;
   delete(employeeId: string, taskId: string, expectedRevision: number): Promise<void>;
   deleteUnreadable(employeeId: string, taskId: string): Promise<void>;
   cacheSynchronizedTask(record: CachedSynchronizedTask): Promise<void>;
   replaceCachedSynchronizedTasks(employeeId: string, records: CachedSynchronizedTask[]): Promise<void>;
   revokeCachedSynchronizedTask(employeeId: string, taskId: string): Promise<void>;
   listCachedSynchronizedTasks(employeeId: string): Promise<string[]>;
+  listOutbox(employeeId: string, taskId?: string): Promise<OutboxItem[]>;
+  readOutboxSnapshot(employeeId: string, operationId: string): Promise<string | null>;
+  recordOutboxTransition(employeeId: string, operationId: string, transition: OutboxTransition): Promise<OutboxItem>;
 }
 
 export class DraftListCorruptionError extends Error {
@@ -110,6 +189,29 @@ export function createDraftRepository(database: DraftDatabase, now: () => number
     return result;
   }
   const scope = (employeeId: string, taskId: string) => `${employeeId}\u0000${taskId}`;
+  async function assertNoPendingSubmission(employeeId: string, taskId: string) {
+    const items = await database.listOutbox(employeeId, taskId);
+    if (items.some((item) => item.kind === "submit" && isUnresolved(item))) throw new PendingSubmissionError();
+  }
+  async function readForWrite(employeeId: string, taskId: string, expectedRevision: number | undefined) {
+    const raw = await database.read(employeeId, taskId);
+    const previous = raw === null ? null : parseLocalDraft(raw);
+    if (previous && (previous.employeeId !== employeeId || previous.taskId !== taskId)) throw new Error("Local draft scope mismatch.");
+    if (expectedRevision !== undefined && (previous?.revision ?? 0) !== expectedRevision) throw new Error("Local draft changed. Reload before saving.");
+    return previous;
+  }
+  function nextRecord(employeeId: string, taskId: string, previous: LocalDraft | null, payload: LocalDraft["payload"]): LocalDraft {
+    const savedAt = Math.max(now(), previous?.savedAt ?? 0);
+    return {
+      id: previous?.id ?? createId(), employeeId, taskId,
+      payloadSchemaVersion: LOCAL_DRAFT_SCHEMA_VERSION,
+      revision: (previous?.revision ?? 0) + 1,
+      payload, createdAt: previous?.createdAt ?? savedAt, savedAt,
+    };
+  }
+  const newOperation = (kind: OutboxKind, snapshot: LocalDraft): NewOutboxOperation => ({
+    operationId: createId(), idempotencyKey: createId(), snapshotId: createId(), kind, snapshot, createdAt: snapshot.savedAt,
+  });
   return {
     async read(employeeId, taskId) {
       const raw = await database.read(employeeId, taskId);
@@ -133,28 +235,47 @@ export function createDraftRepository(database: DraftDatabase, now: () => number
     },
     async save(employeeId, taskId, content, expectedRevision) {
       return serialize(scope(employeeId, taskId), async () => {
-        const raw = await database.read(employeeId, taskId);
-        const previous = raw === null ? null : parseLocalDraft(raw);
-        if (previous && (previous.employeeId !== employeeId || previous.taskId !== taskId)) throw new Error("Local draft scope mismatch.");
-        if (expectedRevision !== undefined && (previous?.revision ?? 0) !== expectedRevision) throw new Error("Local draft changed. Reload before saving.");
+        await assertNoPendingSubmission(employeeId, taskId);
+        const previous = await readForWrite(employeeId, taskId, expectedRevision);
         const payload = typeof content === "string" ? { content } : content;
         if (JSON.stringify(previous?.payload) === JSON.stringify(payload)) return previous!;
-        const savedAt = Math.max(now(), previous?.savedAt ?? 0);
-        const record: LocalDraft = {
-          id: previous?.id ?? createId(), employeeId, taskId,
-          payloadSchemaVersion: LOCAL_DRAFT_SCHEMA_VERSION,
-          revision: (previous?.revision ?? 0) + 1,
-          payload, createdAt: previous?.createdAt ?? savedAt, savedAt,
-        };
-        await database.save(record, previous?.revision);
+        const record = nextRecord(employeeId, taskId, previous, payload);
+        await database.save(record, previous?.revision, newOperation("sync-draft", record));
         return record;
       });
     },
+    async requestSubmission(employeeId, taskId, payload, expectedRevision) {
+      return serialize(scope(employeeId, taskId), async () => {
+        await assertNoPendingSubmission(employeeId, taskId);
+        // Only legacy content and drafts this app version cannot read are refused locally; the server validates.
+        if (typeof payload !== "object" || payload === null || "content" in payload || payload.legacyContent !== undefined) throw new SubmissionNotAllowedError();
+        const raw = await database.read(employeeId, taskId);
+        let previous: LocalDraft | null = null;
+        if (raw !== null) {
+          try { previous = parseLocalDraft(raw); } catch { throw new SubmissionNotAllowedError(); }
+        }
+        if (previous && (previous.employeeId !== employeeId || previous.taskId !== taskId)) throw new Error("Local draft scope mismatch.");
+        if (expectedRevision !== undefined && (previous?.revision ?? 0) !== expectedRevision) throw new Error("Local draft changed. Reload before saving.");
+        const changed = JSON.stringify(previous?.payload) !== JSON.stringify(payload);
+        const draft = changed ? nextRecord(employeeId, taskId, previous, payload) : previous!;
+        if (changed) {
+          try { parseLocalDraft(JSON.stringify(draft)); } catch { throw new SubmissionNotAllowedError(); }
+        }
+        const operation = await database.requestSubmission(changed ? draft : null, previous?.revision, newOperation("submit", draft));
+        return { draft, operation };
+      });
+    },
     async delete(employeeId, taskId, expectedRevision) {
-      return serialize(scope(employeeId, taskId), () => database.delete(employeeId, taskId, expectedRevision));
+      return serialize(scope(employeeId, taskId), async () => {
+        await assertNoPendingSubmission(employeeId, taskId);
+        await database.delete(employeeId, taskId, expectedRevision);
+      });
     },
     async deleteUnreadable(employeeId, taskId) {
-      return serialize(scope(employeeId, taskId), () => database.deleteUnreadable(employeeId, taskId));
+      return serialize(scope(employeeId, taskId), async () => {
+        await assertNoPendingSubmission(employeeId, taskId);
+        await database.deleteUnreadable(employeeId, taskId);
+      });
     },
     async cacheSynchronizedTask(employeeId, task) {
       const record: CachedSynchronizedTask = { employeeId, task: { ...task }, synchronizedAt: now() };
@@ -183,6 +304,30 @@ export function createDraftRepository(database: DraftDatabase, now: () => number
         records.push(record);
       }
       return records;
+    },
+    async listOutbox(employeeId) {
+      return database.listOutbox(employeeId);
+    },
+    async getTaskSyncStatus(employeeId, taskId) {
+      const items = await database.listOutbox(employeeId, taskId);
+      const unresolved = items.filter(isUnresolved);
+      const lastResolved = items.filter((item) => !isUnresolved(item))
+        .sort((a, b) => (a.resolvedAt ?? 0) - (b.resolvedAt ?? 0) || a.sequence - b.sequence).at(-1);
+      return {
+        hasPendingSubmission: unresolved.some((item) => item.kind === "submit"),
+        unresolvedCount: unresolved.length,
+        lastOutcome: lastResolved?.outcome ?? null,
+      };
+    },
+    async readOutboxSnapshot(employeeId, operationId) {
+      const raw = await database.readOutboxSnapshot(employeeId, operationId);
+      if (raw === null) throw new OutboxOperationNotFoundError();
+      const snapshot = parseLocalDraft(raw);
+      if (snapshot.employeeId !== employeeId) throw new Error("Outbox snapshot scope mismatch.");
+      return snapshot;
+    },
+    async recordOutboxTransition(employeeId, operationId, transition) {
+      return database.recordOutboxTransition(employeeId, operationId, transition);
     },
   };
 }

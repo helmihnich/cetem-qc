@@ -3,6 +3,7 @@ import test, { mock } from "node:test";
 import type { SecureKeyValueStore } from "../offline-authorization-state.js";
 
 const keyName = "cetem-qc.local-drafts.database-key.v1";
+const outboxTables = /outbox_operations|audit_snapshots|task_sync_state/;
 mock.module("expo-sqlite", { namedExports: { openDatabaseAsync: async () => { throw new Error("unused default driver"); } } });
 mock.module("expo-crypto", { namedExports: { getRandomBytesAsync: async (length: number) => new Uint8Array(length) } });
 
@@ -35,12 +36,15 @@ async function fixture(options: { key?: string; existing?: boolean; userVersion?
       events.push(sql.includes("user_version") ? "read-user-version" : "read-schema");
       if (sql.includes("user_version") && options.databaseReadFailure) throw new Error("file is not a database");
       if (sql.includes("user_version")) return { user_version: version } as T;
+      // This fixture has no outbox rows; outbox SQL is exercised against the real SQLite double in outbox.test.ts.
+      if (!sql.includes("sqlite_master") && outboxTables.test(sql)) return null;
       if (sql.includes("synchronized_tasks")) return options.existing ? { name: "synchronized_tasks" } as T : null;
       return options.existing ? { name: "local_drafts" } as T : null;
     },
     async getAllAsync<T>(sql: string, employeeId: string): Promise<T[]> {
       statements.push({ sql, params: [employeeId], inTransaction });
       events.push("read-data");
+      if (outboxTables.test(sql)) return [];
       if (sql.includes("synchronized_tasks")) return [...cachedRows.entries()].filter(([key]) => key.startsWith(`${employeeId}/`)).map(([, row]) => row as T);
       return [...existingRows.values()].map((payload_json) => ({ payload_json }) as T);
     },
@@ -178,9 +182,12 @@ test("M4 unreadable-draft deletion is one employee/task-scoped DELETE in an excl
   const before = f.statements.length;
   await f.database.deleteUnreadable("employee-a", "task-a");
   const issued = f.statements.slice(before);
-  assert.deepEqual(issued.map(({ sql, params, inTransaction }) => ({ sql: sql.replace(/\s+/g, " ").trim(), params, inTransaction })), [
+  const draftStatements = issued.filter(({ sql }) => /local_drafts/.test(sql));
+  assert.deepEqual(draftStatements.map(({ sql, params, inTransaction }) => ({ sql: sql.replace(/\s+/g, " ").trim(), params, inTransaction })), [
     { sql: "DELETE FROM local_drafts WHERE employee_id = ? AND task_id = ?", params: ["employee-a", "task-a"], inTransaction: true },
   ]);
-  assert.ok(!issued.some(({ sql }) => /SELECT/i.test(sql)), "the unreadable row is never read or parsed");
+  // Story 7.1: the same transaction checks for a pending submission and removes the task's unresolved sync-draft items.
+  assert.ok(issued.every(({ sql, inTransaction }) => inTransaction && (/local_drafts/.test(sql) || outboxTables.test(sql))));
+  assert.ok(!issued.some(({ sql }) => /SELECT[\s\S]*local_drafts/i.test(sql)), "the unreadable row is never read or parsed");
   assert.ok(!f.cachedRows.size, "synchronized task cache is not touched");
 });
