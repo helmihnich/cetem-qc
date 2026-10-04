@@ -283,6 +283,9 @@ importers:
       '@cetem-qc/api-client':
         specifier: workspace:*
         version: link:../../packages/api-client
+      '@cetem-qc/domain':
+        specifier: workspace:*
+        version: link:../../packages/domain
       '@cetem-qc/i18n':
         specifier: workspace:*
         version: link:../../packages/i18n
@@ -310,7 +313,11 @@ importers:
 
   packages/domain: {}
 
-  packages/i18n: {}
+  packages/i18n:
+    dependencies:
+      '@cetem-qc/domain':
+        specifier: workspace:*
+        version: link:../domain
 
   packages/schemas:
     dependencies:

@@ -71,3 +71,9 @@
 - source_spec: `_bmad-output/specs/spec-6-3-display-calculation-results-in-employe-form/input-parsing-and-mapping.md`
   summary: `parseGraphieReading` accepts only ASCII digits (`\d` without the `u` flag). Readings typed with Arabic-Indic digits (U+0660–U+0669) or the Arabic decimal separator (U+066B) would be shown as « Valeur numérique invalide », and the dependent results would be unavailable.
   evidence: Unverified (would be medium). To settle it, check whether the `decimal-pad` keyboards on the target Android/iOS devices can emit those characters in an Arabic locale. Accepting them changes the approved input grammar, so it needs a spec update.
+
+## Deferred from: code review of 6-4-display-authorized-calculation-results-in-responsable-review (2026-10-04)
+
+- source_spec: `_bmad-output/specs/spec-6-4-display-calculation-results-in-responsable-review/review-view.md`
+  summary: `GraphieCalculationReview` does not check that `evidence.identity` matches the identity the `evidence.results` snapshot was calculated under. A supported identity paired with old-rule results would show « Version de règle non prise en charge » next to a supported identity, and an old identity paired with current-rule results would show verdicts with no warning.
+  evidence: Not reachable today. No producer exists yet, and `calculateGraphieResults` builds the results from that same identity. Stories 7.3/7.4 (server snapshot) and 9.1 (W4 wiring) should keep identity and results consistent, either with a server invariant or with a view-level check.

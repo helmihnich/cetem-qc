@@ -1,3 +1,5 @@
+import { graphieCalculations } from "./graphie-calculations.js";
+import type { CalculationContext } from "./graphie-identity.js";
 import type {
   LightFieldCorrespondenceInput,
   OutputLinearityInput,
@@ -75,5 +77,24 @@ export function graphieTestInputsFromValues(values: Readonly<Record<string, stri
       rows: ids.outputLinearity.rows.map((row) => ({ mas: read(row.mas), kermaDetector: read(row.kerma) })),
     },
     lightFieldCorrespondence: { dfrMeters: read(ids.lightFieldCorrespondence.dfr), gapsMm: ids.lightFieldCorrespondence.gaps.map(read) },
+  };
+}
+
+export type GraphieCalculationResults = {
+  readonly [TName in keyof typeof graphieCalculations]: ReturnType<(typeof graphieCalculations)[TName]>;
+};
+
+/**
+ * All five paper-test results for one identity and raw form values. The values are mapped once and only read.
+ * An unsupported identity gives five `unsupported-version` results.
+ */
+export function calculateGraphieResults(context: CalculationContext, values: Readonly<Record<string, string>>): GraphieCalculationResults {
+  const inputs = graphieTestInputsFromValues(values);
+  return {
+    voltageAccuracy: graphieCalculations.voltageAccuracy(context, inputs.voltageAccuracy),
+    voltageRepeatability: graphieCalculations.voltageRepeatability(context, inputs.voltageRepeatability),
+    outputRepeatability: graphieCalculations.outputRepeatability(context, inputs.outputRepeatability),
+    outputLinearity: graphieCalculations.outputLinearity(context, inputs.outputLinearity),
+    lightFieldCorrespondence: graphieCalculations.lightFieldCorrespondence(context, inputs.lightFieldCorrespondence),
   };
 }

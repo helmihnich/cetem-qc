@@ -3,7 +3,7 @@ import test from "node:test";
 import { GRAPHIE_CALCULATION_IDENTITY, graphieCalculations } from "./graphie-calculations.js";
 import type { GraphieValue, UnsupportedVersionResult } from "./graphie-calculations.js";
 import { GRAPHIE_SOURCE_REGRESSION_FIXTURES as fixtures } from "./graphie-calculations.source-regression.js";
-import { GRAPHIE_CALCULATION_FIELD_ID_LIST, graphieTestInputsFromValues, isInvalidGraphieReading, parseGraphieReading } from "./graphie-inputs.js";
+import { GRAPHIE_CALCULATION_FIELD_ID_LIST, calculateGraphieResults, graphieTestInputsFromValues, isInvalidGraphieReading, parseGraphieReading } from "./graphie-inputs.js";
 
 const ctx = GRAPHIE_CALCULATION_IDENTITY;
 
@@ -152,4 +152,23 @@ test("G4 one blank or unparseable kV mesuré makes only that test unavailable", 
     assert.deepEqual(result.accuracy.values.deviationPercent[0], baseline.accuracy.values.deviationPercent[0]);
     assert.deepEqual([result.repeatability, result.output, result.linearity, result.light], [baseline.repeatability, baseline.output, baseline.linearity, baseline.light]);
   }
+});
+
+test("D1 calculateGraphieResults equals calling each paper-test calculation on the mapped readings", () => {
+  const results = calculateGraphieResults(ctx, workbookValues);
+  const inputs = graphieTestInputsFromValues(workbookValues);
+  assert.deepEqual(Object.keys(results), Object.keys(graphieCalculations));
+  assert.deepEqual(results.voltageAccuracy, graphieCalculations.voltageAccuracy(ctx, inputs.voltageAccuracy));
+  assert.deepEqual(results.voltageRepeatability, graphieCalculations.voltageRepeatability(ctx, inputs.voltageRepeatability));
+  assert.deepEqual(results.outputRepeatability, graphieCalculations.outputRepeatability(ctx, inputs.outputRepeatability));
+  assert.deepEqual(results.outputLinearity, graphieCalculations.outputLinearity(ctx, inputs.outputLinearity));
+  assert.deepEqual(results.lightFieldCorrespondence, graphieCalculations.lightFieldCorrespondence(ctx, inputs.lightFieldCorrespondence));
+  for (const result of Object.values(results)) assert.equal("formulaSource" in result && result.formulaSource?.ruleId, ctx.ruleId);
+});
+
+test("D2 an old-rule identity gives five unsupported-version results", () => {
+  const oldRule = { ...ctx, ruleId: "cetem-workbook-explicit-formulas", ruleVersion: "1.0.0" };
+  const results = calculateGraphieResults(oldRule, workbookValues);
+  assert.equal(Object.keys(results).length, 5);
+  for (const result of Object.values(results)) assert.deepEqual(result, { status: "unavailable", reason: "unsupported-version", context: oldRule });
 });

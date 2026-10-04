@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { GRAPHIE_CALCULATION_CATALOGUE, GRAPHIE_CALCULATION_FIELD_ID_LIST, GRAPHIE_CALCULATION_RULE_ID, GRAPHIE_CALCULATION_RULE_VERSION } from "@cetem-qc/domain";
+import { GRAPHIE_RESULT_ORDER, presentGraphieMeasurements } from "@cetem-qc/i18n/graphie-results";
 import { GRAPHIE_CATALOGUE_VERSION, GRAPHIE_FORM_SCHEMA_VERSION, GRAPHIE_MOBILE_POV_CATALOGUE, GraphiePayloadCompatibilityError, KERMA_REUSE_HELP_FR, createNewGraphieDraftValues, parseGraphiePayload } from "./graphie-pov-catalogue.js";
 
 const sections = GRAPHIE_MOBILE_POV_CATALOGUE.sections;
@@ -225,5 +226,15 @@ test("C1 every field ID read by the domain calculation mapping is a catalogue nu
   assert.equal(GRAPHIE_CALCULATION_FIELD_ID_LIST.length, 28);
   for (const id of GRAPHIE_CALCULATION_FIELD_ID_LIST) {
     assert.equal(fieldById.get(id)?.type, "number", id);
+  }
+});
+
+test("C2 every measured-value label and unit shown to the Responsable is the catalogue label and unit of that field", () => {
+  const readings = GRAPHIE_RESULT_ORDER.flatMap((name) => presentGraphieMeasurements(name, {}).flatMap((line) => line.readings));
+  assert.equal(readings.length, GRAPHIE_CALCULATION_FIELD_ID_LIST.length);
+  for (const reading of readings) {
+    const field = fieldById.get(reading.fieldId);
+    assert.ok(field, reading.fieldId);
+    assert.deepEqual([reading.label, reading.unit], [field.labelFr, field.unit], reading.fieldId);
   }
 });

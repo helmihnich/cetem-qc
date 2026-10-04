@@ -550,7 +550,7 @@ So that review does not confuse numerical evidence with an unapproved verdict.
 **And** unavailable thresholds/verdicts are clearly identified as unavailable; no automatic overall conformity or fabricated pass/fail appears
 **And** accepted values remain read-only and status is conveyed by text as well as visual semantics.
 
-**Traceability:** FR-012, FR-026, FR-027, SEC-002, SEC-003, UX-DR2 (measurement-result), UX-DR6, UX-DR12. **Dependency:** DEP-01R.
+**Traceability:** spec `_bmad-output/specs/spec-6-4-display-calculation-results-in-responsable-review/SPEC.md`; FR-012, FR-026, FR-027, SEC-002, SEC-003, UX-DR2 (measurement-result), UX-DR6, UX-DR12. **Dependency:** DEP-01R; Stories 6.3 and 6.6 (done). Delivers the read-only web view and shared code; Story 9.1 renders it in W4 with the accepted snapshot (Epic 7).
 
 ### Story 6.5: Separate formula regression fixtures from approved acceptance fixtures
 
