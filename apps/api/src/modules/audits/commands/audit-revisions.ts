@@ -22,6 +22,8 @@ export type AcceptOperationInput = {
   payload: ValidatedGraphiePayload;
   localDraftRevision: number;
   clientSavedAt: string;
+  /** A validated, not yet linked conflict outcome this revision resolves (keep-local): recorded as lineage. */
+  conflictOperationId?: string;
 };
 
 export type AcceptedOperation = { serverRevision: number; acceptedAt: string; submissionId?: string };
@@ -77,8 +79,15 @@ export async function lockAndReadTaskAudit(transaction: Transaction, taskId: str
 export async function applyDraftSync(transaction: Transaction, input: AcceptOperationInput): Promise<AcceptedOperation> {
   const { auditId, revision, acceptedAt } = await advanceAudit(transaction, input, "draft");
   await insertRevision(transaction, input, auditId, revision, "draft-sync", null);
+  await insertConflictLineage(transaction, input, auditId, revision);
   await auditCommandTestSeams.afterRevisionInsert?.();
   return { serverRevision: revision, acceptedAt };
+}
+
+/** True when the stored outcome is already the predecessor of a lineage link; read inside the operation's transaction. */
+export async function isLineagePredecessor(transaction: Transaction, operationId: string): Promise<boolean> {
+  const result = await transaction.query("SELECT 1 FROM audit_lineage_links WHERE predecessor_operation_id = $1", [operationId]);
+  return (result.rowCount ?? 0) > 0;
 }
 
 /**
@@ -103,6 +112,7 @@ export async function acceptSubmission(transaction: Transaction, input: AcceptOp
   }
   const { auditId, revision, acceptedAt } = await advanceAudit(transaction, input, "submitted");
   await insertRevision(transaction, input, auditId, revision, "submission", results);
+  await insertConflictLineage(transaction, input, auditId, revision);
   await auditCommandTestSeams.afterRevisionInsert?.();
   const submission = await transaction.query<{ id: string }>(
     `INSERT INTO audit_submissions (audit_id, revision, submitted_by, accepted_at, operation_id)
@@ -132,6 +142,15 @@ async function advanceAudit(transaction: Transaction, input: AcceptOperationInpu
   );
   if (updated.rowCount !== 1) throw new Error("Audit revision changed while the task lock was held.");
   return { auditId: input.audit.auditId, revision, acceptedAt };
+}
+
+async function insertConflictLineage(transaction: Transaction, input: AcceptOperationInput, auditId: string, revision: number) {
+  if (input.conflictOperationId === undefined) return;
+  await transaction.query(
+    `INSERT INTO audit_lineage_links (link_type, audit_id, revision, predecessor_operation_id, actor_id)
+     VALUES ('sync-conflict-revision', $1, $2, $3, $4)`,
+    [auditId, revision, input.conflictOperationId, input.actor.id],
+  );
 }
 
 async function insertRevision(

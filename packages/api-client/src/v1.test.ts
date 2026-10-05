@@ -170,6 +170,46 @@ test("C3 sync operations throw ApiRequestError for key reuse, errors and malform
   await assert.rejects(offline.syncEmployeeTaskDraft(taskId, syncBody), TypeError);
 });
 
+const auditVersionBody = {
+  revision: 2, state: "draft", lastChangedAt: "2026-10-04T09:00:00.000Z", lastChangedBy: actor, payload: syncBody.payload,
+};
+
+test("K2 the audit version is read with the bearer token from the task's route and parsed", async () => {
+  const { client, calls } = clientFor(auditVersionBody);
+  const controller = new AbortController();
+  assert.deepEqual(await client.getEmployeeTaskAuditVersion(taskId, { signal: controller.signal }), auditVersionBody);
+  assert.equal(calls[0]!.url, `https://cetem-qc.example.test/api/v1/employee/tasks/${taskId}/audit-version`);
+  assert.equal(calls[0]!.init?.method, "GET");
+  assert.deepEqual(calls[0]!.init?.headers, { accept: "application/json", authorization: `Bearer ${token}` });
+  assert.equal(calls[0]!.init?.body, undefined);
+  assert.equal(calls[0]!.init?.signal, controller.signal);
+  const noAudit = { revision: 0, state: "draft", lastChangedAt: null, lastChangedBy: null, payload: null };
+  assert.deepEqual(await clientFor(noAudit).client.getEmployeeTaskAuditVersion(taskId), noAudit);
+});
+
+test("K2 the audit version throws ApiRequestError on errors and invalid bodies", async () => {
+  const cases: Array<[unknown, number, string]> = [
+    [{ error: { code: "AUTHENTICATION_FAILED", message: "Email ou mot de passe invalide." } }, 401, "AUTHENTICATION_FAILED"],
+    [{ error: { code: "FORBIDDEN", message: "Accès réservé à l’Employé." } }, 403, "FORBIDDEN"],
+    [{ error: { code: "TASK_NOT_FOUND", message: "Tâche introuvable." } }, 404, "TASK_NOT_FOUND"],
+    [{ error: { code: "INTERNAL_ERROR", message: "La version du serveur n’a pas pu être chargée." } }, 500, "INTERNAL_ERROR"],
+    [{ ...auditVersionBody, extra: true }, 200, "UNEXPECTED_API_RESPONSE"],
+    [{ ...auditVersionBody, payload: { values: {} } }, 200, "UNEXPECTED_API_RESPONSE"],
+    [auditVersionBody, 201, "UNEXPECTED_API_RESPONSE"],
+  ];
+  for (const [payload, status, code] of cases) {
+    await assert.rejects(clientFor(payload, status).client.getEmployeeTaskAuditVersion(taskId), (error: unknown) => {
+      assert.ok(error instanceof ApiRequestError, `${status} ${code}`);
+      assert.deepEqual([error.status, error.code], [status, code]);
+      return true;
+    });
+  }
+  const unreadable = createApiClient({ baseUrl, sessionToken: token, fetch: async () => ({ ok: true, status: 200, json: async () => { throw new SyntaxError("Unexpected token"); } }) as unknown as Response });
+  await assert.rejects(unreadable.getEmployeeTaskAuditVersion(taskId), (error: unknown) => error instanceof ApiRequestError && error.code === "UNEXPECTED_API_RESPONSE");
+  const offline = createApiClient({ baseUrl, sessionToken: token, fetch: async () => { throw new TypeError("Network request failed"); } });
+  await assert.rejects(offline.getEmployeeTaskAuditVersion(taskId), TypeError);
+});
+
 test("employee password reset posts to the versioned endpoint and maps the inactive conflict", async () => {
   const employeeId = "00000000-0000-4000-8000-000000000020";
   const expected = {

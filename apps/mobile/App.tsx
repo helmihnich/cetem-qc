@@ -16,9 +16,11 @@ import { expoSecureKeyValueStore } from "./offline-authorization-storage";
 import { createDraftRepository } from "./local-drafts/model";
 import { createSqliteDraftDatabase } from "./local-drafts/sqlite-draft-database";
 import { createAuthorizedDrafts } from "./local-drafts/authorized-drafts";
-import { DraftListCorruptionError, LocalDraftPayloadCompatibilityError, PendingSubmissionError, SubmissionNotAllowedError, type LocalDraft, type OutboxItem } from "./local-drafts/model";
-import { createSyncEngine, type SyncTransport } from "./sync/sync-engine";
+import { ConflictResolutionError, DraftListCorruptionError, LocalDraftPayloadCompatibilityError, PendingSubmissionError, SubmissionNotAllowedError, type LocalDraft } from "./local-drafts/model";
+import { ConflictPanel, type ConflictActionResult, type PanelServerVersion } from "./sync/conflict-panel";
+import type { SyncTransport } from "./sync/sync-engine";
 import { createAppSyncTransport } from "./sync/app-sync-transport";
+import { useTaskSync, useTaskSyncTriggers } from "./sync/use-task-sync";
 import { submissionAcceptedLine } from "./sync/acceptance-line";
 import { deriveTaskSyncState, type TaskSyncState } from "./sync/task-sync-state";
 import { runOnlyWhenOnlineAuthorized, ServerWorkAuthorizationError } from "./server-work-authorization";
@@ -99,31 +101,24 @@ export default function App() {
   // A draft this app version can no longer parse; it can only be discarded (Story 6.7).
   const [unreadableDraft, setUnreadableDraft] = useState<{ employeeId: string; taskId: string }>();
   const [unreadableDeleteConfirmation, setUnreadableDeleteConfirmation] = useState<{ employeeId: string; taskId: string }>();
-  // Durable outbox rows of the signed-in employee; every presented sync and submission state is derived from them (Story 7.2).
-  const [outbox, setOutbox] = useState<{ employeeId: string; items: OutboxItem[] }>();
-  const outboxGenerationRef = useRef(0);
   const [submitConfirmation, setSubmitConfirmation] = useState<{ employeeId: string; taskId: string }>();
   const [submitting, setSubmitting] = useState(false);
   const submittingRef = useRef(false);
   // Bumped when a submission request fails, so that the autosave it cancelled is scheduled again.
   const [autosaveRearm, setAutosaveRearm] = useState(0);
-  // The employee whose run is active; another identity never sees it as running (Story 7.2).
-  const [syncRunningFor, setSyncRunningFor] = useState<string>();
   const authorizationStateRef = useRef(authorization);
   authorizationStateRef.current = authorization;
-  const syncEngineRef = useRef<ReturnType<typeof createSyncEngine> | null | undefined>(undefined);
-  if (syncEngineRef.current === undefined) {
+  // Durable outbox rows and conflict resolutions of the signed-in employee, and the active run (Stories 7.2, 8.1).
+  const { controller: taskSync, snapshot: syncSnapshot } = useTaskSync(() => ({
+    store: draftsRef.current,
     // One HTTP transport per App, using its single API client so the signed-in token is the one sent.
     // Test doubles of this module may provide no transport, in which case no run ever starts.
-    const transport: SyncTransport | null = createAppSyncTransport(api);
-    syncEngineRef.current = transport ? createSyncEngine({
-      store: draftsRef.current,
-      transport,
-      now: Date.now,
-      sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
-      isAuthorized: (employeeId) => isSyncAuthorized(employeeId),
-    }) : null;
-  }
+    transport: createAppSyncTransport(api) as SyncTransport | null,
+    context: () => ({ online: isOnlineRef.current, status: authorizationStateRef.current.status, identityId: authorizationStateRef.current.identity?.id }),
+    storedGrantValid: async (employeeId) => (await authorizationRef.current.evaluate(employeeId)).status === "offline-authorized",
+    isActiveIdentity: (employeeId) => activeIdentityRef.current === employeeId,
+  }));
+  const syncRunningFor = syncSnapshot.runningFor;
   // Results are derived on every render from the raw strings; they are never written to the draft.
   const calculationResults = useMemo(
     () => (draftHydration === "ready" && formIdentity ? calculateGraphieResults(formIdentity, formValues) : undefined),
@@ -153,67 +148,35 @@ export default function App() {
   const resumableDrafts = localDrafts.filter((draft) => isOnline || cachedTasks.some((item) => item.id === draft.taskId));
   const unavailableOfflineDrafts = !isOnline && localDrafts.length > resumableDrafts.length;
   activeDraftScopeRef.current = user && screen.kind === "detail" ? `${user.id}\u0000${screen.id}` : null;
-  const outboxItems = outbox && outbox.employeeId === user?.id ? outbox.items : [];
-  const taskSyncStateOf = (taskId: string): TaskSyncState => deriveTaskSyncState(outboxItems.filter((item) => item.taskId === taskId));
+  const outboxItems = syncSnapshot.outbox && syncSnapshot.outbox.employeeId === user?.id ? syncSnapshot.outbox.items : [];
+  const resolutionItems = syncSnapshot.resolutions && syncSnapshot.resolutions.employeeId === user?.id ? syncSnapshot.resolutions.items : [];
+  const taskSyncStateOf = (taskId: string): TaskSyncState => deriveTaskSyncState(
+    outboxItems.filter((item) => item.taskId === taskId), resolutionItems.filter((item) => item.taskId === taskId));
   const currentSyncState = screen.kind === "detail" ? taskSyncStateOf(screen.id) : undefined;
   const acceptedLine = screen.kind === "detail" ? submissionAcceptedLine(outboxItems.filter((item) => item.taskId === screen.id)) : undefined;
   const locked = currentSyncState?.locked ?? false;
+  // An open conflict pauses the task: no Soumettre, Supprimer or retry until an explicit resolution (Story 8.1).
+  const inConflict = Boolean(currentSyncState?.conflict);
   const lockedRef = useRef(locked);
   lockedRef.current = locked;
   const formEditable = draftHydration === "ready" && !draftDeletingRef.current && !deleteDraftConfirmation && !locked && !submitting;
   // A locked task shows its last saved state, never « Enregistrement en cours… ».
   const presentedSaveState = locked && draftSaveState === "saving" ? "saved" : draftSaveState;
 
-  async function isSyncAuthorized(employeeId: string) {
-    const current = authorizationStateRef.current;
-    if (!isOnlineRef.current || current.status !== "online-authorized" || current.identity?.id !== employeeId) return false;
-    // The server confirmed this session; the stored grant must still be valid (not expired, logged out or locked).
-    const stored = await authorizationRef.current.evaluate(employeeId).catch(() => undefined);
-    return stored?.status === "offline-authorized" && authorizationStateRef.current.status === "online-authorized";
-  }
-
-  /** Re-reads the durable outbox; a read failure keeps the previous state and returns false. */
-  async function refreshOutbox(identityId = user?.id) {
-    if (!identityId) return false;
-    const generation = ++outboxGenerationRef.current;
-    try {
-      const items = await draftsRef.current.listOutbox(identityId);
-      if (generation !== outboxGenerationRef.current || activeIdentityRef.current !== identityId) return true;
-      setOutbox({ employeeId: identityId, items });
-      return true;
-    } catch {
-      // Never fall back to « Brouillon »: the last derived state stays on screen.
-      return false;
-    }
-  }
+  const refreshOutbox = (identityId = user?.id) => taskSync.refreshOutbox(identityId);
+  const runSync = (employeeId: string, automatic = false) => taskSync.runSync(employeeId, automatic);
 
   /** Opening a task needs its submission state first, so that a pending submission is never shown as an editable draft. */
   async function readOutboxBeforeOpen(employeeId: string) {
     if (!await refreshOutbox(employeeId)) throw new Error("Outbox unavailable.");
   }
 
-  /** `automatic` runs (connectivity, authorization, foreground, save) leave blocked items for an explicit retry. */
-  async function runSync(employeeId: string, automatic = false) {
-    const engine = syncEngineRef.current;
-    if (!engine || !await isSyncAuthorized(employeeId)) return false;
-    setSyncRunningFor(employeeId);
-    try {
-      await engine.run(employeeId, { retryBlocked: !automatic });
-    } catch {
-      // A failed run keeps every item, snapshot and draft; the refreshed rows tell the state.
-    } finally {
-      setSyncRunningFor((current) => current === employeeId ? undefined : current);
-      await refreshOutbox(employeeId);
-    }
-    return true;
-  }
-
   async function retrySync() {
     if (!user) return;
     const employeeId = user.id;
     if (!isOnlineRef.current) { setError(fr.auth.offlineUnavailable); return; }
-    if (!syncEngineRef.current) return;
-    if (!await isSyncAuthorized(employeeId)) {
+    if (!taskSync.hasTransport()) return;
+    if (!await taskSync.isAuthorized(employeeId)) {
       if (activeIdentityRef.current === employeeId) setError(fr.auth.reauthenticateOnline);
       return;
     }
@@ -221,8 +184,76 @@ export default function App() {
     await runSync(employeeId);
   }
 
+  /** The conflict panel reads the server only online with a server-confirmed authorization (Story 8.1). */
+  async function canReadServerVersion(employeeId: string): Promise<string | null> {
+    if (!isOnlineRef.current) return fr.auth.offlineUnavailable;
+    return await taskSync.isAuthorized(employeeId) ? null : fr.auth.reauthenticateOnline;
+  }
+
+  /**
+   * Applies an explicit conflict choice after pending local saves, in one store transaction. Keep-local queues
+   * the preserved local version and starts a separately authorized run; discard reloads the server version.
+   */
+  async function resolveConflict(choice: "keep-local" | "discard-local", server: PanelServerVersion): Promise<ConflictActionResult> {
+    const conflict = currentSyncState?.conflict;
+    if (!user || screen.kind !== "detail" || !conflict) return "failed";
+    const employeeId = user.id;
+    const taskId = screen.id;
+    const scopeKey = `${employeeId}\u0000${taskId}`;
+    const conflictOperationIds = conflict.items.map((item) => item.operationId);
+    // The preserved local version is the latest local save: flush a pending or previously failed edit first.
+    if ((draftSaveState === "saving" || draftSaveState === "failed") && !lockedRef.current && !(await saveDraft())) return "failed";
+    if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
+    const work = draftSaveQueueRef.current.then(async (): Promise<ConflictActionResult> => {
+      if (choice === "keep-local") {
+        await draftsRef.current.resolveConflictKeepLocal(employeeId, taskId, { conflictOperationIds, server: { revision: server.revision, state: server.state } });
+      } else {
+        const { draft } = await draftsRef.current.resolveConflictDiscardLocal(employeeId, taskId, {
+          conflictOperationIds, server: { revision: server.revision, state: server.state, payload: server.payload },
+        });
+        if (activeDraftScopeRef.current === scopeKey) {
+          draftGenerationRef.current++;
+          if (draft) {
+            const parsed = parseGraphiePayload(draft.payload);
+            formValuesRef.current = parsed.values;
+            setFormValues(parsed.values);
+            setFormIdentity(calculationIdentityOf(parsed));
+            draftContentRef.current = parsed.legacyContent ?? "";
+            setDraftContent(parsed.legacyContent ?? "");
+            legacyContentModeRef.current = parsed.legacyContent !== undefined;
+            setLegacyContentMode(parsed.legacyContent !== undefined);
+          } else resetFormToNewDraft();
+          setActiveDraft(draft ?? undefined);
+          draftRevisionRef.current = draft?.revision ?? 0;
+          draftRevisionByScopeRef.current.set(scopeKey, draft?.revision ?? 0);
+          clearUnreadableDraft();
+          setDraftNotice(undefined);
+          setDraftSaveState(draft ? "saved" : "idle");
+          setDraftHydration("ready");
+          setError(undefined);
+        }
+      }
+      await refreshOutbox(employeeId);
+      await refreshLocalDrafts(employeeId);
+      // Keep-local is sent by a separately authorized run; it never re-queues a submission. The run is not an
+      // explicit retry: blocked items of other tasks still wait for « Réessayer la synchronisation ».
+      if (choice === "keep-local") void runSync(employeeId, true);
+      return "done";
+    }).catch(async (cause): Promise<ConflictActionResult> => {
+      if (cause instanceof ConflictResolutionError && cause.reason === "stale") {
+        await refreshOutbox(employeeId);
+        return "stale";
+      }
+      await refreshOutbox(employeeId);
+      await redactDraftIfAuthorizationLost(employeeId);
+      return "failed";
+    });
+    draftSaveQueueRef.current = work.then(() => undefined);
+    return work;
+  }
+
   function beginSubmit() {
-    if (!user || screen.kind !== "detail" || draftHydration !== "ready" || locked || submittingRef.current || draftDeletingRef.current) return;
+    if (!user || screen.kind !== "detail" || draftHydration !== "ready" || !currentSyncState?.canSubmit || submittingRef.current || draftDeletingRef.current) return;
     setSubmitConfirmation({ employeeId: user.id, taskId: screen.id });
   }
 
@@ -528,7 +559,7 @@ export default function App() {
         await refreshLocalDrafts(employeeId);
       }
       // A save that created a revision queued a draft synchronization: send it when allowed.
-      if (saved.revision !== revisionBefore) void runSync(employeeId, true);
+      if (saved.revision !== revisionBefore) void taskSync.trigger(employeeId, "changed-save");
       return true;
     }).catch(async (cause) => {
       if (cause instanceof PendingSubmissionError) {
@@ -571,25 +602,22 @@ export default function App() {
     return () => { if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current); };
   }, [draftContent, formValues, draftHydration, screen, user?.id, locked, autosaveRearm]);
 
+  // A conflict recorded while a Soumettre or Supprimer confirmation is open closes it: both stay refused until resolution.
+  useEffect(() => {
+    if (!inConflict) return;
+    setSubmitConfirmation(undefined);
+    setDeleteDraftConfirmation(undefined);
+  }, [inConflict]);
+
   useEffect(() => {
     if (!user) { localRefreshGenerationRef.current++; setLocalDrafts([]); setCachedTaskContext(undefined); return; }
     void refreshLocalDrafts(user.id);
   }, [user?.id, authorization.status]);
 
-  // Automatic synchronization: online authorization established or confirmed (sign-in, server revalidation,
-  // reconnection), and return to the foreground. runSync checks connectivity and authorization itself.
-  useEffect(() => {
-    if (user && isOnline && authorization.status === "online-authorized" && authorization.identity?.id === user.id) void runSync(user.id, true);
-  }, [authorization.status, authorization.identity?.id, isOnline, user?.id]);
-
-  useEffect(() => {
-    if (!user) return;
-    const employeeId = user.id;
-    const subscription = AppState.addEventListener("change", (state) => {
-      if (state === "active" && activeIdentityRef.current === employeeId) void runSync(employeeId, true);
-    });
-    return () => subscription.remove();
-  }, [user?.id]);
+  useTaskSyncTriggers(taskSync, {
+    employeeId: user?.id, isOnline, authorizationStatus: authorization.status, authorizedIdentityId: authorization.identity?.id,
+    isActiveIdentity: (employeeId) => activeIdentityRef.current === employeeId,
+  });
 
   async function revalidateServerAuthorization(expectedUser: AuthenticatedUser): Promise<OfflineAuthorizationState> {
     try {
@@ -1010,7 +1038,7 @@ export default function App() {
   }
 
   function beginDraftDelete() {
-    if (!user || !activeDraft || draftHydration !== "ready" || lockedRef.current || submittingRef.current) return;
+    if (!user || !activeDraft || draftHydration !== "ready" || lockedRef.current || inConflict || submittingRef.current) return;
     if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
     setSubmitConfirmation(undefined);
     setDeleteDraftConfirmation({ employeeId: user.id, taskId: activeDraft.taskId, draftId: activeDraft.id, revision: activeDraft.revision });
@@ -1162,6 +1190,18 @@ export default function App() {
     setLoading(false);
   }
 
+  const detailTaskId = screen.kind === "detail" ? screen.id : undefined;
+  const conflictPanel = user && detailTaskId && currentSyncState?.conflict ? <ConflictPanel
+    conflict={currentSyncState.conflict}
+    localDraft={activeDraft?.taskId === detailTaskId ? activeDraft : undefined}
+    localUnreadable={unreadableDraft?.employeeId === user.id && unreadableDraft.taskId === detailTaskId
+      || (draftHydration === "ready" && activeDraft?.taskId !== detailTaskId)}
+    canFetch={() => canReadServerVersion(user.id)}
+    fetchServer={(signal) => api.getEmployeeTaskAuditVersion(detailTaskId, { signal })}
+    onKeepLocal={(server) => resolveConflict("keep-local", server)}
+    onDiscard={(server) => resolveConflict("discard-local", server)}
+  /> : null;
+
   return (
     <SafeAreaView style={styles.safe}>
       <ScrollView contentContainerStyle={[styles.container, { alignItems: "center" }]} keyboardShouldPersistTaps="handled">
@@ -1249,6 +1289,7 @@ export default function App() {
                   <View style={{ width: "100%", gap: 10, paddingTop: 12 }}>
                     {taskCacheWarning ? <Text accessibilityRole="alert" style={styles.error}>{taskCacheWarning}</Text> : null}
                     {currentSyncState ? <TaskSyncStatus state={currentSyncState} running={syncRunningFor === user.id} onRetry={() => void retrySync()} /> : null}
+                    {conflictPanel}
                     <Text style={styles.muted}>{fr.employeeTasks.connectivity}: {isOnline ? fr.employeeTasks.online : fr.employeeTasks.offline}</Text>
                     <Text style={styles.muted}>{fr.employeeTasks.localPersistence}: {presentedSaveState === "saving" ? fr.employeeTasks.savingLocally : presentedSaveState === "saved" ? fr.employeeTasks.savedLocally : presentedSaveState === "failed" ? fr.employeeTasks.saveFailed : fr.employeeTasks.notSavedLocally}</Text>
                     {locked ? <Text accessibilityRole="summary" style={styles.muted}>{fr.employeeTasks.readOnlyPending}</Text> : null}
@@ -1261,13 +1302,13 @@ export default function App() {
                       {presentedSaveState === "failed" ? fr.employeeTasks.saveFailed : presentedSaveState === "saving" ? fr.employeeTasks.savingDraft : presentedSaveState === "saved" ? fr.employeeTasks.savedLocally : fr.workflow.draft}
                     </Text>
                     <Button title={fr.employeeTasks.saveDraft} onPress={() => saveDraft()} disabled={draftHydration !== "ready" || draftDeletingRef.current || locked || submitting} />
-                    {activeDraft && !locked ? <Button title={fr.employeeTasks.deleteDraft} secondary onPress={beginDraftDelete} disabled={draftHydration !== "ready" || draftDeletingRef.current || submitting} /> : null}
+                    {activeDraft && !locked && !inConflict ? <Button title={fr.employeeTasks.deleteDraft} secondary onPress={beginDraftDelete} disabled={draftHydration !== "ready" || draftDeletingRef.current || submitting} /> : null}
                     {deleteDraftConfirmation && activeDraft?.id === deleteDraftConfirmation.draftId ? <View style={styles.confirmation}>
                       <Text accessibilityRole="alert" style={styles.muted}>{fr.employeeTasks.confirmDeleteDraft}</Text>
                       <Button title={fr.common.cancel} secondary onPress={cancelDraftDelete} />
                       <Button title={fr.common.confirm} onPress={confirmDraftDelete} />
                     </View> : null}
-                    {draftHydration === "ready" && !locked && !draftDeletingRef.current && !deleteDraftConfirmation ? <Button title={fr.employeeTasks.submit} onPress={beginSubmit} disabled={submitting || Boolean(submitConfirmation)} /> : null}
+                    {draftHydration === "ready" && currentSyncState?.canSubmit && !draftDeletingRef.current && !deleteDraftConfirmation ? <Button title={fr.employeeTasks.submit} onPress={beginSubmit} disabled={submitting || Boolean(submitConfirmation)} /> : null}
                     {submitConfirmation && submitConfirmation.employeeId === user.id && submitConfirmation.taskId === screen.id && !locked ? <View style={styles.confirmation}>
                       <Text accessibilityRole="alert" style={styles.muted}>{fr.employeeTasks.confirmSubmit}</Text>
                       <Button title={fr.common.cancel} secondary onPress={() => setSubmitConfirmation(undefined)} />
@@ -1282,6 +1323,7 @@ export default function App() {
                   <Detail label={fr.employeeTasks.state} value={lifecycleLabel(currentSyncState?.lifecycle ?? "draft")} />
                   {acceptedLine ? <Text accessibilityRole="summary" style={styles.muted}>{acceptedLine}</Text> : null}
                   {currentSyncState ? <TaskSyncStatus state={currentSyncState} running={syncRunningFor === user.id} onRetry={() => void retrySync()} /> : null}
+                  {!displayedTask ? conflictPanel : null}
                   {locked ? <Text accessibilityRole="summary" style={styles.muted}>{fr.employeeTasks.readOnlyPending}</Text> : null}
                   {legacyContentMode ? <Field label={fr.employeeTasks.legacyDraftContent} value={draftContent} onChangeText={changeDraftContent} editable={formEditable} multiline /> : null}
                   <Text style={styles.heading}>{fr.employeeTasks.sectionNavigation}</Text>
@@ -1291,7 +1333,7 @@ export default function App() {
                     {presentedSaveState === "failed" ? fr.employeeTasks.saveFailed : presentedSaveState === "saving" ? fr.employeeTasks.savingDraft : fr.employeeTasks.savedLocally}
                   </Text>
                   <Button title={fr.employeeTasks.saveDraft} onPress={() => saveDraft()} disabled={draftHydration !== "ready" || draftDeletingRef.current || locked || submitting} />
-                  {!locked ? <Button title={fr.employeeTasks.deleteDraft} secondary onPress={beginDraftDelete} disabled={draftHydration !== "ready" || draftDeletingRef.current || submitting} /> : null}
+                  {!locked && !inConflict ? <Button title={fr.employeeTasks.deleteDraft} secondary onPress={beginDraftDelete} disabled={draftHydration !== "ready" || draftDeletingRef.current || submitting} /> : null}
                   {deleteDraftConfirmation && activeDraft.id === deleteDraftConfirmation.draftId ? <View style={styles.confirmation}>
                     <Text accessibilityRole="alert" style={styles.muted}>{fr.employeeTasks.confirmDeleteDraft}</Text>
                     <Button title={fr.common.cancel} secondary onPress={cancelDraftDelete} />
@@ -1300,7 +1342,7 @@ export default function App() {
                 </View> : null}
                 {draftNotice ? <Text accessibilityRole="summary" style={styles.muted}>{draftNotice}</Text> : null}
                 {error ? <Text accessibilityRole="alert" style={styles.error}>{error}</Text> : null}
-                {unreadableDraft && unreadableDraft.employeeId === user.id && screen.id === unreadableDraft.taskId ? <View style={{ gap: 10 }}>
+                {unreadableDraft && unreadableDraft.employeeId === user.id && screen.id === unreadableDraft.taskId && !inConflict ? <View style={{ gap: 10 }}>
                   <Button title={fr.employeeTasks.deleteDraft} secondary onPress={beginUnreadableDraftDelete} disabled={draftDeletingRef.current || Boolean(unreadableDeleteConfirmation)} />
                   {unreadableDeleteConfirmation && unreadableDeleteConfirmation.employeeId === user.id && unreadableDeleteConfirmation.taskId === screen.id ? <View style={styles.confirmation}>
                     <Text accessibilityRole="alert" style={styles.muted}>{fr.employeeTasks.confirmDeleteDraft}</Text>

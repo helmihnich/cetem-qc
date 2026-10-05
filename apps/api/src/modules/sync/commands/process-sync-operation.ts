@@ -5,7 +5,7 @@ import type { SyncOperationAccepted, SyncOperationConflict, SyncOperationRejecte
 import type { Pool, QueryResultRow } from "pg";
 import { withTransaction } from "../../../db/transaction.js";
 import type { Transaction } from "../../../db/transaction.js";
-import { acceptSubmission, applyDraftSync, lockAndReadTaskAudit } from "../../audits/commands/audit-revisions.js";
+import { acceptSubmission, applyDraftSync, isLineagePredecessor, lockAndReadTaskAudit } from "../../audits/commands/audit-revisions.js";
 import type { AuditActor } from "../../audits/commands/audit-revisions.js";
 
 export type SyncOperationKind = "sync-draft" | "submit";
@@ -24,6 +24,7 @@ const REJECTION_MESSAGES: Record<SyncOperationRejected["code"], string> = {
   UNSUPPORTED_PAYLOAD_VERSION: "Cette version du formulaire n’est pas prise en charge par le serveur.",
   INVALID_PAYLOAD: "Les données du contrôle sont invalides.",
   AUDIT_ALREADY_SUBMITTED: "Ce contrôle a déjà été soumis et accepté.",
+  INVALID_CONFLICT_REFERENCE: "La référence du conflit de synchronisation est invalide.",
 };
 
 interface StoredOutcomeRow extends QueryResultRow {
@@ -94,6 +95,9 @@ async function runOnce(
         current: { revision: audit.revision, state: audit.state, lastChangedAt: audit.lastChangedAt, lastChangedBy: audit.lastChangedBy },
       }),
     };
+  } else if (request.conflictOperationId !== undefined
+    && !await isValidConflictReference(transaction, request.conflictOperationId, actor.id, taskId)) {
+    outcome = rejected(base, "INVALID_CONFLICT_REFERENCE", [{ path: "conflictOperationId", code: "invalid-reference" }]);
   } else {
     const validation = validateGraphiePayload(request.payload, kind);
     if (!validation.ok) {
@@ -102,6 +106,7 @@ async function runOnce(
       const acceptInput = {
         audit, taskId, actor, operationId: request.operationId, payload: validation.payload,
         localDraftRevision: request.localDraftRevision, clientSavedAt: request.clientSavedAt,
+        ...(request.conflictOperationId !== undefined ? { conflictOperationId: request.conflictOperationId.toLowerCase() } : {}),
       };
       const accepted = kind === "submit" ? await acceptSubmission(transaction, acceptInput) : await applyDraftSync(transaction, acceptInput);
       outcome = {
@@ -126,6 +131,17 @@ async function runOnce(
   return { type: "stored", httpStatus: outcome.httpStatus, body: inserted.rows[0]!.response } as SyncOperationOutcome;
 }
 
+/** The reference must be a stored conflict outcome of the same actor and task that no lineage link uses yet. */
+async function isValidConflictReference(transaction: Transaction, operationId: string, actorId: string, taskId: string): Promise<boolean> {
+  const referenced = await transaction.query<{ actor_id: string; task_id: string; outcome: string }>(
+    "SELECT actor_id, task_id, outcome FROM sync_operation_outcomes WHERE operation_id = $1",
+    [operationId],
+  );
+  const row = referenced.rows[0];
+  if (!row || row.outcome !== "conflict" || row.actor_id !== actorId || row.task_id !== taskId) return false;
+  return !await isLineagePredecessor(transaction, operationId);
+}
+
 function rejected(
   base: { operationId: string; kind: SyncOperationKind },
   code: SyncOperationRejected["code"],
@@ -137,11 +153,17 @@ function rejected(
   };
 }
 
-/** SHA-256 of the canonical JSON (keys sorted recursively) of everything that defines the request. */
+/**
+ * SHA-256 of the canonical JSON (keys sorted recursively) of everything that defines the request.
+ * The conflict reference enters only when present, so fingerprints of earlier requests stay valid.
+ */
 export function requestFingerprint(kind: SyncOperationKind, taskId: string, request: SyncOperationRequest): string {
-  const { operationId, baseRevision, localDraftRevision, clientSavedAt, payload } = request;
+  const { operationId, baseRevision, localDraftRevision, clientSavedAt, payload, conflictOperationId } = request;
   return createHash("sha256")
-    .update(canonicalJson({ kind, taskId, operationId, baseRevision, localDraftRevision, clientSavedAt, payload }))
+    .update(canonicalJson({
+      kind, taskId, operationId, baseRevision, localDraftRevision, clientSavedAt, payload,
+      ...(conflictOperationId !== undefined ? { conflictOperationId } : {}),
+    }))
     .digest("hex");
 }
 

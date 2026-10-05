@@ -463,6 +463,52 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
+  /employee/tasks/{taskId}/audit-version:
+    get:
+      operationId: getEmployeeTaskAuditVersion
+      summary: Read the current server version of an assigned task's audit
+      description: >-
+        Returns the latest audit revision (metadata and payload) so the Employé can resolve a synchronization
+        conflict explicitly. Revision 0, state draft and null fields when no operation was accepted yet.
+        Nothing is written.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: taskId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Current server version of the audit
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmployeeTaskAuditVersion'
+        '401':
+          description: Session rejected
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '403':
+          description: Employé role required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: Task not found or not assigned to the authenticated employee
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '500':
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
   /employee/tasks/{taskId}/draft-syncs:
     post:
       operationId: syncEmployeeTaskDraft
@@ -970,6 +1016,14 @@ components:
             A GraphieDraftPayload. Its content is validated by the server and refused with a stored 422
             SyncOperationRejected (UNSUPPORTED_PAYLOAD, UNSUPPORTED_PAYLOAD_VERSION, INVALID_PAYLOAD), not by the envelope.
           additionalProperties: true
+        conflictOperationId:
+          type: string
+          format: uuid
+          description: >-
+            Optional. The operation ID of the stored conflict outcome this operation resolves (keep-local).
+            It must be a conflict of the same actor and task, not yet linked; otherwise the operation is
+            refused with a stored 422 INVALID_CONFLICT_REFERENCE. On acceptance one sync-conflict-revision
+            lineage link is recorded.
     SyncOperationKind:
       type: string
       enum: [sync-draft, submit]
@@ -1034,7 +1088,7 @@ components:
           $ref: '#/components/schemas/SyncOperationKind'
         code:
           type: string
-          enum: [UNSUPPORTED_PAYLOAD, UNSUPPORTED_PAYLOAD_VERSION, INVALID_PAYLOAD, AUDIT_ALREADY_SUBMITTED]
+          enum: [UNSUPPORTED_PAYLOAD, UNSUPPORTED_PAYLOAD_VERSION, INVALID_PAYLOAD, AUDIT_ALREADY_SUBMITTED, INVALID_CONFLICT_REFERENCE]
         message: { type: string }
         issues:
           type: array
@@ -1045,6 +1099,26 @@ components:
             properties:
               path: { type: string }
               code: { type: string }
+    EmployeeTaskAuditVersion:
+      type: object
+      additionalProperties: false
+      required: [revision, state, lastChangedAt, lastChangedBy, payload]
+      properties:
+        revision: { type: integer, minimum: 0 }
+        state:
+          type: string
+          enum: [draft, submitted]
+        lastChangedAt:
+          type: [string, 'null']
+          format: date-time
+        lastChangedBy:
+          oneOf:
+            - $ref: '#/components/schemas/SyncActor'
+            - type: 'null'
+        payload:
+          oneOf:
+            - $ref: '#/components/schemas/GraphieDraftPayload'
+            - type: 'null'
     HealthResponse:
       type: object
       required: [status, version]

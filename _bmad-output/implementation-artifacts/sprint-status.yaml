@@ -29,7 +29,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 # - Retrospective appends its action items to action_items; the status view surfaces open ones
 generated: 09-26-2026 18:00
-last_updated: 10-05-2026 07:04
+last_updated: 10-05-2026 07:40
 project: cetem-qc
 project_key: NOKEY
 tracking_system: file-system
@@ -86,8 +86,8 @@ development_status:
   7-4-freeze-accepted-measurements-and-comments: done
   epic-7-retrospective: done
 
-  epic-8: backlog
-  8-1-resolve-a-synchronization-conflict-explicitly: backlog
+  epic-8: in-progress
+  8-1-resolve-a-synchronization-conflict-explicitly: done
   8-2-create-a-correction-draft-after-validation-rejection: backlog
   8-3-create-a-responsable-only-replacement-after-acceptance: backlog
   8-4-handle-unfinished-tasks-after-employee-deactivation: backlog
@@ -315,7 +315,10 @@ action_items:
       run state) from App.tsx into its own hook or module with tests before Stories
       8.1/8.2 add conflict and correction UI."
     owner: "Mobile maintainers / Story 8.1 author"
-    status: open
+    status: done
+    note: "Story 8.1: apps/mobile/sync/task-sync-controller.ts (non-React controller) and
+      use-task-sync.ts (thin hook); covered by W1 in task-sync-controller.test.ts with the
+      existing 7.2/7.3 App render tests passing on the extracted wiring."
     ref: "_bmad-output/implementation-artifacts/epic-7-retro-2026-10-05.md"
   - id: "epic-7-retro-item-22-in-the-epic-12-deployment-templates-and"
     epic: 7

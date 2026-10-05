@@ -1,5 +1,5 @@
-const DATABASE_VERSION = 3;
-const OUTBOX_TABLES = ["audit_snapshots", "outbox_operations", "task_sync_state"] as const;
+const DATABASE_VERSION = 4;
+const OUTBOX_TABLES = ["audit_snapshots", "outbox_operations", "task_sync_state", "conflict_resolutions", "conflict_resolution_items"] as const;
 
 type MigrationTransaction = {
   getFirstAsync<T>(sql: string): Promise<T | null>;
@@ -22,6 +22,8 @@ export async function initializeDraftDatabase(db: MigrationDatabase): Promise<vo
       const outbox = await db.getFirstAsync<{ name: string }>(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = '${name}'`);
       if (outbox?.name !== name) throw new Error("Local outbox schema is incomplete.");
     }
+    const lineage = await db.getFirstAsync<{ name: string }>("SELECT name FROM pragma_table_info('outbox_operations') WHERE name = 'conflict_operation_id'");
+    if (lineage?.name !== "conflict_operation_id") throw new Error("Local outbox schema is incomplete.");
     return;
   }
   await db.withExclusiveTransactionAsync(async (tx) => {
@@ -98,6 +100,36 @@ export async function initializeDraftDatabase(db: MigrationDatabase): Promise<vo
           PRIMARY KEY (employee_id, task_id)
         );
         PRAGMA user_version = 3;
+      `);
+    }
+    if (versionInside < 4) {
+      // Adds a nullable column and insert-only tables: no existing row is changed.
+      await tx.execAsync(`
+        ALTER TABLE outbox_operations ADD COLUMN conflict_operation_id TEXT;
+        CREATE TABLE conflict_resolutions (
+          resolution_id TEXT PRIMARY KEY,
+          employee_id TEXT NOT NULL,
+          task_id TEXT NOT NULL,
+          choice TEXT NOT NULL CHECK (choice IN ('keep-local', 'discard-local')),
+          server_revision INTEGER NOT NULL CHECK (server_revision >= 0),
+          server_state TEXT NOT NULL CHECK (server_state IN ('draft', 'submitted')),
+          new_operation_id TEXT,
+          created_at INTEGER NOT NULL,
+          CHECK ((choice = 'keep-local') = (new_operation_id IS NOT NULL))
+        );
+        CREATE TABLE conflict_resolution_items (
+          operation_id TEXT PRIMARY KEY,
+          resolution_id TEXT NOT NULL REFERENCES conflict_resolutions(resolution_id),
+          employee_id TEXT NOT NULL,
+          role TEXT NOT NULL CHECK (role IN ('conflict', 'withdrawn')),
+          kind TEXT NOT NULL CHECK (kind IN ('sync-draft', 'submit')),
+          snapshot_id TEXT NOT NULL
+        );
+        CREATE TRIGGER conflict_resolutions_insert_only BEFORE UPDATE ON conflict_resolutions
+        BEGIN SELECT RAISE(ABORT, 'conflict resolutions are insert-only'); END;
+        CREATE TRIGGER conflict_resolution_items_insert_only BEFORE UPDATE ON conflict_resolution_items
+        BEGIN SELECT RAISE(ABORT, 'conflict resolution items are insert-only'); END;
+        PRAGMA user_version = 4;
       `);
     }
   });

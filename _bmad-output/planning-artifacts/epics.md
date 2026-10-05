@@ -683,7 +683,7 @@ So that I can resolve a conflict without silent data loss.
 **And** alternatively, after confirmation, the employee may discard the local working version and reload the current server version; the original pending snapshot remains traceable until resolution is persisted
 **And** the implementation performs no field-level merge or last-write-wins and does not treat conflict as validation rejection or accepted-audit replacement.
 
-**Traceability:** FR-022, UX-DR2 (confirmation-dialog, alert-message), UX-DR5, UX-DR13, AD-4, AD-5, AD-6, OD-02b.
+**Traceability:** spec `_bmad-output/specs/spec-8-1-resolve-a-synchronization-conflict-explicitly/SPEC.md` (also places the employee current-version endpoint, the `audit_lineage_links` table and the extraction of the mobile sync wiring, epic-7 retro item 21); FR-022, UX-DR2 (confirmation-dialog, alert-message), UX-DR5, UX-DR13, AD-4, AD-5, AD-6, OD-02b. **Dependency:** Stories 7.1–7.4 (done).
 
 ### Story 8.2: Create a correction draft after validation rejection
 

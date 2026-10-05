@@ -1,7 +1,10 @@
 import * as Crypto from "expo-crypto";
 import * as SQLite from "expo-sqlite";
 import type { SecureKeyValueStore } from "../offline-authorization-state";
-import { OutboxOperationNotFoundError, PendingSubmissionError, type CachedSynchronizedTask, type DraftDatabase, type LocalDraft, type NewOutboxOperation, type OutboxItem } from "./model";
+import {
+  ConflictResolutionError, isOpenConflict, LOCAL_DRAFT_SCHEMA_VERSION, OpenConflictError, OutboxOperationNotFoundError, PendingSubmissionError,
+  type CachedSynchronizedTask, type ConflictResolution, type ConflictResolutionWrite, type DraftDatabase, type LocalDraft, type NewOutboxOperation, type OutboxItem,
+} from "./model";
 import { initializeDraftDatabase } from "./sqlite-draft-schema";
 
 const DATABASE_NAME = "cetem-qc-local-drafts.db";
@@ -112,9 +115,10 @@ export function createSqliteDraftDatabase(
         await db.withExclusiveTransactionAsync(async (tx) => {
           await assertNoPendingSubmission(tx, record.employeeId, record.taskId);
           await writeDraft(tx, record, expectedRevision);
-          if (operation) {
-            await removeUnresolvedSyncDrafts(tx, record.employeeId, record.taskId, true);
-            await insertOperation(tx, operation);
+          // While a conflict is open the save stays local: no snapshot and no item with a stale base.
+          if (operation && !await hasOpenConflict(tx, record.employeeId, record.taskId)) {
+            const inherited = await removeUnresolvedSyncDrafts(tx, record.employeeId, record.taskId, true);
+            await insertOperation(tx, operation, inherited);
           }
         });
       });
@@ -125,14 +129,15 @@ export function createSqliteDraftDatabase(
         let item: OutboxItem | undefined;
         await db.withExclusiveTransactionAsync(async (tx) => {
           const { employeeId, taskId, revision } = operation.snapshot;
+          await assertNoOpenConflict(tx, employeeId, taskId);
           await assertNoPendingSubmission(tx, employeeId, taskId);
           if (record) await writeDraft(tx, record, expectedRevision);
           else {
             const stored = await tx.getFirstAsync<{ revision: number }>("SELECT revision FROM local_drafts WHERE employee_id = ? AND task_id = ?", employeeId, taskId);
             if (stored?.revision !== revision) throw new Error("Local draft revision changed.");
           }
-          await removeUnresolvedSyncDrafts(tx, employeeId, taskId, true);
-          item = await insertOperation(tx, operation);
+          const inherited = await removeUnresolvedSyncDrafts(tx, employeeId, taskId, true);
+          item = await insertOperation(tx, operation, inherited);
         });
         return item!;
       });
@@ -141,6 +146,7 @@ export function createSqliteDraftDatabase(
       return serialize(async () => {
         const db = await open();
         await db.withExclusiveTransactionAsync(async (tx) => {
+          await assertNoOpenConflict(tx, employeeId, taskId);
           await assertNoPendingSubmission(tx, employeeId, taskId);
           const result = await tx.runAsync("DELETE FROM local_drafts WHERE employee_id = ? AND task_id = ? AND revision = ?", employeeId, taskId, expectedRevision);
           if (result.changes !== 1) throw new Error("Local draft revision changed before deletion.");
@@ -152,6 +158,7 @@ export function createSqliteDraftDatabase(
       return serialize(async () => {
         const db = await open();
         await db.withExclusiveTransactionAsync(async (tx) => {
+          await assertNoOpenConflict(tx, employeeId, taskId);
           await assertNoPendingSubmission(tx, employeeId, taskId);
           // No read, parse or revision check: the row is unreadable by this app version. Zero rows means already gone.
           await tx.runAsync("DELETE FROM local_drafts WHERE employee_id = ? AND task_id = ?", employeeId, taskId);
@@ -162,10 +169,7 @@ export function createSqliteDraftDatabase(
     async listOutbox(employeeId, taskId) {
       return serialize(async () => {
         const db = await open();
-        const rows = taskId === undefined
-          ? await db.getAllAsync<OutboxRow>(`SELECT ${OUTBOX_COLUMNS} FROM outbox_operations WHERE employee_id = ? ORDER BY sequence`, employeeId)
-          : await db.getAllAsync<OutboxRow>(`SELECT ${OUTBOX_COLUMNS} FROM outbox_operations WHERE employee_id = ? AND task_id = ? ORDER BY sequence`, employeeId, taskId);
-        return rows.map(toOutboxItem);
+        return taskId === undefined ? listItems(db, employeeId) : listItems(db, employeeId, taskId);
       });
     },
     async readOutboxSnapshot(employeeId, operationId) {
@@ -214,7 +218,93 @@ export function createSqliteDraftDatabase(
         return item!;
       });
     },
+    async resolveConflict(write) {
+      return serialize(async () => {
+        const db = await open();
+        let result: { draft: LocalDraft | null; operation: OutboxItem | null } | undefined;
+        await db.withExclusiveTransactionAsync(async (tx) => {
+          result = await applyConflictResolution(tx, write);
+        });
+        return result!;
+      });
+    },
+    async listConflictResolutions(employeeId) {
+      return serialize(async () => {
+        const db = await open();
+        const resolutions = await db.getAllAsync<ResolutionRow>(`SELECT resolution_id, employee_id, task_id, choice, server_revision,
+          server_state, new_operation_id, created_at FROM conflict_resolutions WHERE employee_id = ? ORDER BY created_at, rowid`, employeeId);
+        const items = await db.getAllAsync<ResolutionItemRow>(`SELECT operation_id, resolution_id, role, kind, snapshot_id
+          FROM conflict_resolution_items WHERE employee_id = ? ORDER BY rowid`, employeeId);
+        return resolutions.map((row): ConflictResolution => ({
+          resolutionId: row.resolution_id, employeeId: row.employee_id, taskId: row.task_id, choice: row.choice,
+          serverRevision: row.server_revision, serverState: row.server_state, newOperationId: row.new_operation_id, createdAt: row.created_at,
+          items: items.filter((item) => item.resolution_id === row.resolution_id)
+            .map((item) => ({ operationId: item.operation_id, role: item.role, kind: item.kind, snapshotId: item.snapshot_id })),
+        }));
+      });
+    },
   };
+}
+
+type ResolutionRow = {
+  resolution_id: string; employee_id: string; task_id: string; choice: ConflictResolution["choice"]; server_revision: number;
+  server_state: ConflictResolution["serverState"]; new_operation_id: string | null; created_at: number;
+};
+type ResolutionItemRow = { operation_id: string; resolution_id: string; role: "conflict" | "withdrawn"; kind: OutboxItem["kind"]; snapshot_id: string };
+
+/** One explicit resolution; every refusal throws before commit, so nothing changes. */
+async function applyConflictResolution(tx: SqlTransaction, write: ConflictResolutionWrite): Promise<{ draft: LocalDraft | null; operation: OutboxItem | null }> {
+  const { employeeId, taskId, resolutionId, createdAt } = write;
+  const items = await listItems(tx, employeeId, taskId);
+  const open = items.filter(isOpenConflict).sort((a, b) => a.sequence - b.sequence);
+  const expected = new Set(write.conflictOperationIds);
+  if (!open.length || open.length !== expected.size || open.some((item) => !expected.has(item.operationId))) {
+    throw new ConflictResolutionError("stale");
+  }
+  const unresolved = items.filter((item) => item.status !== "resolved");
+  if (unresolved.some((item) => item.attemptCount > 0)) throw new ConflictResolutionError("attempted");
+  if (write.choice === "keep-local") {
+    if (write.server.state !== "draft" || !write.operation) throw new ConflictResolutionError("server-submitted");
+    const stored = await tx.getFirstAsync<{ revision: number }>("SELECT revision FROM local_drafts WHERE employee_id = ? AND task_id = ?", employeeId, taskId);
+    if (stored?.revision !== write.operation.snapshot.revision) throw new ConflictResolutionError("local-unavailable");
+  }
+
+  await tx.runAsync(`INSERT INTO conflict_resolutions (resolution_id, employee_id, task_id, choice, server_revision, server_state, new_operation_id, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+  resolutionId, employeeId, taskId, write.choice, write.server.revision, write.server.state, write.operation?.operationId ?? null, createdAt);
+  for (const [role, covered] of [["conflict", open], ["withdrawn", unresolved]] as const) {
+    for (const item of covered) {
+      await tx.runAsync(`INSERT INTO conflict_resolution_items (operation_id, resolution_id, employee_id, role, kind, snapshot_id)
+        VALUES (?, ?, ?, ?, ?, ?)`, item.operationId, resolutionId, employeeId, role, item.kind, item.snapshotId);
+    }
+  }
+  // Withdrawn items were never attempted (the conflict paused the task); their snapshots are kept.
+  for (const item of unresolved) {
+    await tx.runAsync("DELETE FROM outbox_operations WHERE operation_id = ? AND employee_id = ? AND attempt_count = 0", item.operationId, employeeId);
+  }
+  await tx.runAsync(`INSERT INTO task_sync_state (employee_id, task_id, server_revision, updated_at) VALUES (?, ?, ?, ?)
+    ON CONFLICT(employee_id, task_id) DO UPDATE SET server_revision = excluded.server_revision, updated_at = excluded.updated_at`,
+  employeeId, taskId, write.server.revision, createdAt);
+
+  if (write.choice === "keep-local") {
+    // The lineage references the newest open conflict; the base is the fetched server revision set above.
+    const operation = await insertOperation(tx, write.operation!, open.at(-1)!.operationId);
+    return { draft: write.operation!.snapshot, operation };
+  }
+  const previous = await tx.getFirstAsync<{ revision: number; draft_id: string; created_at: number; saved_at: number }>(
+    "SELECT revision, draft_id, created_at, saved_at FROM local_drafts WHERE employee_id = ? AND task_id = ?", employeeId, taskId);
+  if (!write.replacement) {
+    await tx.runAsync("DELETE FROM local_drafts WHERE employee_id = ? AND task_id = ?", employeeId, taskId);
+    return { draft: null, operation: null };
+  }
+  const { payload, draftId, savedAt } = write.replacement;
+  const record: LocalDraft = {
+    id: previous?.draft_id ?? draftId, employeeId, taskId, payloadSchemaVersion: LOCAL_DRAFT_SCHEMA_VERSION,
+    revision: (previous?.revision ?? 0) + 1, payload,
+    createdAt: Math.min(previous?.created_at ?? savedAt, savedAt), savedAt: Math.max(savedAt, previous?.saved_at ?? 0),
+  };
+  await writeDraft(tx, record, previous?.revision);
+  return { draft: record, operation: null };
 }
 
 type SqlTransaction = Pick<SqlDatabase, "getFirstAsync" | "getAllAsync" | "runAsync">;
@@ -223,9 +313,15 @@ type OutboxRow = {
   kind: OutboxItem["kind"]; snapshot_id: string; base_revision: number; status: OutboxItem["status"];
   attempt_count: number; last_error: string | null; outcome: OutboxItem["outcome"]; outcome_json: string | null;
   created_at: number; updated_at: number; resolved_at: number | null;
+  conflict_operation_id: string | null; conflict_resolution_id: string | null;
 };
-const OUTBOX_COLUMNS = `operation_id, idempotency_key, employee_id, task_id, sequence, kind, snapshot_id, base_revision,
-  status, attempt_count, last_error, outcome, outcome_json, created_at, updated_at, resolved_at`;
+/** Every item with its lineage and, for a conflict, the resolution covering it (if any). */
+const OUTBOX_SELECT = `SELECT item.operation_id, item.idempotency_key, item.employee_id, item.task_id, item.sequence, item.kind,
+  item.snapshot_id, item.base_revision, item.status, item.attempt_count, item.last_error, item.outcome, item.outcome_json,
+  item.created_at, item.updated_at, item.resolved_at, item.conflict_operation_id, covered.resolution_id AS conflict_resolution_id
+  FROM outbox_operations item
+  LEFT JOIN conflict_resolution_items covered ON covered.operation_id = item.operation_id
+    AND covered.employee_id = item.employee_id AND covered.role = 'conflict'`;
 
 function toOutboxItem(row: OutboxRow): OutboxItem {
   return {
@@ -234,12 +330,29 @@ function toOutboxItem(row: OutboxRow): OutboxItem {
     attemptCount: row.attempt_count, lastError: row.last_error, outcome: row.outcome,
     outcomeMetadata: row.outcome_json === null ? null : JSON.parse(row.outcome_json),
     createdAt: row.created_at, updatedAt: row.updated_at, resolvedAt: row.resolved_at,
+    conflictOperationId: row.conflict_operation_id, conflictResolutionId: row.conflict_resolution_id,
   };
 }
 
+async function listItems(tx: SqlTransaction, employeeId: string, taskId?: string): Promise<OutboxItem[]> {
+  const rows = taskId === undefined
+    ? await tx.getAllAsync<OutboxRow>(`${OUTBOX_SELECT} WHERE item.employee_id = ? ORDER BY sequence`, employeeId)
+    : await tx.getAllAsync<OutboxRow>(`${OUTBOX_SELECT} WHERE item.employee_id = ? AND item.task_id = ? ORDER BY sequence`, employeeId, taskId);
+  return rows.map(toOutboxItem);
+}
+
 async function readOperation(tx: SqlTransaction, employeeId: string, operationId: string): Promise<OutboxItem | null> {
-  const row = await tx.getFirstAsync<OutboxRow>(`SELECT ${OUTBOX_COLUMNS} FROM outbox_operations WHERE employee_id = ? AND operation_id = ?`, employeeId, operationId);
+  const row = await tx.getFirstAsync<OutboxRow>(`${OUTBOX_SELECT} WHERE item.employee_id = ? AND item.operation_id = ?`, employeeId, operationId);
   return row ? toOutboxItem(row) : null;
+}
+
+async function hasOpenConflict(tx: SqlTransaction, employeeId: string, taskId: string): Promise<boolean> {
+  const rows = await tx.getAllAsync<OutboxRow>(`${OUTBOX_SELECT} WHERE item.employee_id = ? AND item.task_id = ?`, employeeId, taskId);
+  return rows.map(toOutboxItem).some(isOpenConflict);
+}
+
+async function assertNoOpenConflict(tx: SqlTransaction, employeeId: string, taskId: string) {
+  if (await hasOpenConflict(tx, employeeId, taskId)) throw new OpenConflictError();
 }
 
 async function assertNoPendingSubmission(tx: SqlTransaction, employeeId: string, taskId: string) {
@@ -266,18 +379,25 @@ async function writeDraft(tx: SqlTransaction, record: LocalDraft, expectedRevisi
   if (committed?.revision !== record.revision) throw new Error("Local draft revision was not committed.");
 }
 
-/** Removes unresolved `sync-draft` items and their snapshots (never-attempted ones only on supersession). */
-async function removeUnresolvedSyncDrafts(tx: SqlTransaction, employeeId: string, taskId: string, neverAttemptedOnly: boolean) {
-  const rows = await tx.getAllAsync<{ operation_id: string; snapshot_id: string }>(`SELECT operation_id, snapshot_id FROM outbox_operations
+/**
+ * Removes unresolved `sync-draft` items and their snapshots (never-attempted ones only on supersession).
+ * Returns the conflict lineage a removed item carried, so the superseding item keeps it.
+ */
+async function removeUnresolvedSyncDrafts(tx: SqlTransaction, employeeId: string, taskId: string, neverAttemptedOnly: boolean): Promise<string | null> {
+  const rows = await tx.getAllAsync<{ operation_id: string; snapshot_id: string; conflict_operation_id: string | null }>(`SELECT operation_id, snapshot_id,
+    conflict_operation_id FROM outbox_operations
     WHERE employee_id = ? AND task_id = ? AND kind = 'sync-draft' AND status <> 'resolved'${neverAttemptedOnly ? " AND attempt_count = 0" : ""}`,
   employeeId, taskId);
+  let inherited: string | null = null;
   for (const row of rows) {
+    inherited = row.conflict_operation_id ?? inherited;
     await tx.runAsync("DELETE FROM outbox_operations WHERE operation_id = ? AND employee_id = ?", row.operation_id, employeeId);
     await tx.runAsync("DELETE FROM audit_snapshots WHERE snapshot_id = ? AND employee_id = ?", row.snapshot_id, employeeId);
   }
+  return inherited;
 }
 
-async function insertOperation(tx: SqlTransaction, operation: NewOutboxOperation): Promise<OutboxItem> {
+async function insertOperation(tx: SqlTransaction, operation: NewOutboxOperation, conflictOperationId: string | null = null): Promise<OutboxItem> {
   const { employeeId, taskId } = operation.snapshot;
   const state = await tx.getFirstAsync<{ server_revision: number }>("SELECT server_revision FROM task_sync_state WHERE employee_id = ? AND task_id = ?", employeeId, taskId);
   const next = await tx.getFirstAsync<{ next_sequence: number }>("SELECT COALESCE(MAX(sequence), 0) + 1 AS next_sequence FROM outbox_operations");
@@ -285,9 +405,9 @@ async function insertOperation(tx: SqlTransaction, operation: NewOutboxOperation
     VALUES (?, ?, ?, ?, ?, ?, ?)`,
   operation.snapshotId, employeeId, taskId, operation.kind, operation.snapshot.revision, JSON.stringify(operation.snapshot), operation.createdAt);
   await tx.runAsync(`INSERT INTO outbox_operations (operation_id, idempotency_key, employee_id, task_id, sequence, kind, snapshot_id,
-    base_revision, status, attempt_count, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'queued', 0, ?, ?)`,
+    base_revision, status, attempt_count, created_at, updated_at, conflict_operation_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'queued', 0, ?, ?, ?)`,
   operation.operationId, operation.idempotencyKey, employeeId, taskId, next?.next_sequence ?? 1, operation.kind, operation.snapshotId,
-  state?.server_revision ?? 0, operation.createdAt, operation.createdAt);
+  state?.server_revision ?? 0, operation.createdAt, operation.createdAt, conflictOperationId);
   const item = await readOperation(tx, employeeId, operation.operationId);
   if (!item) throw new Error("Outbox operation was not committed.");
   return item;

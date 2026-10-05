@@ -1,7 +1,7 @@
 import express from "express";
 import type { Server } from "node:http";
 import type { Pool } from "pg";
-import { apiErrorSchema, authenticationRequestSchema, authenticationResponseSchema, createEmployeeRequestSchema, createTaskRequestSchema, employeeCredentialResponseSchema, employeeListResponseSchema, employeeTaskListQuerySchema, employeeTaskListResponseSchema, employeeTaskResponseSchema, healthQuerySchema, passwordReplacementRequestSchema, sessionResponseSchema, syncOperationRequestSchema, taskAssigneeListResponseSchema, taskListQuerySchema, taskListResponseSchema, taskResponseSchema, updateEmployeeStatusRequestSchema, updateEmployeeStatusResponseSchema } from "@cetem-qc/schemas/api/v1";
+import { apiErrorSchema, authenticationRequestSchema, authenticationResponseSchema, createEmployeeRequestSchema, createTaskRequestSchema, employeeCredentialResponseSchema, employeeListResponseSchema, employeeTaskAuditVersionSchema, employeeTaskListQuerySchema, employeeTaskListResponseSchema, employeeTaskResponseSchema, healthQuerySchema, passwordReplacementRequestSchema, sessionResponseSchema, syncOperationRequestSchema, taskAssigneeListResponseSchema, taskListQuerySchema, taskListResponseSchema, taskResponseSchema, updateEmployeeStatusRequestSchema, updateEmployeeStatusResponseSchema } from "@cetem-qc/schemas/api/v1";
 import { getHealth } from "./modules/health/health-query.js";
 import {
   authenticateWithPassword,
@@ -13,6 +13,7 @@ import { listOwnTeamEmployees } from "./modules/team-access/queries/list-own-tea
 import { createOwnTeamEmployee, DuplicateEmployeeEmailError, regenerateOwnTeamEmployeeCredential, resetOwnTeamEmployeePassword, updateOwnTeamEmployeeStatus } from "./modules/team-access/employee-credentials.js";
 import { createAssignedTask, listAssignedEmployeeTasks, listEligibleTaskAssignees, listOwnTeamTasks, TaskAssigneeUnavailableError } from "./modules/tasks/tasks.js";
 import { getAssignedEmployeeTask } from "./modules/tasks/queries/assigned-employee-task.js";
+import { getCurrentAuditVersion } from "./modules/audits/queries/current-audit-version.js";
 import { processSyncOperation } from "./modules/sync/commands/process-sync-operation.js";
 import type { SyncOperationKind } from "./modules/sync/commands/process-sync-operation.js";
 
@@ -264,6 +265,31 @@ export function createApp(pool?: Pool) {
       response.status(200).json(employeeTaskResponseSchema.parse({ task }));
     } catch {
       response.status(500).json(apiErrorSchema.parse({ error: { code: "INTERNAL_ERROR", message: "La tâche n’a pas pu être chargée." } }));
+    }
+  });
+
+  v1.get("/employee/tasks/:taskId/audit-version", async (request, response) => {
+    const session = response.locals.session as NonNullable<Awaited<ReturnType<typeof findActiveSession>>>;
+    if (session.role !== "employe") {
+      response.status(403).json(apiErrorSchema.parse({ error: { code: "FORBIDDEN", message: "Accès réservé à l’Employé." } }));
+      return;
+    }
+    const taskNotFound = () => response.status(404).json(apiErrorSchema.parse({ error: { code: "TASK_NOT_FOUND", message: "Tâche introuvable." } }));
+    const taskId = String(request.params.taskId ?? "");
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(taskId)) {
+      taskNotFound();
+      return;
+    }
+    try {
+      if (!await getAssignedEmployeeTask(getPool(), session.id, taskId)) {
+        taskNotFound();
+        return;
+      }
+      const version = await getCurrentAuditVersion(getPool(), taskId.toLowerCase());
+      response.status(200).json(employeeTaskAuditVersionSchema.parse(version));
+    } catch {
+      // Never log the error: it may carry payload values.
+      response.status(500).json(apiErrorSchema.parse({ error: { code: "INTERNAL_ERROR", message: "La version du serveur n’a pas pu être chargée." } }));
     }
   });
 

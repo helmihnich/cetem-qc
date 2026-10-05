@@ -287,13 +287,14 @@ test("database migration initializes an empty versioned schema and rejects unkno
     },
   };
   await initializeDraftDatabase(database);
-  assert.equal(version, 3);
+  assert.equal(version, 4);
   assert.match(statements[0] ?? "", /CREATE TABLE local_drafts/);
   version = 0;
   failMigration = true;
   await assert.rejects(initializeDraftDatabase(database));
   assert.equal(version, 0, "failed schema migration rolls back its version change");
-  assert.equal(statements.length, 3, "failed schema migration leaves prior schema statements intact");
+  // One statement per schema step of the earlier successful migration (v1, v2, v3 and the Story 8.1 v4).
+  assert.equal(statements.length, 4, "failed schema migration leaves prior schema statements intact");
   failMigration = false;
   version = 77;
   await assert.rejects(initializeDraftDatabase(database));

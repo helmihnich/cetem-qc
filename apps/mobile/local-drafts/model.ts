@@ -43,6 +43,10 @@ export type OutboxItem = {
   createdAt: number;
   updatedAt: number;
   resolvedAt: number | null;
+  /** Keep-local lineage: the conflicted operation this item resolves (sent as `conflictOperationId`). Set by the store. */
+  conflictOperationId?: string | null;
+  /** For a `conflict` item: the resolution that covers it, or null while the conflict is open. Set by the store. */
+  conflictResolutionId?: string | null;
 };
 
 export type NewOutboxOperation = {
@@ -54,6 +58,42 @@ export type NewOutboxOperation = {
   snapshot: LocalDraft;
   createdAt: number;
 };
+
+export type ConflictChoice = "keep-local" | "discard-local";
+
+/** An explicit, insert-only conflict resolution and the items it covers (`conflict`) or withdrew (`withdrawn`). */
+export type ConflictResolution = {
+  resolutionId: string;
+  employeeId: string;
+  taskId: string;
+  choice: ConflictChoice;
+  serverRevision: number;
+  serverState: "draft" | "submitted";
+  /** Keep-local only: the new `sync-draft` item. */
+  newOperationId: string | null;
+  createdAt: number;
+  items: { operationId: string; role: "conflict" | "withdrawn"; kind: OutboxKind; snapshotId: string }[];
+};
+
+/** The current server version fetched by the conflict panel. */
+export type FetchedServerVersion = { revision: number; state: "draft" | "submitted"; payload: GraphieDraftPayload | null };
+
+export type ConflictResolutionWrite = {
+  resolutionId: string;
+  employeeId: string;
+  taskId: string;
+  choice: ConflictChoice;
+  conflictOperationIds: string[];
+  server: { revision: number; state: "draft" | "submitted" };
+  createdAt: number;
+  /** Keep-local: the new `sync-draft` operation built from the preserved local draft. */
+  operation?: NewOutboxOperation;
+  /** Discard-local with a server payload: the payload becomes the next local revision. */
+  replacement?: { payload: GraphieDraftPayload; draftId: string; savedAt: number };
+};
+
+/** True for a `conflict` item no resolution covers yet. */
+export const isOpenConflict = (item: OutboxItem) => item.outcome === "conflict" && item.conflictResolutionId == null;
 
 export type OutboxTransition = { at: number } & (
   | { type: "attempt-start" }
@@ -78,6 +118,22 @@ export class SubmissionNotAllowedError extends Error {
   constructor() {
     super("This local draft cannot be submitted.");
     this.name = "SubmissionNotAllowedError";
+  }
+}
+
+/** The task has an open synchronization conflict: only a local draft save or an explicit resolution is allowed. */
+export class OpenConflictError extends Error {
+  constructor() {
+    super("A synchronization conflict is open for this task.");
+    this.name = "OpenConflictError";
+  }
+}
+
+/** The resolution cannot be applied as shown (stale panel, attempted item, server state or unreadable data); nothing changed. */
+export class ConflictResolutionError extends Error {
+  constructor(readonly reason: "stale" | "attempted" | "server-submitted" | "local-unavailable" | "server-unreadable") {
+    super("The synchronization conflict could not be resolved.");
+    this.name = "ConflictResolutionError";
   }
 }
 
@@ -153,6 +209,15 @@ export interface DraftRepository {
   getTaskSyncStatus(employeeId: string, taskId: string): Promise<TaskSyncStatus>;
   readOutboxSnapshot(employeeId: string, operationId: string): Promise<LocalDraft>;
   recordOutboxTransition(employeeId: string, operationId: string, transition: OutboxTransition): Promise<OutboxItem>;
+  /** Queues the preserved local draft as a new `sync-draft` on the fetched server revision, with conflict lineage. */
+  resolveConflictKeepLocal(employeeId: string, taskId: string, input: {
+    conflictOperationIds: string[]; server: { revision: number; state: FetchedServerVersion["state"] };
+  }): Promise<{ draft: LocalDraft; operation: OutboxItem }>;
+  /** Replaces the local working version with the fetched server version (deleted when the server has no audit). */
+  resolveConflictDiscardLocal(employeeId: string, taskId: string, input: {
+    conflictOperationIds: string[]; server: FetchedServerVersion;
+  }): Promise<{ draft: LocalDraft | null }>;
+  listConflictResolutions(employeeId: string): Promise<ConflictResolution[]>;
 }
 
 export interface DraftDatabase {
@@ -171,6 +236,13 @@ export interface DraftDatabase {
   listOutbox(employeeId: string, taskId?: string): Promise<OutboxItem[]>;
   readOutboxSnapshot(employeeId: string, operationId: string): Promise<string | null>;
   recordOutboxTransition(employeeId: string, operationId: string, transition: OutboxTransition): Promise<OutboxItem>;
+  /**
+   * Applies one conflict resolution in one exclusive transaction: resolution rows, withdrawal of the task's
+   * never-attempted unresolved items (snapshots kept), the local draft, `task_sync_state` and, for keep-local,
+   * the new item. Refused with `ConflictResolutionError` when the open conflicts differ or an item was attempted.
+   */
+  resolveConflict(write: ConflictResolutionWrite): Promise<{ draft: LocalDraft | null; operation: OutboxItem | null }>;
+  listConflictResolutions(employeeId: string): Promise<ConflictResolution[]>;
 }
 
 export class DraftListCorruptionError extends Error {
@@ -192,6 +264,13 @@ export function createDraftRepository(database: DraftDatabase, now: () => number
   async function assertNoPendingSubmission(employeeId: string, taskId: string) {
     const items = await database.listOutbox(employeeId, taskId);
     if (items.some((item) => item.kind === "submit" && isUnresolved(item))) throw new PendingSubmissionError();
+  }
+  async function assertNoOpenConflict(employeeId: string, taskId: string) {
+    if ((await database.listOutbox(employeeId, taskId)).some(isOpenConflict)) throw new OpenConflictError();
+  }
+  async function openConflictIds(employeeId: string, taskId: string, expected: string[]) {
+    const open = (await database.listOutbox(employeeId, taskId)).filter(isOpenConflict).map((item) => item.operationId);
+    if (!open.length || open.length !== expected.length || open.some((id) => !expected.includes(id))) throw new ConflictResolutionError("stale");
   }
   async function readForWrite(employeeId: string, taskId: string, expectedRevision: number | undefined) {
     const raw = await database.read(employeeId, taskId);
@@ -246,6 +325,7 @@ export function createDraftRepository(database: DraftDatabase, now: () => number
     },
     async requestSubmission(employeeId, taskId, payload, expectedRevision) {
       return serialize(scope(employeeId, taskId), async () => {
+        await assertNoOpenConflict(employeeId, taskId);
         await assertNoPendingSubmission(employeeId, taskId);
         // Only legacy content and drafts this app version cannot read are refused locally; the server validates.
         if (typeof payload !== "object" || payload === null || "content" in payload || payload.legacyContent !== undefined) throw new SubmissionNotAllowedError();
@@ -267,12 +347,14 @@ export function createDraftRepository(database: DraftDatabase, now: () => number
     },
     async delete(employeeId, taskId, expectedRevision) {
       return serialize(scope(employeeId, taskId), async () => {
+        await assertNoOpenConflict(employeeId, taskId);
         await assertNoPendingSubmission(employeeId, taskId);
         await database.delete(employeeId, taskId, expectedRevision);
       });
     },
     async deleteUnreadable(employeeId, taskId) {
       return serialize(scope(employeeId, taskId), async () => {
+        await assertNoOpenConflict(employeeId, taskId);
         await assertNoPendingSubmission(employeeId, taskId);
         await database.deleteUnreadable(employeeId, taskId);
       });
@@ -328,6 +410,58 @@ export function createDraftRepository(database: DraftDatabase, now: () => number
     },
     async recordOutboxTransition(employeeId, operationId, transition) {
       return database.recordOutboxTransition(employeeId, operationId, transition);
+    },
+    async resolveConflictKeepLocal(employeeId, taskId, input) {
+      return serialize(scope(employeeId, taskId), async () => {
+        await openConflictIds(employeeId, taskId, input.conflictOperationIds);
+        // 7.4 refuses every new revision on accepted evidence: keep-local is only for a draft server version.
+        if (input.server.state !== "draft") throw new ConflictResolutionError("server-submitted");
+        const raw = await database.read(employeeId, taskId);
+        let draft: LocalDraft;
+        try {
+          if (raw === null) throw new Error("No local draft.");
+          draft = parseLocalDraft(raw);
+        } catch {
+          throw new ConflictResolutionError("local-unavailable");
+        }
+        if (draft.employeeId !== employeeId || draft.taskId !== taskId) throw new ConflictResolutionError("local-unavailable");
+        const result = await database.resolveConflict({
+          resolutionId: createId(), employeeId, taskId, choice: "keep-local",
+          conflictOperationIds: [...input.conflictOperationIds],
+          server: { revision: input.server.revision, state: "draft" },
+          createdAt: now(),
+          operation: { ...newOperation("sync-draft", draft), createdAt: Math.max(now(), draft.savedAt) },
+        });
+        return { draft, operation: result.operation! };
+      });
+    },
+    async resolveConflictDiscardLocal(employeeId, taskId, input) {
+      return serialize(scope(employeeId, taskId), async () => {
+        await openConflictIds(employeeId, taskId, input.conflictOperationIds);
+        const createdAt = now();
+        let replacement: ConflictResolutionWrite["replacement"];
+        if (input.server.payload !== null) {
+          const draftId = createId();
+          // The fetched payload must be readable by this app version before anything is replaced.
+          const candidate: LocalDraft = {
+            id: draftId, employeeId, taskId, payloadSchemaVersion: LOCAL_DRAFT_SCHEMA_VERSION, revision: 1,
+            payload: input.server.payload, createdAt, savedAt: createdAt,
+          };
+          try { parseLocalDraft(JSON.stringify(candidate)); } catch { throw new ConflictResolutionError("server-unreadable"); }
+          replacement = { payload: input.server.payload, draftId, savedAt: createdAt };
+        }
+        const result = await database.resolveConflict({
+          resolutionId: createId(), employeeId, taskId, choice: "discard-local",
+          conflictOperationIds: [...input.conflictOperationIds],
+          server: { revision: input.server.revision, state: input.server.state },
+          createdAt,
+          ...(replacement ? { replacement } : {}),
+        });
+        return { draft: result.draft };
+      });
+    },
+    async listConflictResolutions(employeeId) {
+      return database.listConflictResolutions(employeeId);
     },
   };
 }

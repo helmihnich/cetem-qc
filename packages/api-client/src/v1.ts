@@ -1,8 +1,8 @@
-import { apiErrorSchema, authenticationRequestSchema, authenticationResponseSchema, createEmployeeRequestSchema, createTaskRequestSchema, employeeCredentialResponseSchema, employeeListResponseSchema, employeeTaskListQuerySchema, employeeTaskListResponseSchema, employeeTaskResponseSchema, healthResponseSchema, passwordReplacementRequestSchema, sessionResponseSchema, syncOperationAcceptedSchema, syncOperationConflictSchema, syncOperationRejectedSchema, syncOperationRequestSchema, taskAssigneeListResponseSchema, taskListResponseSchema, taskResponseSchema } from "@cetem-qc/schemas/api/v1";
-import type { AuthenticationRequest, AuthenticationResponse, CreateEmployeeRequest, CreateTaskRequest, EmployeeCredentialResponse, EmployeeListResponse, EmployeeTaskListResponse, EmployeeTaskResponse, HealthResponse, PasswordReplacementRequest, SyncOperationAccepted, SyncOperationConflict, SyncOperationRejected, SyncOperationRequest, TaskListResponse, TaskResponse } from "@cetem-qc/schemas/api/v1";
+import { apiErrorSchema, authenticationRequestSchema, authenticationResponseSchema, createEmployeeRequestSchema, createTaskRequestSchema, employeeCredentialResponseSchema, employeeListResponseSchema, employeeTaskAuditVersionSchema, employeeTaskListQuerySchema, employeeTaskListResponseSchema, employeeTaskResponseSchema, healthResponseSchema, passwordReplacementRequestSchema, sessionResponseSchema, syncOperationAcceptedSchema, syncOperationConflictSchema, syncOperationRejectedSchema, syncOperationRequestSchema, taskAssigneeListResponseSchema, taskListResponseSchema, taskResponseSchema } from "@cetem-qc/schemas/api/v1";
+import type { AuthenticationRequest, AuthenticationResponse, CreateEmployeeRequest, CreateTaskRequest, EmployeeCredentialResponse, EmployeeListResponse, EmployeeTaskAuditVersion, EmployeeTaskListResponse, EmployeeTaskResponse, HealthResponse, PasswordReplacementRequest, SyncOperationAccepted, SyncOperationConflict, SyncOperationRejected, SyncOperationRequest, TaskListResponse, TaskResponse } from "@cetem-qc/schemas/api/v1";
 
 export { taskListResponseSchema };
-export type { EmployeeTaskListResponse, EmployeeTaskResponse, SyncOperationAccepted, SyncOperationConflict, SyncOperationRejected, SyncOperationRequest, TaskListResponse };
+export type { EmployeeTaskAuditVersion, EmployeeTaskListResponse, EmployeeTaskResponse, SyncOperationAccepted, SyncOperationConflict, SyncOperationRejected, SyncOperationRequest, TaskListResponse };
 
 export type SyncOperationResponse =
   | { status: 200; body: SyncOperationAccepted }
@@ -113,6 +113,25 @@ export function createApiClient({ baseUrl, fetch: fetcher = fetch, sessionToken:
     },
     submitEmployeeTaskAudit(taskId: string, body: SyncOperationRequest, options: { signal?: AbortSignal } = {}): Promise<SyncOperationResponse> {
       return sendSyncOperation(`/employee/tasks/${encodeURIComponent(taskId)}/submissions`, body, options.signal);
+    },
+    /** The current server version of the task's audit; any other status or an invalid body throws `ApiRequestError`. */
+    async getEmployeeTaskAuditVersion(taskId: string, options: { signal?: AbortSignal } = {}): Promise<EmployeeTaskAuditVersion> {
+      const signal = options.signal;
+      const response = await fetcher(`${root}/employee/tasks/${encodeURIComponent(taskId)}/audit-version`, {
+        method: "GET", headers: { accept: "application/json", ...sessionHeaders() }, ...(signal ? { signal } : {}),
+      });
+      let data: unknown;
+      try {
+        data = await response.json();
+      } catch (error) {
+        if (signal?.aborted) throw error;
+        throw new ApiRequestError("The API response could not be read.", response.status, "UNEXPECTED_API_RESPONSE");
+      }
+      if (response.status === 200) {
+        const parsed = employeeTaskAuditVersionSchema.safeParse(data);
+        if (parsed.success) return parsed.data;
+      }
+      throw toRequestError(response.status, data);
     },
     async logout(): Promise<void> {
       const payload = await request("/session", { method: "DELETE", headers: { accept: "application/json", ...sessionHeaders() } });

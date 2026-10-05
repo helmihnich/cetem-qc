@@ -182,6 +182,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/employee/tasks/{taskId}/audit-version": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read the current server version of an assigned task's audit
+         * @description Returns the latest audit revision (metadata and payload) so the Employé can resolve a synchronization conflict explicitly. Revision 0, state draft and null fields when no operation was accepted yet. Nothing is written.
+         */
+        get: operations["getEmployeeTaskAuditVersion"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/employee/tasks/{taskId}/draft-syncs": {
         parameters: {
             query?: never;
@@ -420,6 +440,11 @@ export interface components {
             payload: {
                 [key: string]: unknown;
             };
+            /**
+             * Format: uuid
+             * @description Optional. The operation ID of the stored conflict outcome this operation resolves (keep-local). It must be a conflict of the same actor and task, not yet linked; otherwise the operation is refused with a stored 422 INVALID_CONFLICT_REFERENCE. On acceptance one sync-conflict-revision lineage link is recorded.
+             */
+            conflictOperationId?: string;
         };
         /** @enum {string} */
         SyncOperationKind: "sync-draft" | "submit";
@@ -467,12 +492,21 @@ export interface components {
             operationId: string;
             kind: components["schemas"]["SyncOperationKind"];
             /** @enum {string} */
-            code: "UNSUPPORTED_PAYLOAD" | "UNSUPPORTED_PAYLOAD_VERSION" | "INVALID_PAYLOAD" | "AUDIT_ALREADY_SUBMITTED";
+            code: "UNSUPPORTED_PAYLOAD" | "UNSUPPORTED_PAYLOAD_VERSION" | "INVALID_PAYLOAD" | "AUDIT_ALREADY_SUBMITTED" | "INVALID_CONFLICT_REFERENCE";
             message: string;
             issues: {
                 path: string;
                 code: string;
             }[];
+        };
+        EmployeeTaskAuditVersion: {
+            revision: number;
+            /** @enum {string} */
+            state: "draft" | "submitted";
+            /** Format: date-time */
+            lastChangedAt: string | null;
+            lastChangedBy: components["schemas"]["SyncActor"] | null;
+            payload: components["schemas"]["GraphieDraftPayload"] | null;
         };
         HealthResponse: {
             /** @constant */
@@ -1111,6 +1145,64 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Session rejected */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Employé role required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Task not found or not assigned to the authenticated employee */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    getEmployeeTaskAuditVersion: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                taskId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Current server version of the audit */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EmployeeTaskAuditVersion"];
                 };
             };
             /** @description Session rejected */

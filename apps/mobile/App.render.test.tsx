@@ -45,18 +45,56 @@ const runtime = globalThis as typeof globalThis & {
   __appStateListeners?: Set<(state: string) => void>;
   __failOutboxList?: boolean;
   __failOutboxInsert?: boolean;
+  __syncStateRows?: Map<string, number>;
+  __resolutionRows?: Map<string, Record<string, unknown>>;
+  __resolutionItemRows?: Map<string, Record<string, unknown>>;
 };
 type OutboxTestRow = {
   operation_id: string; idempotency_key: string; employee_id: string; task_id: string; sequence: number; kind: string;
   snapshot_id: string; base_revision: number; status: string; attempt_count: number; last_error: string | null;
   outcome: string | null; outcome_json: string | null; created_at: number; updated_at: number; resolved_at: number | null;
+  conflict_operation_id?: string | null;
 };
 let testUuid = 0;
+/** Story 8.1 conflict resolution tables (insert-only) for the App double. */
+function resolutionStatement(kind: "first" | "all" | "run", sql: string, params: unknown[]): { handled: boolean; value?: unknown } {
+  if (!/INSERT INTO conflict_resolution|FROM conflict_resolution/.test(sql) || sql.includes("FROM outbox_operations")) return { handled: false };
+  runtime.__resolutionRows ??= new Map();
+  runtime.__resolutionItemRows ??= new Map();
+  if (kind === "run" && sql.includes("INSERT INTO conflict_resolutions")) {
+    const [resolution_id, employee_id, task_id, choice, server_revision, server_state, new_operation_id, created_at] = params;
+    runtime.__resolutionRows.set(String(resolution_id), { resolution_id, employee_id, task_id, choice, server_revision, server_state, new_operation_id, created_at });
+  } else if (kind === "run" && sql.includes("INSERT INTO conflict_resolution_items")) {
+    const [operation_id, resolution_id, employee_id, role, itemKind, snapshot_id] = params;
+    runtime.__resolutionItemRows.set(String(operation_id), { operation_id, resolution_id, employee_id, role, kind: itemKind, snapshot_id });
+  } else if (kind === "all") {
+    const source = sql.includes("FROM conflict_resolution_items") ? runtime.__resolutionItemRows : runtime.__resolutionRows;
+    return { handled: true, value: [...source.values()].filter((row) => row.employee_id === params[0]) };
+  } else throw new Error(`Unsupported conflict resolution statement in the App double: ${sql}`);
+  return { handled: true, value: { changes: 1, lastInsertRowId: 1 } };
+}
 // Minimal outbox tables for the App double; the real SQL is exercised in local-drafts and sync tests.
 function outboxStatement(kind: "first" | "all" | "run", sql: string, params: unknown[]): { handled: boolean; value?: unknown } {
+  const resolution = resolutionStatement(kind, sql, params);
+  if (resolution.handled) return resolution;
   if (!/outbox_operations|audit_snapshots|task_sync_state/.test(sql)) return { handled: false };
+  if (kind !== "run" && sql.includes("FROM outbox_operations")) {
+    // The outbox reads join the covering conflict resolution (Story 8.1).
+    const result = outboxRows(kind, sql, params);
+    const withResolution = (row: OutboxTestRow) => {
+      const covered = runtime.__resolutionItemRows?.get(row.operation_id);
+      return { ...row, conflict_operation_id: row.conflict_operation_id ?? null, conflict_resolution_id: covered?.role === "conflict" ? covered.resolution_id : null };
+    };
+    const value = result.value as OutboxTestRow | OutboxTestRow[] | null | undefined;
+    if (!result.handled || !value || !("operation_id" in value || Array.isArray(value))) return result;
+    return { handled: true, value: Array.isArray(value) ? value.map(withResolution) : withResolution(value) };
+  }
+  return outboxRows(kind, sql, params);
+}
+function outboxRows(kind: "first" | "all" | "run", sql: string, params: unknown[]): { handled: boolean; value?: unknown } {
   runtime.__outboxRows ??= new Map();
   runtime.__snapshotRows ??= new Map();
+  runtime.__syncStateRows ??= new Map();
   const outbox = runtime.__outboxRows;
   const snapshots = runtime.__snapshotRows;
   const [employeeId, second] = params.map(String);
@@ -65,15 +103,16 @@ function outboxStatement(kind: "first" | "all" | "run", sql: string, params: unk
       snapshots.set(String(params[0]), { employee_id: String(params[1]), payload_json: String(params[5]) });
     } else if (sql.includes("INSERT INTO outbox_operations")) {
       if (runtime.__failOutboxInsert) throw new Error("outbox write failed");
-      const [operation_id, idempotency_key, employee_id, task_id, sequence, kind, snapshot_id, base_revision, created_at, updated_at] = params;
+      const [operation_id, idempotency_key, employee_id, task_id, sequence, kind, snapshot_id, base_revision, created_at, updated_at, conflict_operation_id] = params;
       outbox.set(String(operation_id), {
         operation_id: String(operation_id), idempotency_key: String(idempotency_key), employee_id: String(employee_id), task_id: String(task_id),
         sequence: Number(sequence), kind: String(kind), snapshot_id: String(snapshot_id), base_revision: Number(base_revision), status: "queued",
         attempt_count: 0, last_error: null, outcome: null, outcome_json: null, created_at: Number(created_at), updated_at: Number(updated_at), resolved_at: null,
+        conflict_operation_id: conflict_operation_id === undefined || conflict_operation_id === null ? null : String(conflict_operation_id),
       });
     } else if (sql.includes("DELETE FROM outbox_operations")) outbox.delete(employeeId!);
     else if (sql.includes("DELETE FROM audit_snapshots")) snapshots.delete(employeeId!);
-    else if (sql.includes("INSERT INTO task_sync_state")) { /* The server revision is not read back by the App double. */ }
+    else if (sql.includes("INSERT INTO task_sync_state")) runtime.__syncStateRows.set(`${employeeId}/${second}`, Number(params[2]));
     else if (sql.includes("UPDATE outbox_operations SET status = 'in-flight'")) {
       const row = outbox.get(String(params[1]))!;
       Object.assign(row, { status: "in-flight", attempt_count: row.attempt_count + 1, updated_at: Number(params[0]) });
@@ -95,7 +134,10 @@ function outboxStatement(kind: "first" | "all" | "run", sql: string, params: unk
   if (runtime.__failOutboxList && kind === "all" && sql.includes("ORDER BY sequence")) throw new Error("outbox read failed");
   const rows = [...outbox.values()].filter((row) => row.employee_id === employeeId).sort((a, b) => a.sequence - b.sequence);
   if (sql.includes("MAX(sequence)")) return { handled: true, value: { next_sequence: Math.max(0, ...[...outbox.values()].map((row) => row.sequence)) + 1 } };
-  if (sql.includes("FROM task_sync_state")) return { handled: true, value: null };
+  if (sql.includes("FROM task_sync_state")) {
+    const revision = runtime.__syncStateRows!.get(`${employeeId}/${second}`);
+    return { handled: true, value: revision === undefined ? null : { server_revision: revision } };
+  }
   if (sql.includes("JOIN audit_snapshots")) {
     const row = rows.find((item) => item.operation_id === second);
     return { handled: true, value: row ? { payload_json: snapshots.get(row.snapshot_id)?.payload_json } : null };
@@ -225,11 +267,17 @@ mock.module("expo-sqlite", { namedExports: {
         const cacheBefore = new Map(runtime.__cachedTaskRows);
         const outboxBefore = new Map([...(runtime.__outboxRows ?? new Map<string, OutboxTestRow>())].map(([id, row]) => [id, { ...row }]));
         const snapshotsBefore = new Map(runtime.__snapshotRows);
+        const syncStateBefore = new Map(runtime.__syncStateRows);
+        const resolutionsBefore = new Map(runtime.__resolutionRows);
+        const resolutionItemsBefore = new Map(runtime.__resolutionItemRows);
         try { await operation(db); } catch (error) {
           rows.clear(); for (const [id, value] of before) rows.set(id, value);
           runtime.__cachedTaskRows = new Map(cacheBefore);
           runtime.__outboxRows = outboxBefore;
           runtime.__snapshotRows = snapshotsBefore;
+          runtime.__syncStateRows = syncStateBefore;
+          runtime.__resolutionRows = resolutionsBefore;
+          runtime.__resolutionItemRows = resolutionItemsBefore;
           throw error;
         }
       },
@@ -267,6 +315,8 @@ interface MockApi {
   getAssignedEmployeeTask: (id: string) => Promise<{ task: Task }>;
   getSession: () => Promise<{ user: { id: string; role: "employe" } }>;
   logout: () => Promise<void>;
+  /** Story 8.1: the current server version; absent unless a test installs it. */
+  getEmployeeTaskAuditVersion?: (taskId: string, options?: { signal?: AbortSignal }) => Promise<unknown>;
   listCalls: number;
   sessionCalls: number;
   detailCalls: string[];
@@ -304,6 +354,9 @@ function installMocks() {
   runtime.__cachedTaskRows = new Map();
   runtime.__outboxRows = new Map();
   runtime.__snapshotRows = new Map();
+  runtime.__syncStateRows = new Map();
+  runtime.__resolutionRows = new Map();
+  runtime.__resolutionItemRows = new Map();
   runtime.__employeeId = "employee-1";
   runtime.__holdDraftRead = undefined;
   runtime.__holdDraftWrite = undefined;
@@ -2467,13 +2520,14 @@ async function requestSubmission(tree: ReactTestRenderer) {
 
 test("Story 7.2 R1 the task detail shows lifecycle, synchronization, connectivity and local save as separate derived lines", async () => {
   await loadApp();
-  type Case = { rows: [kind: "sync-draft" | "submit", status: string, outcome?: string][]; state: string; transfer?: string; alert?: boolean; retry?: boolean; locked?: boolean };
+  // `submittable` defaults to !locked; an open conflict pauses Soumettre while the draft stays editable (Story 8.1).
+  type Case = { rows: [kind: "sync-draft" | "submit", status: string, outcome?: string][]; state: string; transfer?: string; alert?: boolean; retry?: boolean; locked?: boolean; submittable?: boolean };
   const cases: Case[] = [
     { rows: [], state: fr.employeeTasks.draft, transfer: fr.employeeTasks.notSynchronized },
     { rows: [["sync-draft", "queued"]], state: fr.employeeTasks.draft, transfer: fr.employeeTasks.syncQueued },
     { rows: [["sync-draft", "resolved", "accepted"]], state: fr.employeeTasks.draft, transfer: fr.employeeTasks.draftSynchronized },
     { rows: [["sync-draft", "resolved", "rejected"]], state: fr.employeeTasks.draft, transfer: fr.employeeTasks.draftSyncRejected, alert: true },
-    { rows: [["sync-draft", "resolved", "conflict"]], state: fr.employeeTasks.draft, transfer: fr.employeeTasks.syncConflict, alert: true },
+    { rows: [["sync-draft", "resolved", "conflict"]], state: fr.employeeTasks.draft, transfer: fr.employeeTasks.syncConflict, alert: true, submittable: false },
     { rows: [["sync-draft", "retry-paused"]], state: fr.employeeTasks.draft, transfer: fr.employeeTasks.syncFailed, alert: true, retry: true },
     { rows: [["sync-draft", "blocked"], ["submit", "queued"]], state: fr.employeeTasks.submissionPending, transfer: fr.employeeTasks.syncBlocked, alert: true, retry: true, locked: true },
     { rows: [["submit", "queued"]], state: fr.employeeTasks.submissionPending, transfer: fr.employeeTasks.syncQueued, locked: true },
@@ -2504,7 +2558,7 @@ test("Story 7.2 R1 the task detail shows lifecycle, synchronization, connectivit
     assert.equal(allTexts(tree).filter((text) => text.startsWith(`${fr.employeeTasks.localPersistence}: `)).length, 1, label);
     assert.ok(allTexts(tree).every((text) => !text.includes("Dernier état serveur") && !text.includes("synchronisé ;")), label);
     assert.equal(hasButton(tree, fr.employeeTasks.retrySync), Boolean(item.retry), label);
-    assert.equal(hasButton(tree, fr.employeeTasks.submit), !item.locked, label);
+    assert.equal(hasButton(tree, fr.employeeTasks.submit), item.submittable ?? !item.locked, label);
     assert.equal(findInput(tree, reportField().labelFr)!.props.editable, !item.locked, label);
     assert.equal(Boolean(findText(tree, fr.employeeTasks.readOnlyPending)), Boolean(item.locked), label);
     await act(async () => { tree.unmount(); });
@@ -3000,5 +3054,332 @@ test("Story 7.3 R17 no trigger sends anything offline or without an online autho
   await act(async () => { for (const listener of runtime.__appStateListeners ?? []) listener("active"); await settle(); });
   assert.equal(transport.sent.length, 0, "without an online authorization: no send");
   assert.ok([...runtime.__outboxRows!.values()].every((row) => row.status === "queued"));
+  await act(async () => { tree.unmount(); });
+});
+
+// Story 8.1 — explicit synchronization conflict resolution.
+const conflictActor = { id: "employee-1", displayName: "Employée Test" };
+const conflictDetail = { revision: 2, state: "draft", lastChangedAt: "2026-10-04T08:00:00.000Z", lastChangedBy: conflictActor };
+const pad2 = (value: number) => String(value).padStart(2, "0");
+const deviceDateTime = (value: number | string) => {
+  const date = new Date(value);
+  return { date: `${pad2(date.getDate())}/${pad2(date.getMonth() + 1)}/${date.getFullYear()}`, time: `${pad2(date.getHours())}:${pad2(date.getMinutes())}` };
+};
+const fieldLabel = (sectionId: string, fieldId: string) => {
+  const section = GRAPHIE_MOBILE_POV_CATALOGUE.sections.find((item) => item.id === sectionId)!;
+  return `${section.labelFr} › ${section.fields.find((item) => item.id === fieldId)!.labelFr}`;
+};
+
+function seedConflict(taskId: string, sequence: number, kind: "sync-draft" | "submit") {
+  seedOutbox(taskId, sequence, kind, "resolved", "conflict");
+  runtime.__outboxRows!.get(`seed-op-${taskId}-${sequence}`)!.outcome_json = JSON.stringify({ serverRevision: 2, detail: conflictDetail });
+  return `seed-op-${taskId}-${sequence}`;
+}
+
+function serverVersion(state: "draft" | "submitted", values: Record<string, string>, revision = 3) {
+  return { revision, state, lastChangedAt: "2026-10-04T09:30:00.000Z", lastChangedBy: { id: "employee-2", displayName: "Collègue Test" }, payload: graphiePayload(values) };
+}
+
+/** Installs the current-version read; offline or unauthorized panels must never call it. */
+function serveVersion(api: MockApi, respond: () => Promise<unknown>) {
+  const calls: string[] = [];
+  api.getEmployeeTaskAuditVersion = async (taskId) => { calls.push(taskId); return respond(); };
+  return calls;
+}
+
+const conflictRows = () => ({
+  drafts: new Map(runtime.__draftRows), outbox: JSON.stringify([...runtime.__outboxRows!.values()]),
+  resolutions: runtime.__resolutionRows!.size, syncState: JSON.stringify([...runtime.__syncStateRows!.entries()]),
+});
+
+test("Story 8.1 R18 a draft conflict shows the local, conflict-time and current server versions with the differing fields; the form stays editable", async () => {
+  await loadApp();
+  const api = installMocks();
+  const localValues = { ...createNewGraphieDraftValues(), "header.reportNumber": "R18-local" };
+  const draft = seedDraft(firstTask.id, localValues);
+  seedConflict(firstTask.id, 1, "sync-draft");
+  const calls = serveVersion(api, async () => serverVersion("draft", { ...localValues, "header.reportNumber": "R18-serveur", "comments.general": "Commentaire serveur" }));
+  let tree!: ReactTestRenderer;
+  await act(async () => { tree = create(<App />); });
+  await signIn(tree);
+  await openFirstTask(tree);
+  await act(async () => { await settle(); });
+  assert.deepEqual(calls, [firstTask.id]);
+  assert.equal(findText(tree, fr.employeeTasks.conflictTitle)?.props.accessibilityRole, "alert");
+  assert.ok(findText(tree, fr.employeeTasks.conflictExplanation));
+  const saved = deviceDateTime(draft.savedAt);
+  assert.ok(findText(tree, `Version locale : révision 1, enregistrée le ${saved.date} à ${saved.time}`));
+  const atConflict = deviceDateTime(conflictDetail.lastChangedAt);
+  assert.ok(findText(tree, `Version du serveur au moment du conflit : révision 2, modifiée le ${atConflict.date} à ${atConflict.time} par Employée Test`));
+  const current = deviceDateTime("2026-10-04T09:30:00.000Z");
+  assert.ok(findText(tree, `Version actuelle du serveur : révision 3 (${fr.employeeTasks.draft}), modifiée le ${current.date} à ${current.time} par Collègue Test`));
+  assert.ok(findText(tree, fr.employeeTasks.conflictDifferences));
+  assert.ok(findText(tree, fieldLabel(GRAPHIE_MOBILE_POV_CATALOGUE.sections[0]!.id, "header.reportNumber")));
+  assert.ok(findText(tree, fieldLabel("comments", "comments.general")));
+  assert.equal(findText(tree, fr.employeeTasks.conflictPendingKept), undefined);
+  assert.ok(allTexts(tree).every((text) => !text.includes("R18-serveur") && !text.includes("Commentaire serveur")), "server values are not shown");
+  assert.equal(hasButton(tree, fr.employeeTasks.submit), false);
+  assert.equal(hasButton(tree, fr.employeeTasks.deleteDraft), false);
+  assert.equal(hasButton(tree, fr.employeeTasks.retrySync), false);
+  assert.equal(findButton(tree, fr.employeeTasks.conflictKeepLocal).props.disabled, false);
+  assert.equal(findButton(tree, fr.employeeTasks.conflictDiscardLocal).props.disabled, false);
+  assert.equal(findInput(tree, reportField().labelFr)!.props.editable, true);
+
+  // A save during the open conflict stays local: no outbox item with the stale base.
+  const outboxBefore = JSON.stringify([...runtime.__outboxRows!.values()]);
+  await act(async () => { findInput(tree, reportField().labelFr)!.props.onChangeText("R18-edited"); });
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 650)); await settle(); });
+  assert.ok(runtime.__draftRows!.get(`employee-1/${firstTask.id}`)!.includes("R18-edited"));
+  assert.equal(JSON.stringify([...runtime.__outboxRows!.values()]), outboxBefore);
+  assert.ok(findText(tree, fr.employeeTasks.conflictTitle), "the conflict stays open");
+  await act(async () => { tree.unmount(); });
+});
+
+test("Story 8.1 R19 a submit conflict keeps the form read-only and says the requested submission is kept", async () => {
+  await loadApp();
+  const api = installMocks();
+  seedDraft(firstTask.id, { ...createNewGraphieDraftValues(), "header.reportNumber": "R19-local" });
+  seedConflict(firstTask.id, 1, "submit");
+  serveVersion(api, async () => serverVersion("draft", createNewGraphieDraftValues()));
+  let tree!: ReactTestRenderer;
+  await act(async () => { tree = create(<App />); });
+  await signIn(tree);
+  await openFirstTask(tree);
+  await act(async () => { await settle(); });
+  assert.ok(findText(tree, fr.employeeTasks.conflictPendingKept));
+  assert.equal(findInput(tree, reportField().labelFr)!.props.editable, false);
+  assert.equal(hasButton(tree, fr.employeeTasks.submit), false);
+  assert.equal(hasButton(tree, fr.employeeTasks.deleteDraft), false);
+  assert.equal(findButton(tree, fr.employeeTasks.conflictKeepLocal).props.disabled, false);
+  await act(async () => { tree.unmount(); });
+});
+
+test("Story 8.1 R20 a failed or offline server read shows why with « Réessayer », keeps both actions disabled, and a successful retry enables them", async () => {
+  await loadApp();
+  const api = installMocks();
+  seedDraft(firstTask.id);
+  seedConflict(firstTask.id, 1, "sync-draft");
+  let fail = true;
+  const calls = serveVersion(api, async () => { if (fail) throw new Error("server unavailable"); return serverVersion("draft", createNewGraphieDraftValues()); });
+  let tree!: ReactTestRenderer;
+  await act(async () => { tree = create(<App />); });
+  await signIn(tree);
+  await openFirstTask(tree);
+  await act(async () => { await settle(); });
+  assert.equal(calls.length, 1);
+  assert.equal(findText(tree, fr.employeeTasks.conflictServerUnavailable)?.props.accessibilityRole, "alert");
+  assert.ok(findButton(tree, fr.employeeTasks.conflictRetryFetch));
+  assert.equal(findButton(tree, fr.employeeTasks.conflictKeepLocal).props.disabled, true);
+  assert.equal(findButton(tree, fr.employeeTasks.conflictDiscardLocal).props.disabled, true);
+  assert.ok(allTexts(tree).every((text) => !text.startsWith("Version actuelle du serveur")), "no invented server data");
+
+  await act(async () => { runtime.__networkListener?.({ isConnected: false, isInternetReachable: false }); await settle(); });
+  await act(async () => { findButton(tree, fr.employeeTasks.conflictRetryFetch).props.onPress(); await settle(); });
+  assert.equal(calls.length, 1, "nothing is fetched offline");
+  assert.ok(tree.root.findAll((node) => node.type === "Text" && node.children.join("") === fr.auth.offlineUnavailable).length > 0);
+  assert.equal(findButton(tree, fr.employeeTasks.conflictKeepLocal).props.disabled, true);
+
+  fail = false;
+  await act(async () => { runtime.__networkListener?.({ isConnected: true, isInternetReachable: true }); await settle(); });
+  await act(async () => { findButton(tree, fr.employeeTasks.conflictRetryFetch).props.onPress(); await settle(); });
+  assert.equal(calls.length, 2);
+  assert.equal(findText(tree, fr.employeeTasks.conflictServerUnavailable), undefined);
+  assert.equal(findButton(tree, fr.employeeTasks.conflictKeepLocal).props.disabled, false);
+  assert.equal(findButton(tree, fr.employeeTasks.conflictDiscardLocal).props.disabled, false);
+  await act(async () => { tree.unmount(); });
+});
+
+test("Story 8.1 R21 keep-local makes the draft editable again and sends one sync-draft on the server revision with the conflict reference", async () => {
+  await loadApp();
+  const api = installMocks();
+  seedDraft(firstTask.id, { ...createNewGraphieDraftValues(), "header.reportNumber": "R21-local" });
+  const conflicted = seedConflict(firstTask.id, 1, "sync-draft");
+  serveVersion(api, async () => serverVersion("draft", createNewGraphieDraftValues(), 5));
+  const transport = fakeTransport([], { type: "accepted", serverRevision: 6 });
+  runtime.__syncTransport = transport;
+  let tree!: ReactTestRenderer;
+  await act(async () => { tree = create(<App />); });
+  await signIn(tree);
+  await openFirstTask(tree);
+  await act(async () => { await settle(); });
+  assert.equal(transport.sent.length, 0, "the open conflict pauses the task");
+  await act(async () => { findButton(tree, fr.employeeTasks.conflictKeepLocal).props.onPress(); await settle(); });
+  assert.equal(findText(tree, fr.employeeTasks.conflictTitle), undefined, "the panel closes");
+  assert.deepEqual(transport.sent.map((request) => [request.kind, request.baseRevision, request.conflictOperationId]), [["sync-draft", 5, conflicted]]);
+  assert.equal((transport.sent[0]!.snapshot.payload as { values: Record<string, string> }).values["header.reportNumber"], "R21-local");
+  assert.equal(submitRows(firstTask.id).length, 0, "no submission is queued");
+  assert.equal(findInput(tree, reportField().labelFr)!.props.editable, true);
+  assert.ok(hasButton(tree, fr.employeeTasks.submit), "Soumettre returns");
+  assert.ok(syncLine(tree, fr.employeeTasks.draftSynchronized));
+  assert.equal(runtime.__resolutionRows!.size, 1);
+  await act(async () => { tree.unmount(); });
+});
+
+test("Story 8.1 R22 discard asks for confirmation; cancel changes nothing and confirm reloads the server values as a synchronized draft", async () => {
+  await loadApp();
+  const api = installMocks();
+  seedDraft(firstTask.id, { ...createNewGraphieDraftValues(), "header.reportNumber": "R22-local" });
+  seedConflict(firstTask.id, 1, "sync-draft");
+  serveVersion(api, async () => serverVersion("draft", { ...createNewGraphieDraftValues(), "header.reportNumber": "R22-serveur" }));
+  let tree!: ReactTestRenderer;
+  await act(async () => { tree = create(<App />); });
+  await signIn(tree);
+  await openFirstTask(tree);
+  await act(async () => { await settle(); });
+  const before = conflictRows();
+  await act(async () => { findButton(tree, fr.employeeTasks.conflictDiscardLocal).props.onPress(); });
+  assert.equal(findText(tree, fr.employeeTasks.conflictConfirmDiscard)?.props.accessibilityRole, "alert");
+  await act(async () => { findButton(tree, fr.common.cancel).props.onPress(); await settle(); });
+  assert.equal(findText(tree, fr.employeeTasks.conflictConfirmDiscard), undefined);
+  assert.deepEqual(conflictRows(), before, "cancelling changes nothing");
+  assert.equal(findInput(tree, reportField().labelFr)!.props.value, "R22-local");
+
+  await act(async () => { findButton(tree, fr.employeeTasks.conflictDiscardLocal).props.onPress(); });
+  await act(async () => { findButton(tree, fr.employeeTasks.conflictConfirmDiscardAction).props.onPress(); await settle(); });
+  assert.equal(findText(tree, fr.employeeTasks.conflictTitle), undefined);
+  assert.equal(findInput(tree, reportField().labelFr)!.props.value, "R22-serveur");
+  assert.equal(findInput(tree, reportField().labelFr)!.props.editable, true);
+  assert.ok(syncLine(tree, fr.employeeTasks.draftSynchronized));
+  assert.ok(runtime.__draftRows!.get(`employee-1/${firstTask.id}`)!.includes("R22-serveur"));
+  assert.equal([...runtime.__resolutionRows!.values()][0]!.choice, "discard-local");
+  await act(async () => { tree.unmount(); });
+});
+
+test("Story 8.1 R23 a submitted server version offers only discard, which reloads it read-only as accepted", async () => {
+  await loadApp();
+  const api = installMocks();
+  seedDraft(firstTask.id, { ...createNewGraphieDraftValues(), "header.reportNumber": "R23-local" });
+  seedConflict(firstTask.id, 1, "submit");
+  serveVersion(api, async () => serverVersion("submitted", { ...createNewGraphieDraftValues(), "header.reportNumber": "R23-accepté" }, 4));
+  let tree!: ReactTestRenderer;
+  await act(async () => { tree = create(<App />); });
+  await signIn(tree);
+  await openFirstTask(tree);
+  await act(async () => { await settle(); });
+  assert.ok(allTexts(tree).some((text) => text.startsWith(`Version actuelle du serveur : révision 4 (${fr.employeeTasks.submitted})`)));
+  assert.equal(hasButton(tree, fr.employeeTasks.conflictKeepLocal), false);
+  await act(async () => { findButton(tree, fr.employeeTasks.conflictDiscardLocal).props.onPress(); });
+  await act(async () => { findButton(tree, fr.employeeTasks.conflictConfirmDiscardAction).props.onPress(); await settle(); });
+  const stateDetail = tree.root.findAll((node) => node.type === "View" && node.findAll((child) => child.type === "Text" && child.children.join("") === fr.employeeTasks.state).length > 0
+    && node.findAll((child) => child.type === "Text" && child.children.join("") === fr.employeeTasks.submitted).length > 0)[0];
+  assert.ok(stateDetail, "« État » reads « Soumis — accepté par le serveur »");
+  assert.equal(findInput(tree, reportField().labelFr)!.props.value, "R23-accepté");
+  assert.equal(findInput(tree, reportField().labelFr)!.props.editable, false);
+  assert.equal(hasButton(tree, fr.employeeTasks.submit), false);
+  assert.equal(findText(tree, fr.employeeTasks.conflictTitle), undefined);
+  await act(async () => { tree.unmount(); });
+});
+
+test("Story 8.1 R24 a failed resolution keeps the panel and leaves the local draft and outbox unchanged", async () => {
+  await loadApp();
+  const api = installMocks();
+  seedDraft(firstTask.id, { ...createNewGraphieDraftValues(), "header.reportNumber": "R24-local" });
+  seedConflict(firstTask.id, 1, "sync-draft");
+  serveVersion(api, async () => serverVersion("draft", createNewGraphieDraftValues()));
+  let tree!: ReactTestRenderer;
+  await act(async () => { tree = create(<App />); });
+  await signIn(tree);
+  await openFirstTask(tree);
+  await act(async () => { await settle(); });
+  const before = conflictRows();
+  runtime.__failOutboxInsert = true;
+  await act(async () => { findButton(tree, fr.employeeTasks.conflictKeepLocal).props.onPress(); await settle(); });
+  assert.equal(findText(tree, fr.employeeTasks.conflictResolutionFailed)?.props.accessibilityRole, "alert");
+  assert.ok(findText(tree, fr.employeeTasks.conflictTitle), "the panel stays");
+  assert.deepEqual(conflictRows(), before);
+  assert.equal(findInput(tree, reportField().labelFr)!.props.value, "R24-local");
+  assert.equal(hasButton(tree, fr.employeeTasks.submit), false);
+  await act(async () => { tree.unmount(); });
+});
+
+test("Story 8.1 R25 a stale panel (the open conflicts changed) says so, changes nothing and reads the server version again", async () => {
+  await loadApp();
+  const api = installMocks();
+  seedDraft(firstTask.id, { ...createNewGraphieDraftValues(), "header.reportNumber": "R25-local" });
+  seedConflict(firstTask.id, 1, "sync-draft");
+  const calls = serveVersion(api, async () => serverVersion("draft", createNewGraphieDraftValues()));
+  let tree!: ReactTestRenderer;
+  await act(async () => { tree = create(<App />); });
+  await signIn(tree);
+  await openFirstTask(tree);
+  await act(async () => { await settle(); });
+  assert.equal(calls.length, 1);
+  seedConflict(firstTask.id, 2, "sync-draft");
+  const before = conflictRows();
+  await act(async () => { findButton(tree, fr.employeeTasks.conflictKeepLocal).props.onPress(); await settle(); });
+  assert.equal(findText(tree, fr.employeeTasks.conflictResolutionStale)?.props.accessibilityRole, "alert");
+  assert.ok(findText(tree, fr.employeeTasks.conflictTitle), "the panel stays");
+  assert.ok(calls.length > 1, "the server version is read again");
+  assert.deepEqual(conflictRows(), before, "a stale panel changes nothing");
+  assert.equal(findButton(tree, fr.employeeTasks.conflictKeepLocal).props.disabled, false, "the refreshed panel allows a new choice");
+  await act(async () => { tree.unmount(); });
+});
+
+test("Story 8.1 R26 keep-local first saves an edit typed just before, so the kept version is the one on screen", async () => {
+  await loadApp();
+  const api = installMocks();
+  seedDraft(firstTask.id, { ...createNewGraphieDraftValues(), "header.reportNumber": "R26-local" });
+  seedConflict(firstTask.id, 1, "sync-draft");
+  serveVersion(api, async () => serverVersion("draft", createNewGraphieDraftValues(), 5));
+  const transport = fakeTransport([], { type: "accepted", serverRevision: 6 });
+  runtime.__syncTransport = transport;
+  let tree!: ReactTestRenderer;
+  await act(async () => { tree = create(<App />); });
+  await signIn(tree);
+  await openFirstTask(tree);
+  await act(async () => { await settle(); });
+  await act(async () => { findInput(tree, reportField().labelFr)!.props.onChangeText("R26-edited"); });
+  await act(async () => { findButton(tree, fr.employeeTasks.conflictKeepLocal).props.onPress(); await settle(); });
+  assert.equal(findText(tree, fr.employeeTasks.conflictTitle), undefined);
+  assert.equal(transport.sent.length, 1);
+  assert.equal((transport.sent[0]!.snapshot.payload as { values: Record<string, string> }).values["header.reportNumber"], "R26-edited");
+  assert.ok(runtime.__draftRows!.get(`employee-1/${firstTask.id}`)!.includes("R26-edited"));
+  await act(async () => { tree.unmount(); });
+});
+
+test("Story 8.1 R27 a submit conflict resolved with keep-local becomes an editable draft, queues no submission and offers Soumettre again", async () => {
+  await loadApp();
+  const api = installMocks();
+  seedDraft(firstTask.id, { ...createNewGraphieDraftValues(), "header.reportNumber": "R27-local" });
+  const conflicted = seedConflict(firstTask.id, 1, "submit");
+  serveVersion(api, async () => serverVersion("draft", createNewGraphieDraftValues(), 5));
+  const transport = fakeTransport([], { type: "accepted", serverRevision: 6 });
+  runtime.__syncTransport = transport;
+  let tree!: ReactTestRenderer;
+  await act(async () => { tree = create(<App />); });
+  await signIn(tree);
+  await openFirstTask(tree);
+  await act(async () => { await settle(); });
+  assert.equal(findInput(tree, reportField().labelFr)!.props.editable, false);
+  await act(async () => { findButton(tree, fr.employeeTasks.conflictKeepLocal).props.onPress(); await settle(); });
+  assert.equal(findText(tree, fr.employeeTasks.conflictTitle), undefined);
+  assert.deepEqual(transport.sent.map((request) => [request.kind, request.baseRevision, request.conflictOperationId]), [["sync-draft", 5, conflicted]]);
+  assert.equal(submitRows(firstTask.id).length, 1, "only the conflicted submit row remains; no new submission is queued");
+  assert.equal(findInput(tree, reportField().labelFr)!.props.editable, true);
+  assert.ok(hasButton(tree, fr.employeeTasks.submit), "Soumettre returns");
+  await act(async () => { tree.unmount(); });
+});
+
+test("Story 8.1 R28 an unreadable local draft in conflict offers only discard, lists no differences and hides its delete button", async () => {
+  await loadApp();
+  const api = installMocks();
+  const key = `employee-1/${firstTask.id}`;
+  runtime.__draftRows!.set(key, unreadableDraftRows.oldRule(firstTask.id));
+  seedConflict(firstTask.id, 1, "sync-draft");
+  serveVersion(api, async () => serverVersion("draft", { ...createNewGraphieDraftValues(), "header.reportNumber": "R28-serveur" }));
+  let tree!: ReactTestRenderer;
+  await act(async () => { tree = create(<App />); });
+  await signIn(tree);
+  await act(async () => { findTaskRow(tree, firstTask.establishment).props.onPress(); await settle(); });
+  assert.ok(findText(tree, fr.employeeTasks.conflictLocalUnavailable));
+  assert.equal(hasButton(tree, fr.employeeTasks.conflictKeepLocal), false);
+  assert.equal(findText(tree, fr.employeeTasks.conflictDifferences), undefined);
+  assert.equal(findText(tree, fr.employeeTasks.conflictNoDifference), undefined);
+  assert.equal(hasButton(tree, fr.employeeTasks.deleteDraft), false, "the unreadable draft cannot be deleted during the conflict");
+  await act(async () => { findButton(tree, fr.employeeTasks.conflictDiscardLocal).props.onPress(); });
+  await act(async () => { findButton(tree, fr.employeeTasks.conflictConfirmDiscardAction).props.onPress(); await settle(); });
+  assert.equal(findText(tree, fr.employeeTasks.conflictTitle), undefined);
+  assert.equal(findText(tree, fr.employeeTasks.draftCompatibilityUnavailable), undefined);
+  assert.ok(runtime.__draftRows!.get(key)!.includes("R28-serveur"));
   await act(async () => { tree.unmount(); });
 });

@@ -4,7 +4,7 @@ import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import type { apiV1Components, apiV1Operations } from "@cetem-qc/types";
-import { apiErrorSchema, createEmployeeRequestSchema, createTaskRequestSchema, employeeCredentialResponseSchema, employeeListResponseSchema, employeeTaskListQuerySchema, employeeTaskListResponseSchema, employeeTaskResponseSchema, graphieDraftPayloadSchema, healthQuerySchema, healthResponseSchema, syncOperationAcceptedSchema, syncOperationConflictSchema, syncOperationRejectedSchema, syncOperationRequestSchema, taskListQuerySchema, taskListResponseSchema, updateEmployeeStatusRequestSchema, updateEmployeeStatusResponseSchema } from "./v1.js";
+import { apiErrorSchema, createEmployeeRequestSchema, createTaskRequestSchema, employeeCredentialResponseSchema, employeeListResponseSchema, employeeTaskListQuerySchema, employeeTaskListResponseSchema, employeeTaskAuditVersionSchema, employeeTaskResponseSchema, graphieDraftPayloadSchema, healthQuerySchema, healthResponseSchema, syncOperationAcceptedSchema, syncOperationConflictSchema, syncOperationRejectedSchema, syncOperationRequestSchema, taskListQuerySchema, taskListResponseSchema, updateEmployeeStatusRequestSchema, updateEmployeeStatusResponseSchema } from "./v1.js";
 
 const contractPath = fileURLToPath(new URL("../../../types/openapi/cetem-qc-v1.yaml", import.meta.url));
 
@@ -195,4 +195,40 @@ test("the documented Graphie payload schema matches the catalogue 2.0.0 identity
   assert.deepEqual(graphieDraftPayloadSchema.parse(payload), payload);
   assert.equal(graphieDraftPayloadSchema.safeParse({ ...payload, ruleVersion: "1.0.0" }).success, false);
   assert.equal(graphieDraftPayloadSchema.safeParse({ ...payload, values: { a: 1 } }).success, false);
+});
+
+test("K1 the envelope accepts an optional UUID conflict reference and the audit version body is strict", () => {
+  const valid = {
+    operationId: "00000000-0000-4000-8000-000000000001",
+    idempotencyKey: "00000000-0000-4000-8000-000000000002",
+    baseRevision: 1,
+    localDraftRevision: 2,
+    clientSavedAt: "2026-10-04T10:00:00.000Z",
+    payload: {},
+  };
+  const withReference = { ...valid, conflictOperationId: "00000000-0000-4000-8000-000000000003" };
+  assert.deepEqual(syncOperationRequestSchema.parse(withReference), withReference);
+  assert.equal("conflictOperationId" in syncOperationRequestSchema.parse(valid), false);
+  for (const conflictOperationId of ["conflit-1", null, 3, ""]) {
+    assert.equal(syncOperationRequestSchema.safeParse({ ...valid, conflictOperationId }).success, false, String(conflictOperationId));
+  }
+  const rejected = { outcome: "rejected", operationId: valid.operationId, kind: "sync-draft", code: "INVALID_CONFLICT_REFERENCE", message: "La référence du conflit de synchronisation est invalide.", issues: [{ path: "conflictOperationId", code: "invalid-reference" }] } as const;
+  assert.deepEqual(syncOperationRejectedSchema.parse(rejected), rejected);
+
+  const noAudit = { revision: 0, state: "draft", lastChangedAt: null, lastChangedBy: null, payload: null } as const;
+  assert.deepEqual(employeeTaskAuditVersionSchema.parse(noAudit), noAudit);
+  const full = {
+    revision: 2, state: "submitted", lastChangedAt: "2026-10-04T10:00:00.000Z",
+    lastChangedBy: { id: "00000000-0000-4000-8000-000000000009", displayName: "Employé Test" },
+    payload: { catalogueId: "graphie-mobile-pov", catalogueVersion: "2.0.0", schemaVersion: 3, ruleId: "cetem-paper-form", ruleVersion: "2.0.0", values: { "header.reportNumber": "R-001" } },
+  } as const;
+  assert.deepEqual(employeeTaskAuditVersionSchema.parse(full), full);
+  for (const invalid of [
+    { ...full, extra: true },
+    { ...full, lastChangedBy: { ...full.lastChangedBy, email: "employe@example.test" } },
+    { ...full, payload: { ...full.payload, extra: 1 } },
+    { ...full, state: "rejected" },
+    { ...full, revision: -1 },
+    { revision: 0, state: "draft", lastChangedAt: null, lastChangedBy: null },
+  ]) assert.equal(employeeTaskAuditVersionSchema.safeParse(invalid).success, false, JSON.stringify(invalid));
 });

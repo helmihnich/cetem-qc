@@ -1,4 +1,4 @@
-import type { DraftRepository, GraphieDraftPayload, LocalDraft, CachedSynchronizedTask, OutboxItem, OutboxTransition, SubmissionRequest, TaskSyncStatus } from "./model";
+import type { ConflictResolution, DraftRepository, GraphieDraftPayload, LocalDraft, CachedSynchronizedTask, OutboxItem, OutboxTransition, SubmissionRequest, TaskSyncStatus } from "./model";
 
 export type DraftAuthorization = <T>(employeeId: string, operation: () => Promise<T>) => Promise<T>;
 
@@ -47,6 +47,15 @@ export function createAuthorizedDrafts(repository: DraftRepository, authorize: D
     },
     async recordOutboxTransition(employeeId: string, operationId: string, transition: OutboxTransition): Promise<OutboxItem> {
       return authorize(employeeId, () => repository.recordOutboxTransition(employeeId, operationId, transition));
+    },
+    async resolveConflictKeepLocal(employeeId: string, taskId: string, input: Parameters<DraftRepository["resolveConflictKeepLocal"]>[2]) {
+      return authorize(employeeId, () => repository.resolveConflictKeepLocal(employeeId, taskId, input));
+    },
+    async resolveConflictDiscardLocal(employeeId: string, taskId: string, input: Parameters<DraftRepository["resolveConflictDiscardLocal"]>[2]) {
+      return authorize(employeeId, () => repository.resolveConflictDiscardLocal(employeeId, taskId, input));
+    },
+    async listConflictResolutions(employeeId: string): Promise<ConflictResolution[]> {
+      return authorize(employeeId, () => repository.listConflictResolutions(employeeId));
     },
   };
 }

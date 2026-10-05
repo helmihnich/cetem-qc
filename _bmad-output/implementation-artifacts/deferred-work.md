@@ -107,6 +107,7 @@
 - source_spec: `_bmad-output/specs/spec-7-1-queue-durable-synchronization-operations/outbox-model.md`
   summary: After a `conflict` outcome, later unresolved items of the same task keep the stale base revision and will predictably conflict as well.
   evidence: Only `accepted` moves later items' base revision. Conflict recovery is Story 8.1.
+  resolved: Story 8.1 (2026-10-05) — an open conflict pauses its whole task in every run (explicit retry included) and the engine stops the task right after recording a conflict; the explicit resolution withdraws the never-attempted items and keep-local queues one item on the fetched server revision; engine test E4 in `apps/mobile/sync/conflict-engine.test.ts`.
 
 ## Deferred from: code review of spec-7-2-show-synchronization-and-submission-state-distinctly (2026-10-04)
 
@@ -138,3 +139,15 @@
 - source_spec: `_bmad-output/specs/spec-7-4-freeze-accepted-measurements-and-comments/freeze-model.md`
   summary: The 0009/0010 freeze triggers hold only for a role that cannot alter them. The table owner can still run `ALTER TABLE … DISABLE TRIGGER`, `SET session_replication_role = replica` or `DROP TABLE` and then change or remove accepted evidence.
   evidence: Migrations and the API both connect with `DATABASE_URL`, so by default the runtime role owns the tables. Separating a migration/owner role from a runtime role without TRIGGER, TRUNCATE or DDL rights is a deployment decision. Story 12.x (deployment templates and guide) should cover it.
+
+## Deferred from: code review of spec-8-1-resolve-a-synchronization-conflict-explicitly (2026-10-05)
+
+- source_spec: `_bmad-output/specs/spec-8-1-resolve-a-synchronization-conflict-explicitly/server-support.md`
+  summary: (Unverified, medium if it happens.) When the catalogue or rule tuple changes, an older stored revision fails the strict `employeeTaskAuditVersionSchema` (500 on `GET …/audit-version`), or its payload fails `parseLocalDraft` on discard (`server-unreadable`). In both cases the conflict panel can never offer a working choice and the task stays paused.
+  evidence: Today it cannot happen, because every stored revision was validated against the single `2.0.0` / `3` / `cetem-paper-form 2.0.0` tuple that both the schema and the device read. It needs a catalogue migration story, so handle it with the first catalogue/rule version bump: let the panel offer discard to an empty draft, or upgrade the payload.
+- source_spec: `_bmad-output/specs/spec-8-1-resolve-a-synchronization-conflict-explicitly/conflict-ui.md`
+  summary: No test covers the 30 s abort of the current-version read (`SERVER_VERSION_TIMEOUT_MS` in `conflict-panel.tsx`). A hung request should end with « La version du serveur n’a pas pu être chargée » and « Réessayer ».
+  evidence: The App render harness has no fake timers. The failure path itself is covered by R20. Add the test with mocked timers when the harness gains them.
+- source_spec: `_bmad-output/specs/spec-8-1-resolve-a-synchronization-conflict-explicitly/conflict-model.md`
+  summary: No restart test covers the new v4 startup guards: a v4 database missing `conflict_resolutions` / `conflict_resolution_items` or `outbox_operations.conflict_operation_id` should be refused as incomplete, with no row deleted.
+  evidence: The guard is defensive against a damaged schema. Following the S3 pattern in `outbox.test.ts`, it is a cheap follow-up.

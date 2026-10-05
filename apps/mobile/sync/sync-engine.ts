@@ -1,4 +1,4 @@
-import { isUnresolved, OutboxOperationNotFoundError, type DraftRepository, type LocalDraft, type OutboxItem, type OutboxKind, type OutboxTransition } from "../local-drafts/model";
+import { isOpenConflict, isUnresolved, OutboxOperationNotFoundError, type DraftRepository, type LocalDraft, type OutboxItem, type OutboxKind, type OutboxTransition } from "../local-drafts/model";
 
 export type SyncRequest = {
   operationId: string;
@@ -8,6 +8,8 @@ export type SyncRequest = {
   taskId: string;
   baseRevision: number;
   snapshot: LocalDraft;
+  /** Keep-local lineage, sent only when the item carries it. */
+  conflictOperationId?: string;
 };
 
 export type SyncResult =
@@ -89,6 +91,7 @@ export function createSyncEngine(options: {
         result = normalize(await transport.send({
           operationId: current.operationId, idempotencyKey: current.idempotencyKey, kind: current.kind,
           employeeId, taskId: current.taskId, baseRevision: current.baseRevision, snapshot,
+          ...(current.conflictOperationId ? { conflictOperationId: current.conflictOperationId } : {}),
         }));
       } catch {
         result = { type: "retryable", code: "transport-error" };
@@ -122,9 +125,10 @@ export function createSyncEngine(options: {
     for (const taskId of taskIds) {
       for (;;) {
         // Reload each time: an accepted item may have moved the base revision of the next one.
-        const next = (await store.listOutbox(employeeId))
-          .filter((item) => item.taskId === taskId && item.employeeId === employeeId && isUnresolved(item))
-          .sort((a, b) => a.sequence - b.sequence)[0];
+        const taskItems = (await store.listOutbox(employeeId)).filter((item) => item.taskId === taskId && item.employeeId === employeeId);
+        // An open conflict pauses its whole task, explicit retries included, until the Employé resolves it.
+        if (taskItems.some(isOpenConflict)) break;
+        const next = taskItems.filter(isUnresolved).sort((a, b) => a.sequence - b.sequence)[0];
         if (!next) break;
         // A blocked item holds its task back until an explicit retry; automatic runs leave it alone.
         if (!retryBlocked && next.status === "blocked") break;

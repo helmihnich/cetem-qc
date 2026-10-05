@@ -120,3 +120,12 @@ test("an envelope that cannot be built from the snapshot blocks instead of retry
   assert.deepEqual(await transport.send({ ...request(), operationId: "not-a-uuid" }), { type: "blocking", code: "INVALID_REQUEST" });
   assert.equal(calls.length, 0);
 });
+
+test("T4 the conflict reference is sent only when the request carries it", async () => {
+  const { calls, transport } = transportFor(async () => ({ status: 200, body: { ...acceptedBody, kind: "sync-draft", submissionId: undefined } }));
+  const conflictOperationId = "00000000-0000-4000-8000-000000000076";
+  await transport.send({ ...request("sync-draft"), conflictOperationId });
+  await transport.send(request("sync-draft"));
+  assert.equal(JSON.parse(String(calls[0]!.init?.body)).conflictOperationId, conflictOperationId);
+  assert.equal("conflictOperationId" in JSON.parse(String(calls[1]!.init?.body)), false);
+});
