@@ -90,3 +90,26 @@ test("E5 a keep-local item that conflicts again pauses the task and the next res
   const { operation } = await f.repository.resolveConflictKeepLocal("employee-a", "task-a", { conflictOperationIds: [open[0]!.operationId], server: { revision: 3, state: "draft" } });
   assert.deepEqual([operation.baseRevision, operation.conflictOperationId], [3, open[0]!.operationId]);
 });
+
+// Story 8.2 — E6: the correction reference travels with the items of a correction draft.
+
+test("E6 a refused submission is recorded with its detail, the run continues, and the correction's items carry the reference", async () => {
+  const f = await setup();
+  const saved = await f.repository.save("employee-a", "task-a", form("refusé"));
+  const { operation: refusedSubmit } = await f.repository.requestSubmission("employee-a", "task-a", form("refusé"), saved.revision);
+  await f.repository.save("employee-a", "task-b", form("autre"));
+  const detail = { code: "INVALID_PAYLOAD", issues: [{ path: "values.header.reportNumber", code: "unknown-option" }] };
+  const first = fakeTransport([{ type: "rejected", detail }, { type: "accepted", serverRevision: 1 }]);
+  const summary = await f.engine(first).run("employee-a");
+  assert.deepEqual(first.sent.map((request) => [request.taskId, request.kind, "correctionOfOperationId" in request]), [["task-a", "submit", false], ["task-b", "sync-draft", false]]);
+  assert.equal(summary.resolved, 2, "the run continues after a rejection");
+  const refused = (await f.repository.listOutbox("employee-a")).find((item) => item.operationId === refusedSubmit.operationId)!;
+  assert.deepEqual([refused.outcome, refused.outcomeMetadata?.detail], ["rejected", detail]);
+
+  const { draft } = await f.repository.createCorrectionDraft("employee-a", "task-a", { rejectedOperationId: refusedSubmit.operationId });
+  const corrected = await f.repository.save("employee-a", "task-a", form("corrigé"), draft.revision);
+  await f.repository.requestSubmission("employee-a", "task-a", form("corrigé"), corrected.revision);
+  const second = fakeTransport([{ type: "accepted", serverRevision: 2 }]);
+  await f.engine(second).run("employee-a");
+  assert.deepEqual(second.sent.map((request) => [request.kind, request.correctionOfOperationId]), [["submit", refusedSubmit.operationId]]);
+});

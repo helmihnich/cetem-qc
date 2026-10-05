@@ -1,5 +1,5 @@
-const DATABASE_VERSION = 4;
-const OUTBOX_TABLES = ["audit_snapshots", "outbox_operations", "task_sync_state", "conflict_resolutions", "conflict_resolution_items"] as const;
+const DATABASE_VERSION = 5;
+const OUTBOX_TABLES = ["audit_snapshots", "outbox_operations", "task_sync_state", "conflict_resolutions", "conflict_resolution_items", "correction_drafts"] as const;
 
 type MigrationTransaction = {
   getFirstAsync<T>(sql: string): Promise<T | null>;
@@ -24,6 +24,8 @@ export async function initializeDraftDatabase(db: MigrationDatabase): Promise<vo
     }
     const lineage = await db.getFirstAsync<{ name: string }>("SELECT name FROM pragma_table_info('outbox_operations') WHERE name = 'conflict_operation_id'");
     if (lineage?.name !== "conflict_operation_id") throw new Error("Local outbox schema is incomplete.");
+    const correction = await db.getFirstAsync<{ name: string }>("SELECT name FROM pragma_table_info('outbox_operations') WHERE name = 'correction_operation_id'");
+    if (correction?.name !== "correction_operation_id") throw new Error("Local outbox schema is incomplete.");
     return;
   }
   await db.withExclusiveTransactionAsync(async (tx) => {
@@ -130,6 +132,25 @@ export async function initializeDraftDatabase(db: MigrationDatabase): Promise<vo
         CREATE TRIGGER conflict_resolution_items_insert_only BEFORE UPDATE ON conflict_resolution_items
         BEGIN SELECT RAISE(ABORT, 'conflict resolution items are insert-only'); END;
         PRAGMA user_version = 4;
+      `);
+    }
+    if (versionInside < 5) {
+      // Adds a nullable column and an insert-only table: no existing row is changed.
+      await tx.execAsync(`
+        ALTER TABLE outbox_operations ADD COLUMN correction_operation_id TEXT;
+        CREATE TABLE correction_drafts (
+          correction_id TEXT PRIMARY KEY,
+          employee_id TEXT NOT NULL,
+          task_id TEXT NOT NULL,
+          rejected_operation_id TEXT NOT NULL UNIQUE,
+          rejected_snapshot_id TEXT NOT NULL,
+          rejected_at INTEGER NOT NULL,
+          draft_revision INTEGER NOT NULL CHECK (draft_revision >= 1),
+          created_at INTEGER NOT NULL
+        );
+        CREATE TRIGGER correction_drafts_no_update BEFORE UPDATE ON correction_drafts
+        BEGIN SELECT RAISE(ABORT, 'correction_drafts is insert-only'); END;
+        PRAGMA user_version = 5;
       `);
     }
   });

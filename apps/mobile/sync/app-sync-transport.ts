@@ -29,6 +29,7 @@ export function createAppSyncTransport(api: ApiClient, timers: Timers = defaultT
         payload: snapshot.payload as Record<string, unknown>,
         // Absent unless the item resolves a conflict, so earlier requests keep their exact envelope.
         ...(request.conflictOperationId !== undefined ? { conflictOperationId: request.conflictOperationId } : {}),
+        ...(request.correctionOfOperationId !== undefined ? { correctionOfOperationId: request.correctionOfOperationId } : {}),
       };
       const controller = new AbortController();
       let timedOut = false;

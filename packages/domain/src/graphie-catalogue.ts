@@ -227,14 +227,33 @@ const EXPECTED_IDENTITY: ReadonlyArray<readonly [string, string | number]> = [
 ];
 /** An issue path echoes a client key; NUL and unpaired surrogates are replaced so the stored rejection stays storable as jsonb. */
 const issuePath = (key: string) => key.replace(/[\uD800-\uDBFF][\uDC00-\uDFFF]|[\uD800-\uDFFF\u0000]/g, (match) => match.length === 2 ? match : "�");
+const UNPAIRED_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+/** Storable-character rules: PostgreSQL text and jsonb refuse NUL, and an unpaired UTF-16 surrogate is not valid Unicode. */
+const characterIssue = (value: string): string | undefined =>
+  value.includes("\u0000") ? "nul-character" : UNPAIRED_SURROGATE.test(value) ? "unpaired-surrogate" : undefined;
+
+type PayloadRuleGroups = { characters: boolean; kind?: GraphiePayloadKind };
 
 /**
- * Structural validation of a catalogue 2.0.0 payload: the same rules as the device's saved-payload parser,
- * plus NUL characters (not storable by PostgreSQL) and legacy content on a submission. Blank, missing and
- * unparseable readings are valid evidence. No required-field, range, unit or tolerance rule exists here:
- * those wait for CETEM approval (DEP-01/02) and would come with a new rule or catalogue version.
+ * Structural rules only (identity tuple, keys, field IDs, string values, choice options, `legacyContent` type).
+ * The device parser delegates to this so device and server share one copy of each rule; NUL and unpaired
+ * surrogates pass here so a saved draft holding them stays readable and correctable.
+ */
+export function checkGraphiePayloadStructure(payload: unknown): GraphiePayloadValidation {
+  return inspectGraphiePayload(payload, { characters: false });
+}
+
+/**
+ * Validation of a catalogue 2.0.0 payload sent to the server: the structural rules, then the storable-character
+ * rules (NUL, unpaired surrogate) and legacy content on a submission. Blank, missing and unparseable readings
+ * are valid evidence. No required-field, range, unit or tolerance rule exists here: those wait for CETEM
+ * approval (DEP-01/02) and would come with a new rule or catalogue version.
  */
 export function validateGraphiePayload(payload: unknown, kind: GraphiePayloadKind): GraphiePayloadValidation {
+  return inspectGraphiePayload(payload, { characters: true, kind });
+}
+
+function inspectGraphiePayload(payload: unknown, groups: PayloadRuleGroups): GraphiePayloadValidation {
   if (typeof payload !== "object" || payload === null || Array.isArray(payload)) {
     return { ok: false, code: "INVALID_PAYLOAD", issues: [{ path: "", code: "not-an-object" }] };
   }
@@ -260,14 +279,14 @@ export function validateGraphiePayload(payload: unknown, kind: GraphiePayloadKin
       const path = `values.${issuePath(key)}`;
       if (!supportedFieldIds.has(key)) issues.push({ path, code: "unknown-field" });
       else if (typeof value !== "string") issues.push({ path, code: "not-a-string" });
-      else if (value.includes("\u0000")) issues.push({ path, code: "nul-character" });
+      else if (groups.characters && characterIssue(value)) issues.push({ path, code: characterIssue(value)! });
       else if (choiceOptions.has(key) && value !== "" && !choiceOptions.get(key)!.includes(value)) issues.push({ path, code: "unknown-option" });
     }
   }
   if (record.legacyContent !== undefined) {
-    if (kind === "submit") issues.push({ path: "legacyContent", code: "legacy-content-on-submit" });
+    if (groups.kind === "submit") issues.push({ path: "legacyContent", code: "legacy-content-on-submit" });
     else if (typeof record.legacyContent !== "string") issues.push({ path: "legacyContent", code: "not-a-string" });
-    else if (record.legacyContent.includes("\u0000")) issues.push({ path: "legacyContent", code: "nul-character" });
+    else if (groups.characters && characterIssue(record.legacyContent)) issues.push({ path: "legacyContent", code: characterIssue(record.legacyContent)! });
   }
   if (issues.length) return { ok: false, code: "INVALID_PAYLOAD", issues };
 

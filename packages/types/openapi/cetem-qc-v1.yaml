@@ -1024,6 +1024,15 @@ components:
             It must be a conflict of the same actor and task, not yet linked; otherwise the operation is
             refused with a stored 422 INVALID_CONFLICT_REFERENCE. On acceptance one sync-conflict-revision
             lineage link is recorded.
+        correctionOfOperationId:
+          type: string
+          format: uuid
+          description: >-
+            Optional. The operation ID of the stored rejected submission this operation corrects. It must be
+            a rejected submit of the same actor and task, with a code other than AUDIT_ALREADY_SUBMITTED, not
+            yet linked or already linked as a correction to this task's audit; otherwise the operation is
+            refused with a stored 422 INVALID_CORRECTION_REFERENCE. The first accepted operation carrying an
+            unlinked reference records one rejected-submission-correction lineage link.
     SyncOperationKind:
       type: string
       enum: [sync-draft, submit]
@@ -1088,7 +1097,7 @@ components:
           $ref: '#/components/schemas/SyncOperationKind'
         code:
           type: string
-          enum: [UNSUPPORTED_PAYLOAD, UNSUPPORTED_PAYLOAD_VERSION, INVALID_PAYLOAD, AUDIT_ALREADY_SUBMITTED, INVALID_CONFLICT_REFERENCE]
+          enum: [UNSUPPORTED_PAYLOAD, UNSUPPORTED_PAYLOAD_VERSION, INVALID_PAYLOAD, AUDIT_ALREADY_SUBMITTED, INVALID_CONFLICT_REFERENCE, INVALID_CORRECTION_REFERENCE]
         message: { type: string }
         issues:
           type: array

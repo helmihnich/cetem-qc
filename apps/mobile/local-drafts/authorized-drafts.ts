@@ -1,4 +1,4 @@
-import type { ConflictResolution, DraftRepository, GraphieDraftPayload, LocalDraft, CachedSynchronizedTask, OutboxItem, OutboxTransition, SubmissionRequest, TaskSyncStatus } from "./model";
+import type { ConflictResolution, CorrectionDraft, DraftRepository, GraphieDraftPayload, LocalDraft, CachedSynchronizedTask, OutboxItem, OutboxTransition, SubmissionRequest, TaskSyncStatus } from "./model";
 
 export type DraftAuthorization = <T>(employeeId: string, operation: () => Promise<T>) => Promise<T>;
 
@@ -56,6 +56,12 @@ export function createAuthorizedDrafts(repository: DraftRepository, authorize: D
     },
     async listConflictResolutions(employeeId: string): Promise<ConflictResolution[]> {
       return authorize(employeeId, () => repository.listConflictResolutions(employeeId));
+    },
+    async createCorrectionDraft(employeeId: string, taskId: string, input: Parameters<DraftRepository["createCorrectionDraft"]>[2]) {
+      return authorize(employeeId, () => repository.createCorrectionDraft(employeeId, taskId, input));
+    },
+    async listCorrectionDrafts(employeeId: string): Promise<CorrectionDraft[]> {
+      return authorize(employeeId, () => repository.listCorrectionDrafts(employeeId));
     },
   };
 }

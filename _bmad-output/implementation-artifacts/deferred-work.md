@@ -130,6 +130,7 @@
 - source_spec: `_bmad-output/specs/spec-7-3-accept-submissions-transactionally-and-idempotently/server-command.md`
   summary: A field value with an unpaired UTF-16 surrogate passes `validateGraphiePayload`, but PostgreSQL `jsonb` cannot store it. The acceptance then fails with 500, and the device retries the item until it pauses. The device does the same on every later run.
   evidence: The NUL rule exists for the same storage reason, but the spec lists the validation rules exactly, so adding one needs a spec update. A device keyboard is not expected to produce a lone surrogate. Issue paths built from client keys are already sanitized (review patch). Add the rule with the next validation change (DEP-01/02 or Story 8.2).
+  resolved: Story 8.2 (2026-10-05) — the domain validator refuses an unpaired surrogate as a stored 422 INVALID_PAYLOAD (`unpaired-surrogate`); tests V1 (packages/domain) and L9 (apps/api correction-routes.postgres.test.ts).
 - source_spec: `_bmad-output/specs/spec-7-3-accept-submissions-transactionally-and-idempotently/mobile-transport.md`
   summary: No engine test covers an explicit `run()` (retryBlocked) that joins an active automatic run while a blocked item exists. In that case the follow-up run should send the blocked item (`followUpRetryBlocked`).
   evidence: The UI hides the retry button while a run is active, so the path is narrow. Add the engine test when Story 8.x changes retry handling.
@@ -151,3 +152,9 @@
 - source_spec: `_bmad-output/specs/spec-8-1-resolve-a-synchronization-conflict-explicitly/conflict-model.md`
   summary: No restart test covers the new v4 startup guards: a v4 database missing `conflict_resolutions` / `conflict_resolution_items` or `outbox_operations.conflict_operation_id` should be refused as incomplete, with no row deleted.
   evidence: The guard is defensive against a damaged schema. Following the S3 pattern in `outbox.test.ts`, it is a cheap follow-up.
+
+## Deferred from: code review of spec-8-2-create-a-correction-draft-after-validation-rejection (2026-10-05)
+
+- source_spec: `_bmad-output/specs/spec-8-2-create-a-correction-draft-after-validation-rejection/correction-model.md`
+  summary: `createCorrectionDraft` checks the refused snapshot only with `parseLocalDraft` (envelope and identity), as specified. If the snapshot payload ever fails `parseGraphiePayload` (for example a payload of another catalogue version), the store commits the correction, then `presentStoredDraft` in `App.tsx` throws. The App then shows « Le brouillon de correction n’a pas pu être créé » although the correction exists, and the new draft is unreadable.
+  evidence: Today it cannot happen. Every snapshot was written by this app version from catalogue `2.0.0` values that the shared structure check accepts. It is the same catalogue-bump risk as the 8.1 entry above. Fix it with the first catalogue/rule version bump: either refuse such a snapshot as `snapshot-unavailable` in the store, or present the committed correction through the normal unreadable-draft path.

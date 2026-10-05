@@ -129,3 +129,12 @@ test("T4 the conflict reference is sent only when the request carries it", async
   assert.equal(JSON.parse(String(calls[0]!.init?.body)).conflictOperationId, conflictOperationId);
   assert.equal("conflictOperationId" in JSON.parse(String(calls[1]!.init?.body)), false);
 });
+
+test("T5 the correction reference is sent only when the request carries it", async () => {
+  const { calls, transport } = transportFor(async () => ({ status: 200, body: acceptedBody }));
+  const correctionOfOperationId = "00000000-0000-4000-8000-000000000082";
+  await transport.send({ ...request(), correctionOfOperationId });
+  await transport.send(request());
+  assert.equal(JSON.parse(String(calls[0]!.init?.body)).correctionOfOperationId, correctionOfOperationId);
+  assert.equal("correctionOfOperationId" in JSON.parse(String(calls[1]!.init?.body)), false);
+});

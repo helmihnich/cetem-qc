@@ -10,6 +10,8 @@ export type SyncRequest = {
   snapshot: LocalDraft;
   /** Keep-local lineage, sent only when the item carries it. */
   conflictOperationId?: string;
+  /** Correction lineage, sent only when the item carries it. */
+  correctionOfOperationId?: string;
 };
 
 export type SyncResult =
@@ -92,6 +94,7 @@ export function createSyncEngine(options: {
           operationId: current.operationId, idempotencyKey: current.idempotencyKey, kind: current.kind,
           employeeId, taskId: current.taskId, baseRevision: current.baseRevision, snapshot,
           ...(current.conflictOperationId ? { conflictOperationId: current.conflictOperationId } : {}),
+          ...(current.correctionOperationId ? { correctionOfOperationId: current.correctionOperationId } : {}),
         }));
       } catch {
         result = { type: "retryable", code: "transport-error" };

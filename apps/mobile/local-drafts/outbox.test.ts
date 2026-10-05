@@ -51,12 +51,12 @@ const V2_SCHEMA = `
 
 // S — Schema
 
-test("S1 a fresh database ends at version 4 with all seven tables (Story 8.1 adds the conflict resolution tables)", async () => {
+test("S1 a fresh database ends at version 5 with all eight tables (Story 8.1 adds the conflict resolution tables, Story 8.2 the correction drafts)", async () => {
   const f = await open();
   await f.repository.list("employee-a");
-  assert.equal((f.double.engine.prepare("PRAGMA user_version").get() as { user_version: number }).user_version, 4);
+  assert.equal((f.double.engine.prepare("PRAGMA user_version").get() as { user_version: number }).user_version, 5);
   const tables = (f.double.engine.prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name").all() as { name: string }[]).map((row) => row.name);
-  assert.deepEqual(tables, ["audit_snapshots", "conflict_resolution_items", "conflict_resolutions", "local_drafts", "outbox_operations", "synchronized_tasks", "task_sync_state"]);
+  assert.deepEqual(tables, ["audit_snapshots", "conflict_resolution_items", "conflict_resolutions", "correction_drafts", "local_drafts", "outbox_operations", "synchronized_tasks", "task_sync_state"]);
 });
 
 test("S2 a seeded v2 database upgrades to the current version with byte-identical rows and no DROP or DELETE", async () => {
@@ -68,7 +68,7 @@ test("S2 a seeded v2 database upgrades to the current version with byte-identica
   const before = { drafts: double.engine.prepare("SELECT * FROM local_drafts").all(), cache: double.engine.prepare("SELECT * FROM synchronized_tasks").all() };
   const f = await open(double);
   assert.equal((await f.repository.read("employee-a", "task-a"))?.revision, 4);
-  assert.equal((double.engine.prepare("PRAGMA user_version").get() as { user_version: number }).user_version, 4);
+  assert.equal((double.engine.prepare("PRAGMA user_version").get() as { user_version: number }).user_version, 5);
   assert.deepEqual({ drafts: f.dump("local_drafts"), cache: f.dump("synchronized_tasks") }, before);
   assert.ok(!double.statements.some((sql) => /\bDROP\b|\bDELETE\b/i.test(sql)), "the upgrade only creates tables");
 });
@@ -83,12 +83,12 @@ test("S3 version 3 with a missing outbox table refuses to start and deletes noth
   assert.deepEqual(restarted.dump("local_drafts"), drafts);
 });
 
-test("S4 a version above the current one (5) is refused as before", async () => {
+test("S4 a version above the current one (6) is refused as before", async () => {
   const double = createSqliteTestDouble();
-  double.engine.exec(V2_SCHEMA + "PRAGMA user_version = 5;");
+  double.engine.exec(V2_SCHEMA + "PRAGMA user_version = 6;");
   const f = await open(double);
   await assert.rejects(f.repository.list("employee-a"), /Unsupported local draft database version/);
-  assert.equal((double.engine.prepare("PRAGMA user_version").get() as { user_version: number }).user_version, 5);
+  assert.equal((double.engine.prepare("PRAGMA user_version").get() as { user_version: number }).user_version, 6);
 });
 
 test("snapshot rows are insert-only", async () => {

@@ -5,7 +5,7 @@ import type { SyncOperationAccepted, SyncOperationConflict, SyncOperationRejecte
 import type { Pool, QueryResultRow } from "pg";
 import { withTransaction } from "../../../db/transaction.js";
 import type { Transaction } from "../../../db/transaction.js";
-import { acceptSubmission, applyDraftSync, isLineagePredecessor, lockAndReadTaskAudit } from "../../audits/commands/audit-revisions.js";
+import { acceptSubmission, applyDraftSync, isLineagePredecessor, lockAndReadTaskAudit, readLineageLinkOfPredecessor } from "../../audits/commands/audit-revisions.js";
 import type { AuditActor } from "../../audits/commands/audit-revisions.js";
 
 export type SyncOperationKind = "sync-draft" | "submit";
@@ -25,6 +25,7 @@ const REJECTION_MESSAGES: Record<SyncOperationRejected["code"], string> = {
   INVALID_PAYLOAD: "Les données du contrôle sont invalides.",
   AUDIT_ALREADY_SUBMITTED: "Ce contrôle a déjà été soumis et accepté.",
   INVALID_CONFLICT_REFERENCE: "La référence du conflit de synchronisation est invalide.",
+  INVALID_CORRECTION_REFERENCE: "La référence de la soumission corrigée est invalide.",
 };
 
 interface StoredOutcomeRow extends QueryResultRow {
@@ -99,14 +100,20 @@ async function runOnce(
     && !await isValidConflictReference(transaction, request.conflictOperationId, actor.id, taskId)) {
     outcome = rejected(base, "INVALID_CONFLICT_REFERENCE", [{ path: "conflictOperationId", code: "invalid-reference" }]);
   } else {
-    const validation = validateGraphiePayload(request.payload, kind);
-    if (!validation.ok) {
+    const correction = request.correctionOfOperationId === undefined
+      ? undefined
+      : await checkCorrectionReference(transaction, request.correctionOfOperationId.toLowerCase(), actor.id, taskId, audit.auditId);
+    const validation = correction === "invalid" ? null : validateGraphiePayload(request.payload, kind);
+    if (correction === "invalid" || validation === null) {
+      outcome = rejected(base, "INVALID_CORRECTION_REFERENCE", [{ path: "correctionOfOperationId", code: "invalid-reference" }]);
+    } else if (!validation.ok) {
       outcome = rejected(base, validation.code, validation.issues);
     } else {
       const acceptInput = {
         audit, taskId, actor, operationId: request.operationId, payload: validation.payload,
         localDraftRevision: request.localDraftRevision, clientSavedAt: request.clientSavedAt,
         ...(request.conflictOperationId !== undefined ? { conflictOperationId: request.conflictOperationId.toLowerCase() } : {}),
+        ...(correction !== undefined ? { correction } : {}),
       };
       const accepted = kind === "submit" ? await acceptSubmission(transaction, acceptInput) : await applyDraftSync(transaction, acceptInput);
       outcome = {
@@ -142,6 +149,31 @@ async function isValidConflictReference(transaction: Transaction, operationId: s
   return !await isLineagePredecessor(transaction, operationId);
 }
 
+/**
+ * The reference must be a stored rejected submission of the same actor and task whose code is not
+ * AUDIT_ALREADY_SUBMITTED, and either unlinked or already linked as a correction of this task's audit
+ * (items queued before the first acceptance still carry it).
+ */
+async function checkCorrectionReference(
+  transaction: Transaction,
+  operationId: string,
+  actorId: string,
+  taskId: string,
+  auditId: string | null,
+): Promise<{ predecessorOperationId: string; alreadyLinked: boolean } | "invalid"> {
+  const referenced = await transaction.query<{ actor_id: string; task_id: string; outcome: string; kind: string; code: string | null }>(
+    "SELECT actor_id, task_id, outcome, kind, response->>'code' AS code FROM sync_operation_outcomes WHERE operation_id = $1",
+    [operationId],
+  );
+  const row = referenced.rows[0];
+  if (!row || row.outcome !== "rejected" || row.kind !== "submit" || row.actor_id !== actorId || row.task_id !== taskId
+    || row.code === "AUDIT_ALREADY_SUBMITTED") return "invalid";
+  const link = await readLineageLinkOfPredecessor(transaction, operationId);
+  if (link === null) return { predecessorOperationId: operationId, alreadyLinked: false };
+  if (link.linkType === "rejected-submission-correction" && link.auditId === auditId) return { predecessorOperationId: operationId, alreadyLinked: true };
+  return "invalid";
+}
+
 function rejected(
   base: { operationId: string; kind: SyncOperationKind },
   code: SyncOperationRejected["code"],
@@ -155,14 +187,15 @@ function rejected(
 
 /**
  * SHA-256 of the canonical JSON (keys sorted recursively) of everything that defines the request.
- * The conflict reference enters only when present, so fingerprints of earlier requests stay valid.
+ * The conflict and correction references enter only when present, so fingerprints of earlier requests stay valid.
  */
 export function requestFingerprint(kind: SyncOperationKind, taskId: string, request: SyncOperationRequest): string {
-  const { operationId, baseRevision, localDraftRevision, clientSavedAt, payload, conflictOperationId } = request;
+  const { operationId, baseRevision, localDraftRevision, clientSavedAt, payload, conflictOperationId, correctionOfOperationId } = request;
   return createHash("sha256")
     .update(canonicalJson({
       kind, taskId, operationId, baseRevision, localDraftRevision, clientSavedAt, payload,
       ...(conflictOperationId !== undefined ? { conflictOperationId } : {}),
+      ...(correctionOfOperationId !== undefined ? { correctionOfOperationId } : {}),
     }))
     .digest("hex");
 }

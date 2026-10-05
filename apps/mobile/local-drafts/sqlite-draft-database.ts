@@ -2,8 +2,10 @@ import * as Crypto from "expo-crypto";
 import * as SQLite from "expo-sqlite";
 import type { SecureKeyValueStore } from "../offline-authorization-state";
 import {
-  ConflictResolutionError, isOpenConflict, LOCAL_DRAFT_SCHEMA_VERSION, OpenConflictError, OutboxOperationNotFoundError, PendingSubmissionError,
-  type CachedSynchronizedTask, type ConflictResolution, type ConflictResolutionWrite, type DraftDatabase, type LocalDraft, type NewOutboxOperation, type OutboxItem,
+  ConflictResolutionError, CorrectionDraftError, findOpenRefusal, isOpenConflict, LOCAL_DRAFT_SCHEMA_VERSION, OpenConflictError, OutboxOperationNotFoundError,
+  parseLocalDraft, PendingSubmissionError,
+  type CachedSynchronizedTask, type ConflictResolution, type ConflictResolutionWrite, type CorrectionDraft, type CorrectionDraftWrite, type DraftDatabase,
+  type LocalDraft, type NewOutboxOperation, type OutboxItem,
 } from "./model";
 import { initializeDraftDatabase } from "./sqlite-draft-schema";
 
@@ -243,6 +245,19 @@ export function createSqliteDraftDatabase(
         }));
       });
     },
+    async createCorrectionDraft(write) {
+      return serialize(async () => {
+        const db = await open();
+        let result: { draft: LocalDraft; correction: CorrectionDraft } | undefined;
+        await db.withExclusiveTransactionAsync(async (tx) => {
+          result = await applyCorrectionDraft(tx, write);
+        });
+        return result!;
+      });
+    },
+    async listCorrectionDrafts(employeeId) {
+      return serialize(async () => listCorrections(await open(), employeeId));
+    },
   };
 }
 
@@ -288,7 +303,7 @@ async function applyConflictResolution(tx: SqlTransaction, write: ConflictResolu
 
   if (write.choice === "keep-local") {
     // The lineage references the newest open conflict; the base is the fetched server revision set above.
-    const operation = await insertOperation(tx, write.operation!, open.at(-1)!.operationId);
+    const operation = await insertOperation(tx, write.operation!, { conflictOperationId: open.at(-1)!.operationId });
     return { draft: write.operation!.snapshot, operation };
   }
   const previous = await tx.getFirstAsync<{ revision: number; draft_id: string; created_at: number; saved_at: number }>(
@@ -307,18 +322,84 @@ async function applyConflictResolution(tx: SqlTransaction, write: ConflictResolu
   return { draft: record, operation: null };
 }
 
+/** One correction; every refusal throws before commit, so nothing changes. */
+async function applyCorrectionDraft(tx: SqlTransaction, write: CorrectionDraftWrite): Promise<{ draft: LocalDraft; correction: CorrectionDraft }> {
+  const { employeeId, taskId, createdAt } = write;
+  const items = await listItems(tx, employeeId, taskId);
+  const refusal = findOpenRefusal(items, await listCorrections(tx, employeeId, taskId));
+  if (!refusal || refusal.operationId !== write.rejectedOperationId) throw new CorrectionDraftError("stale");
+  if (items.some(isOpenConflict)) throw new CorrectionDraftError("open-conflict");
+  if (items.some((item) => item.status !== "resolved")) throw new CorrectionDraftError("unresolved");
+  const row = await tx.getFirstAsync<{ payload_json: string }>("SELECT payload_json FROM audit_snapshots WHERE snapshot_id = ? AND employee_id = ? AND task_id = ?",
+    refusal.snapshotId, employeeId, taskId);
+  let snapshot: LocalDraft;
+  try {
+    if (!row) throw new Error("Missing snapshot.");
+    snapshot = parseLocalDraft(row.payload_json);
+  } catch {
+    throw new CorrectionDraftError("snapshot-unavailable");
+  }
+  if (snapshot.employeeId !== employeeId || snapshot.taskId !== taskId || "content" in snapshot.payload || snapshot.payload.legacyContent !== undefined) {
+    throw new CorrectionDraftError("snapshot-unavailable");
+  }
+  // The existing row may be unreadable by this app version: only its identity columns are kept.
+  const previous = await tx.getFirstAsync<{ revision: number; draft_id: string; created_at: number; saved_at: number }>(
+    "SELECT revision, draft_id, created_at, saved_at FROM local_drafts WHERE employee_id = ? AND task_id = ?", employeeId, taskId);
+  const savedAt = Math.max(createdAt, previous?.saved_at ?? 0);
+  const draft: LocalDraft = {
+    id: previous?.draft_id ?? write.draftId, employeeId, taskId, payloadSchemaVersion: LOCAL_DRAFT_SCHEMA_VERSION,
+    revision: (previous?.revision ?? 0) + 1, payload: snapshot.payload, createdAt: previous?.created_at ?? savedAt, savedAt,
+  };
+  const correction: CorrectionDraft = {
+    correctionId: write.correctionId, employeeId, taskId, rejectedOperationId: refusal.operationId, rejectedSnapshotId: refusal.snapshotId,
+    rejectedAt: refusal.resolvedAt ?? refusal.updatedAt, draftRevision: draft.revision, createdAt,
+  };
+  await tx.runAsync(`INSERT INTO correction_drafts (correction_id, employee_id, task_id, rejected_operation_id, rejected_snapshot_id, rejected_at,
+    draft_revision, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+  correction.correctionId, employeeId, taskId, correction.rejectedOperationId, correction.rejectedSnapshotId, correction.rejectedAt, correction.draftRevision, createdAt);
+  await writeDraft(tx, draft, previous?.revision);
+  return { draft, correction };
+}
+
+type CorrectionRow = {
+  correction_id: string; employee_id: string; task_id: string; rejected_operation_id: string; rejected_snapshot_id: string;
+  rejected_at: number; draft_revision: number; created_at: number;
+};
+const toCorrection = (row: CorrectionRow): CorrectionDraft => ({
+  correctionId: row.correction_id, employeeId: row.employee_id, taskId: row.task_id, rejectedOperationId: row.rejected_operation_id,
+  rejectedSnapshotId: row.rejected_snapshot_id, rejectedAt: row.rejected_at, draftRevision: row.draft_revision, createdAt: row.created_at,
+});
+
+async function listCorrections(tx: SqlTransaction, employeeId: string, taskId?: string): Promise<CorrectionDraft[]> {
+  const select = "SELECT * FROM correction_drafts WHERE employee_id = ?";
+  const rows = taskId === undefined
+    ? await tx.getAllAsync<CorrectionRow>(`${select} ORDER BY created_at, rowid`, employeeId)
+    : await tx.getAllAsync<CorrectionRow>(`${select} AND task_id = ? ORDER BY created_at, rowid`, employeeId, taskId);
+  return rows.map(toCorrection);
+}
+
+/** The refused submit named by the task's latest correction while no item carrying it was accepted, else null. */
+async function unlinkedCorrection(tx: SqlTransaction, employeeId: string, taskId: string): Promise<string | null> {
+  const latest = (await listCorrections(tx, employeeId, taskId)).at(-1);
+  if (!latest) return null;
+  const linked = await tx.getFirstAsync<{ operation_id: string }>(`SELECT operation_id FROM outbox_operations
+    WHERE employee_id = ? AND task_id = ? AND correction_operation_id = ? AND outcome = 'accepted' LIMIT 1`, employeeId, taskId, latest.rejectedOperationId);
+  return linked ? null : latest.rejectedOperationId;
+}
+
 type SqlTransaction = Pick<SqlDatabase, "getFirstAsync" | "getAllAsync" | "runAsync">;
 type OutboxRow = {
   operation_id: string; idempotency_key: string; employee_id: string; task_id: string; sequence: number;
   kind: OutboxItem["kind"]; snapshot_id: string; base_revision: number; status: OutboxItem["status"];
   attempt_count: number; last_error: string | null; outcome: OutboxItem["outcome"]; outcome_json: string | null;
   created_at: number; updated_at: number; resolved_at: number | null;
-  conflict_operation_id: string | null; conflict_resolution_id: string | null;
+  conflict_operation_id: string | null; conflict_resolution_id: string | null; correction_operation_id: string | null;
 };
 /** Every item with its lineage and, for a conflict, the resolution covering it (if any). */
 const OUTBOX_SELECT = `SELECT item.operation_id, item.idempotency_key, item.employee_id, item.task_id, item.sequence, item.kind,
   item.snapshot_id, item.base_revision, item.status, item.attempt_count, item.last_error, item.outcome, item.outcome_json,
-  item.created_at, item.updated_at, item.resolved_at, item.conflict_operation_id, covered.resolution_id AS conflict_resolution_id
+  item.created_at, item.updated_at, item.resolved_at, item.conflict_operation_id, covered.resolution_id AS conflict_resolution_id,
+  item.correction_operation_id
   FROM outbox_operations item
   LEFT JOIN conflict_resolution_items covered ON covered.operation_id = item.operation_id
     AND covered.employee_id = item.employee_id AND covered.role = 'conflict'`;
@@ -331,6 +412,7 @@ function toOutboxItem(row: OutboxRow): OutboxItem {
     outcomeMetadata: row.outcome_json === null ? null : JSON.parse(row.outcome_json),
     createdAt: row.created_at, updatedAt: row.updated_at, resolvedAt: row.resolved_at,
     conflictOperationId: row.conflict_operation_id, conflictResolutionId: row.conflict_resolution_id,
+    correctionOperationId: row.correction_operation_id,
   };
 }
 
@@ -379,35 +461,42 @@ async function writeDraft(tx: SqlTransaction, record: LocalDraft, expectedRevisi
   if (committed?.revision !== record.revision) throw new Error("Local draft revision was not committed.");
 }
 
+type Lineage = { conflictOperationId: string | null; correctionOperationId: string | null };
+
 /**
  * Removes unresolved `sync-draft` items and their snapshots (never-attempted ones only on supersession).
- * Returns the conflict lineage a removed item carried, so the superseding item keeps it.
+ * Returns the conflict and correction lineage a removed item carried, so the superseding item keeps it.
  */
-async function removeUnresolvedSyncDrafts(tx: SqlTransaction, employeeId: string, taskId: string, neverAttemptedOnly: boolean): Promise<string | null> {
-  const rows = await tx.getAllAsync<{ operation_id: string; snapshot_id: string; conflict_operation_id: string | null }>(`SELECT operation_id, snapshot_id,
-    conflict_operation_id FROM outbox_operations
+async function removeUnresolvedSyncDrafts(tx: SqlTransaction, employeeId: string, taskId: string, neverAttemptedOnly: boolean): Promise<Lineage> {
+  const rows = await tx.getAllAsync<{ operation_id: string; snapshot_id: string; conflict_operation_id: string | null; correction_operation_id: string | null }>(
+    `SELECT operation_id, snapshot_id, conflict_operation_id, correction_operation_id FROM outbox_operations
     WHERE employee_id = ? AND task_id = ? AND kind = 'sync-draft' AND status <> 'resolved'${neverAttemptedOnly ? " AND attempt_count = 0" : ""}`,
   employeeId, taskId);
-  let inherited: string | null = null;
+  const inherited: Lineage = { conflictOperationId: null, correctionOperationId: null };
   for (const row of rows) {
-    inherited = row.conflict_operation_id ?? inherited;
+    inherited.conflictOperationId = row.conflict_operation_id ?? inherited.conflictOperationId;
+    inherited.correctionOperationId = row.correction_operation_id ?? inherited.correctionOperationId;
     await tx.runAsync("DELETE FROM outbox_operations WHERE operation_id = ? AND employee_id = ?", row.operation_id, employeeId);
     await tx.runAsync("DELETE FROM audit_snapshots WHERE snapshot_id = ? AND employee_id = ?", row.snapshot_id, employeeId);
   }
   return inherited;
 }
 
-async function insertOperation(tx: SqlTransaction, operation: NewOutboxOperation, conflictOperationId: string | null = null): Promise<OutboxItem> {
+/** Inserts the snapshot and item. An item without inherited correction lineage carries the task's unlinked correction, if any. */
+async function insertOperation(tx: SqlTransaction, operation: NewOutboxOperation, inherited: Partial<Lineage> = {}): Promise<OutboxItem> {
   const { employeeId, taskId } = operation.snapshot;
+  const conflictOperationId = inherited.conflictOperationId ?? null;
+  const correctionOperationId = inherited.correctionOperationId ?? await unlinkedCorrection(tx, employeeId, taskId);
   const state = await tx.getFirstAsync<{ server_revision: number }>("SELECT server_revision FROM task_sync_state WHERE employee_id = ? AND task_id = ?", employeeId, taskId);
   const next = await tx.getFirstAsync<{ next_sequence: number }>("SELECT COALESCE(MAX(sequence), 0) + 1 AS next_sequence FROM outbox_operations");
   await tx.runAsync(`INSERT INTO audit_snapshots (snapshot_id, employee_id, task_id, kind, draft_revision, payload_json, created_at)
     VALUES (?, ?, ?, ?, ?, ?, ?)`,
   operation.snapshotId, employeeId, taskId, operation.kind, operation.snapshot.revision, JSON.stringify(operation.snapshot), operation.createdAt);
   await tx.runAsync(`INSERT INTO outbox_operations (operation_id, idempotency_key, employee_id, task_id, sequence, kind, snapshot_id,
-    base_revision, status, attempt_count, created_at, updated_at, conflict_operation_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'queued', 0, ?, ?, ?)`,
+    base_revision, status, attempt_count, created_at, updated_at, conflict_operation_id, correction_operation_id)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'queued', 0, ?, ?, ?, ?)`,
   operation.operationId, operation.idempotencyKey, employeeId, taskId, next?.next_sequence ?? 1, operation.kind, operation.snapshotId,
-  state?.server_revision ?? 0, operation.createdAt, operation.createdAt, conflictOperationId);
+  state?.server_revision ?? 0, operation.createdAt, operation.createdAt, conflictOperationId, correctionOperationId);
   const item = await readOperation(tx, employeeId, operation.operationId);
   if (!item) throw new Error("Outbox operation was not committed.");
   return item;

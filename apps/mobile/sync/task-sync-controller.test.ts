@@ -28,6 +28,7 @@ function fakeStore() {
       return [...items.values()].filter((item) => item.employeeId === employeeId).map((item) => ({ ...item }));
     },
     async listConflictResolutions(employeeId: string) { return store.resolutions.filter((item) => item.employeeId === employeeId); },
+    async listCorrectionDrafts() { return []; },
     async readOutboxSnapshot(_employeeId: string, operationId: string) { return snapshot(items.get(operationId)!); },
     async recordOutboxTransition(_employeeId: string, operationId: string, transition: OutboxTransition) {
       const item = items.get(operationId)!;

@@ -77,7 +77,7 @@ const V3_SCHEMA = `
     updated_at INTEGER NOT NULL, PRIMARY KEY (employee_id, task_id));
   PRAGMA user_version = 3;`;
 
-test("O1 the v3 to v4 upgrade keeps every row of the five existing tables; a version above 4 is refused", async () => {
+test("O1 the v3 upgrade (through v4 and the Story 8.2 v5) keeps every row of the five existing tables; a version above 5 is refused", async () => {
   const double = createSqliteTestDouble();
   double.engine.exec(V3_SCHEMA);
   const draft = { id: "draft-1", employeeId: "employee-a", taskId: "task-a", payloadSchemaVersion: 1, revision: 2, createdAt: 10, savedAt: 20, payload: form("v3") };
@@ -92,14 +92,14 @@ test("O1 the v3 to v4 upgrade keeps every row of the five existing tables; a ver
   const before = Object.fromEntries(tables.map((table) => [table, double.engine.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all()]));
   const f = await open(double);
   const [item] = await f.repository.listOutbox("employee-a");
-  assert.equal((double.engine.prepare("PRAGMA user_version").get() as { user_version: number }).user_version, 4);
+  assert.equal((double.engine.prepare("PRAGMA user_version").get() as { user_version: number }).user_version, 5);
   for (const table of tables.filter((table) => table !== "outbox_operations")) assert.deepEqual(f.dump(table), before[table], table);
-  assert.deepEqual(f.dump("outbox_operations").map((row) => ({ ...(row as object) })), (before.outbox_operations as Record<string, unknown>[]).map((row) => ({ ...row, conflict_operation_id: null })));
+  assert.deepEqual(f.dump("outbox_operations").map((row) => ({ ...(row as object) })), (before.outbox_operations as Record<string, unknown>[]).map((row) => ({ ...row, conflict_operation_id: null, correction_operation_id: null })));
   assert.deepEqual([item!.outcome, item!.conflictOperationId, item!.conflictResolutionId], ["conflict", null, null], "a conflict stored before 8.1 is open");
   assert.ok(!double.statements.some((sql) => /\bDROP\b|\bDELETE\b/i.test(sql)));
 
   const newer = createSqliteTestDouble();
-  newer.engine.exec(V3_SCHEMA.replace("PRAGMA user_version = 3;", "PRAGMA user_version = 5;"));
+  newer.engine.exec(V3_SCHEMA.replace("PRAGMA user_version = 3;", "PRAGMA user_version = 6;"));
   await assert.rejects((await open(newer)).repository.list("employee-a"), /Unsupported local draft database version/);
 });
 

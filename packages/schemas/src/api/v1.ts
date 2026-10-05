@@ -123,6 +123,7 @@ export const syncOperationRequestSchema: z.ZodType<SyncOperationRequestContract>
   clientSavedAt: z.string().datetime({ offset: true }),
   payload: z.custom<Record<string, unknown>>(plainObject),
   conflictOperationId: z.string().uuid().optional(),
+  correctionOfOperationId: z.string().uuid().optional(),
 }).strict();
 const syncOperationKindSchema = z.enum(["sync-draft", "submit"]);
 const syncActorSchema = z.object({ id: z.string().uuid(), displayName: z.string() }).strict();
@@ -141,7 +142,7 @@ export const syncOperationConflictSchema: z.ZodType<SyncOperationConflictContrac
 }).strict();
 export const syncOperationRejectedSchema: z.ZodType<SyncOperationRejectedContract> = z.object({
   outcome: z.literal("rejected"), operationId: z.string().uuid(), kind: syncOperationKindSchema,
-  code: z.enum(["UNSUPPORTED_PAYLOAD", "UNSUPPORTED_PAYLOAD_VERSION", "INVALID_PAYLOAD", "AUDIT_ALREADY_SUBMITTED", "INVALID_CONFLICT_REFERENCE"]),
+  code: z.enum(["UNSUPPORTED_PAYLOAD", "UNSUPPORTED_PAYLOAD_VERSION", "INVALID_PAYLOAD", "AUDIT_ALREADY_SUBMITTED", "INVALID_CONFLICT_REFERENCE", "INVALID_CORRECTION_REFERENCE"]),
   message: z.string(), issues: z.array(z.object({ path: z.string(), code: z.string() }).strict()),
 }).strict();
 export const employeeTaskAuditVersionSchema: z.ZodType<EmployeeTaskAuditVersionContract> = z.object({

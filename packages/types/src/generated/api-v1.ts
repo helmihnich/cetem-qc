@@ -445,6 +445,11 @@ export interface components {
              * @description Optional. The operation ID of the stored conflict outcome this operation resolves (keep-local). It must be a conflict of the same actor and task, not yet linked; otherwise the operation is refused with a stored 422 INVALID_CONFLICT_REFERENCE. On acceptance one sync-conflict-revision lineage link is recorded.
              */
             conflictOperationId?: string;
+            /**
+             * Format: uuid
+             * @description Optional. The operation ID of the stored rejected submission this operation corrects. It must be a rejected submit of the same actor and task, with a code other than AUDIT_ALREADY_SUBMITTED, not yet linked or already linked as a correction to this task's audit; otherwise the operation is refused with a stored 422 INVALID_CORRECTION_REFERENCE. The first accepted operation carrying an unlinked reference records one rejected-submission-correction lineage link.
+             */
+            correctionOfOperationId?: string;
         };
         /** @enum {string} */
         SyncOperationKind: "sync-draft" | "submit";
@@ -492,7 +497,7 @@ export interface components {
             operationId: string;
             kind: components["schemas"]["SyncOperationKind"];
             /** @enum {string} */
-            code: "UNSUPPORTED_PAYLOAD" | "UNSUPPORTED_PAYLOAD_VERSION" | "INVALID_PAYLOAD" | "AUDIT_ALREADY_SUBMITTED" | "INVALID_CONFLICT_REFERENCE";
+            code: "UNSUPPORTED_PAYLOAD" | "UNSUPPORTED_PAYLOAD_VERSION" | "INVALID_PAYLOAD" | "AUDIT_ALREADY_SUBMITTED" | "INVALID_CONFLICT_REFERENCE" | "INVALID_CORRECTION_REFERENCE";
             message: string;
             issues: {
                 path: string;

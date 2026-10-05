@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { GRAPHIE_CALCULATION_CATALOGUE, GRAPHIE_CALCULATION_FIELD_ID_LIST, GRAPHIE_CALCULATION_RULE_ID, GRAPHIE_CALCULATION_RULE_VERSION, GRAPHIE_MOBILE_POV_CATALOGUE as DOMAIN_CATALOGUE, validateGraphiePayload } from "@cetem-qc/domain";
+import { GRAPHIE_CALCULATION_CATALOGUE, GRAPHIE_CALCULATION_FIELD_ID_LIST, GRAPHIE_CALCULATION_RULE_ID, GRAPHIE_CALCULATION_RULE_VERSION, GRAPHIE_MOBILE_POV_CATALOGUE as DOMAIN_CATALOGUE, checkGraphiePayloadStructure, validateGraphiePayload } from "@cetem-qc/domain";
 import { GRAPHIE_RESULT_ORDER, presentGraphieMeasurements } from "@cetem-qc/i18n/graphie-results";
 import { GRAPHIE_CATALOGUE_VERSION, GRAPHIE_FORM_SCHEMA_VERSION, GRAPHIE_MOBILE_POV_CATALOGUE, GraphiePayloadCompatibilityError, KERMA_REUSE_HELP_FR, createNewGraphieDraftValues, parseGraphiePayload } from "./graphie-pov-catalogue.js";
 
@@ -258,6 +258,43 @@ test("V4 the device parser and the domain validator agree on every non-legacy pa
   // Legacy content is converted on the device and refused by the server.
   assert.equal(parseGraphiePayload({ content: "x" }).legacyContent, "x");
   assert.equal(validateGraphiePayload({ content: "x" }, "sync-draft").ok, false);
+});
+
+test("P1 parity table: the device parser and the domain agree on every structural case; storable-character cases stay readable and are refused for submit", () => {
+  const valid = { ...current(), values: { "header.etablissement": "CHU", "visual.integrity": "Oui" } };
+  const structural: Array<[string, unknown]> = [
+    ["valid", valid],
+    ["paired surrogate", { ...valid, values: { "header.etablissement": "CHU 😀" } }],
+    ["not an object", null],
+    ["array", []],
+    ["unsupported version", { ...valid, catalogueVersion: "1.0.0" }],
+    ["missing identity", { values: {} }],
+    ["unknown key", { ...valid, extra: "x" }],
+    ["values not an object", { ...valid, values: ["x"] }],
+    ["unknown field", { ...valid, values: { "future.field": "x" } }],
+    ["not a string", { ...valid, values: { "header.etablissement": 3 } }],
+    ["unknown option", { ...valid, values: { "visual.integrity": "Conforme" } }],
+    ["legacyContent not a string", { ...valid, legacyContent: 4 }],
+  ];
+  for (const [name, input] of structural) {
+    let parsed = true;
+    try { parseGraphiePayload(input); } catch (error) { assert.ok(error instanceof GraphiePayloadCompatibilityError); parsed = false; }
+    assert.equal(parsed, checkGraphiePayloadStructure(input).ok, name);
+    assert.equal(parsed, validateGraphiePayload(input, "sync-draft").ok, name);
+  }
+  const characters: Array<[string, unknown]> = [
+    ["NUL", { ...valid, values: { "header.etablissement": "C\u0000HU" } }],
+    ["lone high surrogate", { ...valid, values: { "header.etablissement": "CHU\uD800" } }],
+    ["lone low surrogate", { ...valid, values: { "header.etablissement": "\uDC00CHU" } }],
+  ];
+  for (const [name, input] of characters) {
+    assert.deepEqual(parseGraphiePayload(input).values, (input as { values: unknown }).values, name);
+    assert.equal(validateGraphiePayload(input, "submit").ok, false, name);
+  }
+  const legacy = { ...valid, legacyContent: "ancien" };
+  assert.equal(parseGraphiePayload(legacy).legacyContent, "ancien");
+  assert.equal(validateGraphiePayload(legacy, "sync-draft").ok, true);
+  assert.equal(validateGraphiePayload(legacy, "submit").ok, false);
 });
 
 test("V5 the device catalogue is the domain catalogue object", () => {

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { GRAPHIE_CALCULATION_IDENTITY } from "./graphie-identity.js";
-import { GRAPHIE_MOBILE_POV_CATALOGUE, validateGraphiePayload } from "./graphie-catalogue.js";
+import { checkGraphiePayloadStructure, GRAPHIE_MOBILE_POV_CATALOGUE, validateGraphiePayload } from "./graphie-catalogue.js";
 
 const identity = () => ({ ...GRAPHIE_CALCULATION_IDENTITY });
 const payload = (values: Record<string, unknown> = {}, extra: Record<string, unknown> = {}) => ({ ...identity(), values, ...extra });
@@ -76,6 +76,58 @@ test("V3 legacyContent is kept on a draft synchronization and refused on a submi
   const withLegacy = payload({ "header.reportNumber": "R1" }, { legacyContent: "ancien" });
   assert.deepEqual(validateGraphiePayload(withLegacy, "sync-draft"), { ok: true, payload: withLegacy });
   assert.deepEqual(validateGraphiePayload(withLegacy, "submit"), { ok: false, code: "INVALID_PAYLOAD", issues: [{ path: "legacyContent", code: "legacy-content-on-submit" }] });
+});
+
+test("8.2 V1 an unpaired UTF-16 surrogate in a value or in legacyContent is INVALID_PAYLOAD, a paired one is valid", () => {
+  const cases: Array<[unknown, string]> = [
+    [payload({ "header.reportNumber": "R\uD800-secret-value" }), "values.header.reportNumber"],
+    [payload({ "header.reportNumber": "\uDC00secret-value" }), "values.header.reportNumber"],
+    [payload({ "header.reportNumber": "secret-value\uD83D" }), "values.header.reportNumber"],
+    [payload({}, { legacyContent: "ancien\uD800" }), "legacyContent"],
+    [payload({}, { legacyContent: "\uDC00ancien" }), "legacyContent"],
+  ];
+  for (const [input, path] of cases) {
+    const result = validateGraphiePayload(input, "sync-draft");
+    assert.deepEqual(result, { ok: false, code: "INVALID_PAYLOAD", issues: [{ path, code: "unpaired-surrogate" }] });
+    assert.equal(JSON.stringify(result).includes("secret-value"), false);
+  }
+  assert.deepEqual(validateGraphiePayload(payload({ "header.reportNumber": "R1" }), "submit").ok, true);
+  const paired = payload({ "header.etablissement": "CHU 😀 𝄞" }, { legacyContent: "ancien 😀" });
+  assert.deepEqual(validateGraphiePayload(paired, "sync-draft"), { ok: true, payload: paired });
+  assert.equal(validateGraphiePayload(payload({ "header.etablissement": "CHU 😀" }), "submit").ok, true);
+});
+
+test("8.2 V2 the structure check gives the validator's code and issues for every structural case and passes storable-character cases", () => {
+  const structural: unknown[] = [
+    payload({ "header.reportNumber": "R1" }),
+    payload({ "header.reportNumber": "R1" }, { legacyContent: "ancien" }),
+    { content: "ancien contenu" },
+    payload({}, { catalogueVersion: "1.0.0" }),
+    payload({}, { schemaVersion: "3" }),
+    { values: {} },
+    payload({}, { extra: "x" }),
+    { ...identity(), values: ["a"] },
+    { ...identity(), values: null },
+    payload({ "header.reportNumber": 12 }),
+    payload({ "future.field": "x" }),
+    payload({ "visual.integrity": "Conforme" }),
+    payload({}, { legacyContent: 4 }),
+    payload({ "x\u0000y": "a" }),
+    null,
+    [],
+  ];
+  for (const input of structural) {
+    assert.deepEqual(checkGraphiePayloadStructure(input), validateGraphiePayload(input, "sync-draft"), JSON.stringify(input));
+  }
+  for (const input of [
+    payload({ "header.reportNumber": "a\u0000b" }),
+    payload({ "header.reportNumber": "a\uD800" }),
+    payload({ "header.reportNumber": "\uDC00" }),
+    payload({}, { legacyContent: "a\u0000\uD800" }),
+  ]) {
+    assert.deepEqual(checkGraphiePayloadStructure(input), { ok: true, payload: input });
+    assert.equal(validateGraphiePayload(input, "sync-draft").ok, false);
+  }
 });
 
 test("D1 no required-field, range, unit or tolerance rule is applied (DR-004 business validation stays blocked on DEP-01/02)", () => {

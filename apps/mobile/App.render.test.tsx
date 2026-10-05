@@ -48,14 +48,33 @@ const runtime = globalThis as typeof globalThis & {
   __syncStateRows?: Map<string, number>;
   __resolutionRows?: Map<string, Record<string, unknown>>;
   __resolutionItemRows?: Map<string, Record<string, unknown>>;
+  __correctionRows?: Map<string, Record<string, unknown>>;
+  __failCorrectionInsert?: boolean;
 };
 type OutboxTestRow = {
   operation_id: string; idempotency_key: string; employee_id: string; task_id: string; sequence: number; kind: string;
   snapshot_id: string; base_revision: number; status: string; attempt_count: number; last_error: string | null;
   outcome: string | null; outcome_json: string | null; created_at: number; updated_at: number; resolved_at: number | null;
   conflict_operation_id?: string | null;
+  correction_operation_id?: string | null;
 };
 let testUuid = 0;
+/** Story 8.2 correction drafts table (insert-only) for the App double. */
+function correctionStatement(kind: "first" | "all" | "run", sql: string, params: unknown[]): { handled: boolean; value?: unknown } {
+  if (!sql.includes("correction_drafts")) return { handled: false };
+  runtime.__correctionRows ??= new Map();
+  if (kind === "run" && sql.includes("INSERT INTO correction_drafts")) {
+    if (runtime.__failCorrectionInsert) throw new Error("correction write failed");
+    const [correction_id, employee_id, task_id, rejected_operation_id, rejected_snapshot_id, rejected_at, draft_revision, created_at] = params;
+    runtime.__correctionRows.set(String(correction_id), { correction_id, employee_id, task_id, rejected_operation_id, rejected_snapshot_id, rejected_at, draft_revision, created_at });
+    return { handled: true, value: { changes: 1, lastInsertRowId: 1 } };
+  }
+  if (kind === "all") {
+    const rows = [...runtime.__correctionRows.values()].filter((row) => row.employee_id === params[0] && (!sql.includes("task_id = ?") || row.task_id === params[1]));
+    return { handled: true, value: rows.sort((a, b) => Number(a.created_at) - Number(b.created_at)) };
+  }
+  throw new Error(`Unsupported correction statement in the App double: ${sql}`);
+}
 /** Story 8.1 conflict resolution tables (insert-only) for the App double. */
 function resolutionStatement(kind: "first" | "all" | "run", sql: string, params: unknown[]): { handled: boolean; value?: unknown } {
   if (!/INSERT INTO conflict_resolution|FROM conflict_resolution/.test(sql) || sql.includes("FROM outbox_operations")) return { handled: false };
@@ -77,13 +96,18 @@ function resolutionStatement(kind: "first" | "all" | "run", sql: string, params:
 function outboxStatement(kind: "first" | "all" | "run", sql: string, params: unknown[]): { handled: boolean; value?: unknown } {
   const resolution = resolutionStatement(kind, sql, params);
   if (resolution.handled) return resolution;
+  const correction = correctionStatement(kind, sql, params);
+  if (correction.handled) return correction;
   if (!/outbox_operations|audit_snapshots|task_sync_state/.test(sql)) return { handled: false };
   if (kind !== "run" && sql.includes("FROM outbox_operations")) {
     // The outbox reads join the covering conflict resolution (Story 8.1).
     const result = outboxRows(kind, sql, params);
     const withResolution = (row: OutboxTestRow) => {
       const covered = runtime.__resolutionItemRows?.get(row.operation_id);
-      return { ...row, conflict_operation_id: row.conflict_operation_id ?? null, conflict_resolution_id: covered?.role === "conflict" ? covered.resolution_id : null };
+      return {
+        ...row, conflict_operation_id: row.conflict_operation_id ?? null, conflict_resolution_id: covered?.role === "conflict" ? covered.resolution_id : null,
+        correction_operation_id: row.correction_operation_id ?? null,
+      };
     };
     const value = result.value as OutboxTestRow | OutboxTestRow[] | null | undefined;
     if (!result.handled || !value || !("operation_id" in value || Array.isArray(value))) return result;
@@ -103,12 +127,13 @@ function outboxRows(kind: "first" | "all" | "run", sql: string, params: unknown[
       snapshots.set(String(params[0]), { employee_id: String(params[1]), payload_json: String(params[5]) });
     } else if (sql.includes("INSERT INTO outbox_operations")) {
       if (runtime.__failOutboxInsert) throw new Error("outbox write failed");
-      const [operation_id, idempotency_key, employee_id, task_id, sequence, kind, snapshot_id, base_revision, created_at, updated_at, conflict_operation_id] = params;
+      const [operation_id, idempotency_key, employee_id, task_id, sequence, kind, snapshot_id, base_revision, created_at, updated_at, conflict_operation_id, correction_operation_id] = params;
       outbox.set(String(operation_id), {
         operation_id: String(operation_id), idempotency_key: String(idempotency_key), employee_id: String(employee_id), task_id: String(task_id),
         sequence: Number(sequence), kind: String(kind), snapshot_id: String(snapshot_id), base_revision: Number(base_revision), status: "queued",
         attempt_count: 0, last_error: null, outcome: null, outcome_json: null, created_at: Number(created_at), updated_at: Number(updated_at), resolved_at: null,
         conflict_operation_id: conflict_operation_id === undefined || conflict_operation_id === null ? null : String(conflict_operation_id),
+        correction_operation_id: correction_operation_id === undefined || correction_operation_id === null ? null : String(correction_operation_id),
       });
     } else if (sql.includes("DELETE FROM outbox_operations")) outbox.delete(employeeId!);
     else if (sql.includes("DELETE FROM audit_snapshots")) snapshots.delete(employeeId!);
@@ -132,6 +157,15 @@ function outboxRows(kind: "first" | "all" | "run", sql: string, params: unknown[
     return { handled: true, value: { changes: 1, lastInsertRowId: 1 } };
   }
   if (runtime.__failOutboxList && kind === "all" && sql.includes("ORDER BY sequence")) throw new Error("outbox read failed");
+  if (sql.includes("FROM audit_snapshots WHERE snapshot_id = ?")) {
+    const snapshot = snapshots.get(employeeId!);
+    return { handled: true, value: snapshot && snapshot.employee_id === second ? { payload_json: snapshot.payload_json } : null };
+  }
+  if (sql.includes("correction_operation_id = ?")) {
+    const linked = [...outbox.values()].find((row) => row.employee_id === employeeId && row.task_id === second
+      && row.correction_operation_id === String(params[2]) && row.outcome === "accepted");
+    return { handled: true, value: linked ? { operation_id: linked.operation_id } : null };
+  }
   const rows = [...outbox.values()].filter((row) => row.employee_id === employeeId).sort((a, b) => a.sequence - b.sequence);
   if (sql.includes("MAX(sequence)")) return { handled: true, value: { next_sequence: Math.max(0, ...[...outbox.values()].map((row) => row.sequence)) + 1 } };
   if (sql.includes("FROM task_sync_state")) {
@@ -212,7 +246,9 @@ mock.module("expo-sqlite", { namedExports: {
         }
         const row = rows.get(key(params[0]!, params[1]!));
         if (!row) return null;
-        const parsed = JSON.parse(row) as { payload_json?: string; revision?: number };
+        const parsed = JSON.parse(row) as { payload_json?: string; revision?: number; id?: string; createdAt?: number; savedAt?: number };
+        // The identity columns read by a correction or a discard-local write (Stories 8.1/8.2).
+        if (sql.includes("draft_id")) return { revision: parsed.revision, draft_id: parsed.id, created_at: parsed.createdAt, saved_at: parsed.savedAt };
         return sql.includes("payload_json") ? { payload_json: parsed.payload_json ?? row } : { revision: parsed.revision ?? (JSON.parse(parsed.payload_json ?? row) as { revision: number }).revision };
       },
       getAllAsync: async (sql: string, employeeId: string, ...rest: string[]) => {
@@ -270,6 +306,7 @@ mock.module("expo-sqlite", { namedExports: {
         const syncStateBefore = new Map(runtime.__syncStateRows);
         const resolutionsBefore = new Map(runtime.__resolutionRows);
         const resolutionItemsBefore = new Map(runtime.__resolutionItemRows);
+        const correctionsBefore = new Map(runtime.__correctionRows);
         try { await operation(db); } catch (error) {
           rows.clear(); for (const [id, value] of before) rows.set(id, value);
           runtime.__cachedTaskRows = new Map(cacheBefore);
@@ -278,6 +315,7 @@ mock.module("expo-sqlite", { namedExports: {
           runtime.__syncStateRows = syncStateBefore;
           runtime.__resolutionRows = resolutionsBefore;
           runtime.__resolutionItemRows = resolutionItemsBefore;
+          runtime.__correctionRows = correctionsBefore;
           throw error;
         }
       },
@@ -357,6 +395,8 @@ function installMocks() {
   runtime.__syncStateRows = new Map();
   runtime.__resolutionRows = new Map();
   runtime.__resolutionItemRows = new Map();
+  runtime.__correctionRows = new Map();
+  runtime.__failCorrectionInsert = false;
   runtime.__employeeId = "employee-1";
   runtime.__holdDraftRead = undefined;
   runtime.__holdDraftWrite = undefined;
@@ -3381,5 +3421,211 @@ test("Story 8.1 R28 an unreadable local draft in conflict offers only discard, l
   assert.equal(findText(tree, fr.employeeTasks.conflictTitle), undefined);
   assert.equal(findText(tree, fr.employeeTasks.draftCompatibilityUnavailable), undefined);
   assert.ok(runtime.__draftRows!.get(key)!.includes("R28-serveur"));
+  await act(async () => { tree.unmount(); });
+});
+
+// Story 8.2 — correction draft after a validation rejection.
+const refusedAt = new Date(2026, 9, 5, 9, 7).getTime();
+const refusalIssues = [{ path: "values.header.reportNumber", code: "unpaired-surrogate" }, { path: "legacyContent", code: "legacy-content-on-submit" }];
+const reportIssueLine = (code: string) => `${fieldLabel(GRAPHIE_MOBILE_POV_CATALOGUE.sections[0]!.id, "header.reportNumber")} : ${fr.employeeTasks.issueCodes[code]}`;
+
+/** A submission refused by the server (stored 422) whose snapshot holds `reportNumber`. */
+function seedRefusal(taskId: string, sequence: number, reportNumber: string, code = "INVALID_PAYLOAD", issues: unknown[] = refusalIssues) {
+  seedOutbox(taskId, sequence, "submit", "resolved", "rejected");
+  const operationId = `seed-op-${taskId}-${sequence}`;
+  const row = runtime.__outboxRows!.get(operationId)!;
+  Object.assign(row, { outcome_json: JSON.stringify({ detail: { code, issues } }), resolved_at: refusedAt, updated_at: refusedAt });
+  const snapshot = JSON.parse(runtime.__snapshotRows!.get(row.snapshot_id)!.payload_json) as { payload: { values: Record<string, string> } };
+  snapshot.payload.values = { ...snapshot.payload.values, "header.reportNumber": reportNumber };
+  runtime.__snapshotRows!.set(row.snapshot_id, { employee_id: "employee-1", payload_json: JSON.stringify(snapshot) });
+  return operationId;
+}
+
+function stateShown(tree: ReactTestRenderer, label: string) {
+  return tree.root.findAll((node) => node.type === "View" && node.findAll((child) => child.type === "Text" && child.children.join("") === fr.employeeTasks.state).length > 0
+    && node.findAll((child) => child.type === "Text" && child.children.join("") === label).length > 0).length > 0;
+}
+
+const correctionRows = () => ({
+  drafts: new Map(runtime.__draftRows), outbox: JSON.stringify([...runtime.__outboxRows!.values()]),
+  snapshots: JSON.stringify([...runtime.__snapshotRows!.entries()]), corrections: runtime.__correctionRows!.size,
+});
+
+async function openRefusedTask(reportNumber: string, code?: string, issues?: unknown[]) {
+  seedDraft(firstTask.id, { ...createNewGraphieDraftValues(), "header.reportNumber": reportNumber });
+  const refused = seedRefusal(firstTask.id, 1, reportNumber, code, issues);
+  let tree!: ReactTestRenderer;
+  await act(async () => { tree = create(<App />); });
+  await signIn(tree);
+  await openFirstTask(tree);
+  return { tree, refused };
+}
+
+test("Story 8.2 R29 a refused submission shows why, keeps the attempt read-only and is never presented as a conflict", async () => {
+  await loadApp();
+  installMocks();
+  const { tree } = await openRefusedTask("R29-valeur-refusée");
+  assert.ok(stateShown(tree, fr.employeeTasks.acceptanceBlocked));
+  assert.equal(findText(tree, fr.employeeTasks.rejectionCodes.INVALID_PAYLOAD)?.props.accessibilityRole, "alert");
+  assert.ok(findText(tree, fr.employeeTasks.rejectionIssues));
+  assert.ok(findText(tree, reportIssueLine("unpaired-surrogate")), "the field is named « section › champ »");
+  assert.ok(findText(tree, `${fr.employeeTasks.issueFormLevel} : ${fr.employeeTasks.issueCodes["legacy-content-on-submit"]}`));
+  assert.ok(findText(tree, fr.employeeTasks.rejectionOriginalKept));
+  assert.ok(findText(tree, fr.employeeTasks.rulesGated));
+  assert.ok(allTexts(tree).every((text) => !text.includes("R29-valeur-refusée")), "values are never shown as text");
+  assert.ok(allTexts(tree).every((text) => !/conflit/i.test(text)), "a rejection is not a conflict");
+  assert.equal(findText(tree, fr.employeeTasks.submitted), undefined);
+  assert.equal(findInput(tree, reportField().labelFr)!.props.editable, false);
+  for (const title of [fr.employeeTasks.submit, fr.employeeTasks.deleteDraft, fr.employeeTasks.retrySync, fr.employeeTasks.conflictKeepLocal, fr.employeeTasks.conflictDiscardLocal]) {
+    assert.equal(hasButton(tree, title), false, title);
+  }
+  assert.ok(hasButton(tree, fr.employeeTasks.createCorrection));
+  await act(async () => { tree.unmount(); });
+});
+
+test("Story 8.2 R30 R31 a correction draft starts from the refused snapshot, is editable, and its resubmission is accepted with the reference", async () => {
+  await loadApp();
+  installMocks();
+  const transport = fakeTransport([], { type: "accepted", serverRevision: 2 });
+  runtime.__syncTransport = transport;
+  seedDraft(firstTask.id, { ...createNewGraphieDraftValues(), "header.reportNumber": "R30-plus-récent" });
+  const refused = seedRefusal(firstTask.id, 1, "R30-refusé");
+  let tree!: ReactTestRenderer;
+  await act(async () => { tree = create(<App />); });
+  await signIn(tree);
+  await openFirstTask(tree);
+  const snapshotsBefore = JSON.stringify([...runtime.__snapshotRows!.entries()]);
+  const refusedRow = JSON.stringify(runtime.__outboxRows!.get(refused));
+
+  await act(async () => { findButton(tree, fr.employeeTasks.createCorrection).props.onPress(); await settle(); });
+  assert.ok(stateShown(tree, fr.employeeTasks.correctionDraft));
+  assert.ok(findText(tree, "Correction de la soumission refusée le 05/10/2026 à 09:07"));
+  assert.ok(findText(tree, fr.employeeTasks.rulesGated));
+  assert.equal(findText(tree, fr.employeeTasks.rejectionOriginalKept), undefined, "the refusal panel closes");
+  const input = findInput(tree, reportField().labelFr)!;
+  assert.equal(input.props.value, "R30-refusé", "the form shows the refused snapshot");
+  assert.equal(input.props.editable, true);
+  assert.ok(String(input.props.accessibilityHint).includes(fr.employeeTasks.issueCodes["unpaired-surrogate"]!), "the refused field carries its issue text");
+  assert.ok(findText(tree, `${fr.employeeTasks.issueFormLevel} : ${fr.employeeTasks.issueCodes["legacy-content-on-submit"]}`));
+  assert.ok(hasButton(tree, fr.employeeTasks.submit));
+  assert.equal(runtime.__correctionRows!.size, 1);
+  assert.equal(JSON.stringify([...runtime.__snapshotRows!.entries()]), snapshotsBefore, "no snapshot is written");
+  assert.equal(JSON.stringify(runtime.__outboxRows!.get(refused)), refusedRow, "the refused attempt is unchanged");
+  assert.equal(transport.sent.length, 0, "creation queues nothing");
+  await act(async () => { findButton(tree, fr.employeeTasks.back).props.onPress(); await settle(); });
+  assert.ok(findText(tree, `${firstTask.service} · ${fr.employeeTasks.correctionDraft}`), "the task list uses the same label");
+  await openFirstTask(tree);
+
+  // R31: correct the value, Soumettre, confirm; the transport sees the reference; acceptance makes it submitted.
+  await act(async () => { findInput(tree, reportField().labelFr)!.props.onChangeText("R31-corrigé"); });
+  await requestSubmission(tree);
+  await act(async () => { await settle(); });
+  const submit = transport.sent.find((request) => request.kind === "submit")!;
+  assert.ok(submit, "the submission is sent");
+  assert.equal(submit.correctionOfOperationId, refused);
+  assert.equal((submit.snapshot.payload as { values: Record<string, string> }).values["header.reportNumber"], "R31-corrigé");
+  assert.ok(transport.sent.every((request) => request.correctionOfOperationId === refused));
+  assert.ok(stateShown(tree, fr.employeeTasks.submitted));
+  assert.equal(findInput(tree, reportField().labelFr)!.props.editable, false);
+  assert.equal(findText(tree, fr.employeeTasks.correctionDraft), undefined);
+  await act(async () => { tree.unmount(); });
+});
+
+test("Story 8.2 R32 a correction draft is created offline; nothing is sent until the device is online", async () => {
+  await loadApp();
+  installMocks();
+  const transport = fakeTransport([], { type: "accepted", serverRevision: 2 });
+  runtime.__syncTransport = transport;
+  let tree!: ReactTestRenderer;
+  await act(async () => { tree = create(<App />); });
+  await signIn(tree);
+  await act(async () => { tree.unmount(); });
+  const refused = seedRefusal(firstTask.id, 1, "R32-refusé");
+  runtime.__networkOnline = false;
+  try {
+    await act(async () => { tree = create(<App />); await settle(1); });
+    await act(async () => { (await waitForButton(tree, firstTask.establishment)).props.onPress(); await settle(100); });
+    assert.ok(findText(tree, `${fr.employeeTasks.connectivity}: ${fr.employeeTasks.offline}`));
+    await act(async () => { findButton(tree, fr.employeeTasks.createCorrection).props.onPress(); await settle(); });
+    assert.ok(stateShown(tree, fr.employeeTasks.correctionDraft));
+    await act(async () => { findInput(tree, reportField().labelFr)!.props.onChangeText("R32-corrigé"); });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 650)); await settle(); });
+    assert.equal(transport.sent.length, 0, "offline: nothing is sent");
+    await act(async () => { runtime.__networkOnline = true; runtime.__networkListener?.({ isConnected: true, isInternetReachable: true }); await settle(50); });
+    assert.deepEqual(transport.sent.map((request) => [request.kind, request.correctionOfOperationId]), [["sync-draft", refused]]);
+    await act(async () => { tree.unmount(); });
+  } finally {
+    runtime.__networkOnline = true;
+  }
+});
+
+test("Story 8.2 R33 a failed creation says so, keeps the refusal panel and changes nothing", async () => {
+  await loadApp();
+  installMocks();
+  const { tree } = await openRefusedTask("R33-refusé");
+  const before = correctionRows();
+  runtime.__failCorrectionInsert = true;
+  await act(async () => { findButton(tree, fr.employeeTasks.createCorrection).props.onPress(); await settle(); });
+  assert.equal(findText(tree, fr.employeeTasks.correctionFailed)?.props.accessibilityRole, "alert");
+  assert.ok(findText(tree, fr.employeeTasks.rejectionOriginalKept), "the panel stays");
+  assert.ok(stateShown(tree, fr.employeeTasks.acceptanceBlocked));
+  assert.deepEqual(correctionRows(), before);
+  assert.equal(findInput(tree, reportField().labelFr)!.props.editable, false);
+  assert.equal(findButton(tree, fr.employeeTasks.createCorrection).props.disabled, false, "the action can be tried again");
+  await act(async () => { tree.unmount(); });
+});
+
+test("Story 8.2 R34 AUDIT_ALREADY_SUBMITTED shows its message and offers no action", async () => {
+  await loadApp();
+  installMocks();
+  const { tree } = await openRefusedTask("R34", "AUDIT_ALREADY_SUBMITTED", []);
+  assert.ok(findText(tree, fr.employeeTasks.rejectionCodes.AUDIT_ALREADY_SUBMITTED));
+  assert.equal(findText(tree, fr.employeeTasks.rejectionIssues), undefined);
+  for (const title of [fr.employeeTasks.createCorrection, fr.employeeTasks.submit, fr.employeeTasks.conflictKeepLocal, fr.employeeTasks.conflictDiscardLocal]) {
+    assert.equal(hasButton(tree, title), false, title);
+  }
+  assert.equal(findInput(tree, reportField().labelFr)!.props.editable, false);
+  await act(async () => { tree.unmount(); });
+});
+
+test("Story 8.2 R35 a refused correction shows the new issues and can be corrected again", async () => {
+  await loadApp();
+  installMocks();
+  const newIssues = [{ path: "values.header.reportNumber", code: "unknown-option" }];
+  const transport = fakeTransport([{ type: "rejected", detail: { code: "INVALID_PAYLOAD", issues: newIssues } }], { type: "accepted", serverRevision: 2 });
+  runtime.__syncTransport = transport;
+  const { tree, refused } = await openRefusedTask("R35-refusé");
+  await act(async () => { findButton(tree, fr.employeeTasks.createCorrection).props.onPress(); await settle(); });
+  await requestSubmission(tree);
+  await act(async () => { await settle(); });
+  assert.equal(transport.sent.at(-1)!.correctionOfOperationId, refused);
+  assert.ok(stateShown(tree, fr.employeeTasks.acceptanceBlocked));
+  assert.ok(findText(tree, reportIssueLine("unknown-option")), "the new issue is shown");
+  assert.ok(!findText(tree, reportIssueLine("unpaired-surrogate")), "the earlier refusal's issues are gone");
+  assert.ok(!findText(tree, `${fr.employeeTasks.issueFormLevel} : ${fr.employeeTasks.issueCodes["legacy-content-on-submit"]}`));
+  await act(async () => { findButton(tree, fr.employeeTasks.createCorrection).props.onPress(); await settle(); });
+  assert.ok(stateShown(tree, fr.employeeTasks.correctionDraft));
+  const rejected = [...runtime.__correctionRows!.values()].map((row) => row.rejected_operation_id);
+  assert.equal(rejected.length, 2);
+  assert.equal(rejected[0], refused);
+  assert.equal(rejected[1], transport.sent.at(-1)!.operationId, "the second correction links the newer refusal");
+  await act(async () => { tree.unmount(); });
+});
+
+test("Story 8.2 R36 a payload the shared validator refuses is not submitted; the issues are shown and the form stays editable", async () => {
+  await loadApp();
+  installMocks();
+  let tree!: ReactTestRenderer;
+  await act(async () => { tree = create(<App />); });
+  await signIn(tree);
+  await openFirstTask(tree);
+  await act(async () => { findInput(tree, reportField().labelFr)!.props.onChangeText("R36\u0000"); });
+  await requestSubmission(tree);
+  assert.equal(findText(tree, fr.employeeTasks.submissionInvalid)?.props.accessibilityRole, "alert");
+  assert.ok(findText(tree, reportIssueLine("nul-character")));
+  assert.equal(findText(tree, fr.common.confirm), undefined, "the confirmation closes");
+  assert.equal(submitRows(firstTask.id).length, 0, "nothing is queued");
+  assert.equal(findInput(tree, reportField().labelFr)!.props.editable, true);
+  assert.ok(hasButton(tree, fr.employeeTasks.submit));
   await act(async () => { tree.unmount(); });
 });

@@ -1,4 +1,7 @@
-import { isOpenConflict, isUnresolved, type ConflictResolution, type OutboxItem, type OutboxKind } from "../local-drafts/model";
+import {
+  isOpenConflict, isUnresolved, NON_CORRECTABLE_REJECTION_CODE, rejectionCode,
+  type ConflictResolution, type CorrectionDraft, type OutboxItem, type OutboxKind,
+} from "../local-drafts/model";
 
 export type TaskLifecycle = "draft" | "submission-pending" | "submitted" | "acceptance-blocked" | "conflict";
 export type TransferState = "none" | "queued" | "in-flight" | "retry-paused" | "blocked"
@@ -13,6 +16,14 @@ export type OpenConflictSummary = {
   hasPendingSnapshot: boolean;
 };
 
+export type RejectionIssue = { path: string; code: string };
+
+/** The task's uncorrected refused submission, with its stored detail. */
+export type RejectionSummary = { operationId: string; code: string | null; issues: RejectionIssue[]; canCorrect: boolean };
+
+/** The correction draft currently worked on: set until a later submission exists. */
+export type CorrectionSummary = { rejectedOperationId: string; rejectedAt: number };
+
 export type TaskSyncState = {
   lifecycle: TaskLifecycle;
   transfer: TransferState;
@@ -20,9 +31,30 @@ export type TaskSyncState = {
   canRetry: boolean;
   conflict: OpenConflictSummary | null;
   canSubmit: boolean;
+  rejection: RejectionSummary | null;
+  correction: CorrectionSummary | null;
 };
 
 const bySequence = (a: OutboxItem, b: OutboxItem) => a.sequence - b.sequence;
+
+/** The stored `issues` of a rejected item; malformed entries are dropped. */
+export function rejectionIssues(item: OutboxItem): RejectionIssue[] {
+  const detail = item.outcomeMetadata?.detail;
+  const issues = typeof detail === "object" && detail !== null ? (detail as { issues?: unknown }).issues : undefined;
+  if (!Array.isArray(issues)) return [];
+  return issues.filter((issue): issue is RejectionIssue => typeof issue === "object" && issue !== null
+    && typeof (issue as RejectionIssue).path === "string" && typeof (issue as RejectionIssue).code === "string")
+    .map(({ path, code }) => ({ path, code }));
+}
+
+/** The latest correction while no `submit` item was created after its refused item, else null. */
+function currentCorrection(sorted: readonly OutboxItem[], corrections: readonly CorrectionDraft[]): CorrectionSummary | null {
+  const latest = [...corrections].sort((a, b) => a.createdAt - b.createdAt).at(-1);
+  if (!latest) return null;
+  const refused = sorted.find((item) => item.operationId === latest.rejectedOperationId);
+  if (!refused || sorted.some((item) => item.kind === "submit" && item.sequence > refused.sequence)) return null;
+  return { rejectedOperationId: latest.rejectedOperationId, rejectedAt: latest.rejectedAt };
+}
 
 function unresolvedTransfer(item: OutboxItem): TransferState {
   return item.status === "resolved" ? "none" : item.status;
@@ -38,10 +70,16 @@ function createdAfter(item: OutboxItem, resolution: ConflictResolution): boolean
 /**
  * Derives the presented state of one task from its durable outbox items and conflict resolutions (one
  * employee and task, any order). Only the latest `submit` item decides the lifecycle; a transport success
- * alone never makes a task submitted. An open conflict pauses the task until an explicit resolution.
+ * alone never makes a task submitted. An open conflict pauses the task until an explicit resolution. A refused
+ * submission blocks the task until a correction draft covers it.
  */
-export function deriveTaskSyncState(items: readonly OutboxItem[], resolutions: readonly ConflictResolution[] = []): TaskSyncState {
+export function deriveTaskSyncState(
+  items: readonly OutboxItem[],
+  resolutions: readonly ConflictResolution[] = [],
+  corrections: readonly CorrectionDraft[] = [],
+): TaskSyncState {
   const sorted = [...items].sort(bySequence);
+  const correction = currentCorrection(sorted, corrections);
   const open = sorted.filter(isOpenConflict);
   if (open.length) {
     const pendingSubmit = sorted.some((item) => item.kind === "submit" && isUnresolved(item));
@@ -52,19 +90,31 @@ export function deriveTaskSyncState(items: readonly OutboxItem[], resolutions: r
       hasPendingSnapshot: submitConflict,
     };
     return submitConflict
-      ? { lifecycle: "conflict", transfer: "none", locked: true, canRetry: false, conflict, canSubmit: false }
-      : { lifecycle: "draft", transfer: "draft-conflict", locked: false, canRetry: false, conflict, canSubmit: false };
+      ? { lifecycle: "conflict", transfer: "none", locked: true, canRetry: false, conflict, canSubmit: false, rejection: null, correction }
+      : { lifecycle: "draft", transfer: "draft-conflict", locked: false, canRetry: false, conflict, canSubmit: false, rejection: null, correction };
   }
 
   const latest = [...resolutions].sort((a, b) => a.createdAt - b.createdAt).at(-1);
   const discarded = latest?.choice === "discard-local" ? latest : undefined;
   if (discarded?.serverState === "submitted" && !sorted.some((item) => item.kind === "submit" && createdAfter(item, discarded))) {
-    return { lifecycle: "submitted", transfer: "none", locked: true, canRetry: false, conflict: null, canSubmit: false };
+    return { lifecycle: "submitted", transfer: "none", locked: true, canRetry: false, conflict: null, canSubmit: false, rejection: null, correction: null };
   }
 
-  // The 7.2 rules, without the conflicts an explicit resolution closed.
+  // The 7.2 rules, without the conflicts an explicit resolution closed and without corrected refused submissions.
+  const corrected = new Set(corrections.map((entry) => entry.rejectedOperationId));
   const relevant = sorted.filter((item) => item.outcome !== "conflict");
-  const submit = relevant.filter((item) => item.kind === "submit").at(-1);
+  const latestSubmit = relevant.filter((item) => item.kind === "submit").at(-1);
+  if (latestSubmit?.outcome === "rejected" && !corrected.has(latestSubmit.operationId)) {
+    const code = rejectionCode(latestSubmit);
+    return {
+      lifecycle: "acceptance-blocked", transfer: "none", locked: true, canRetry: false, conflict: null, canSubmit: false, correction: null,
+      rejection: {
+        operationId: latestSubmit.operationId, code, issues: rejectionIssues(latestSubmit),
+        canCorrect: code !== NON_CORRECTABLE_REJECTION_CODE && !sorted.some(isUnresolved),
+      },
+    };
+  }
+  const submit = relevant.filter((item) => item.kind === "submit" && !corrected.has(item.operationId)).at(-1);
   let lifecycle: TaskLifecycle = "draft";
   let transfer: TransferState = "none";
   if (submit && isUnresolved(submit)) {
@@ -86,5 +136,7 @@ export function deriveTaskSyncState(items: readonly OutboxItem[], resolutions: r
     canRetry: transfer === "retry-paused" || transfer === "blocked",
     conflict: null,
     canSubmit: lifecycle === "draft" && !sorted.some((item) => item.kind === "submit" && isUnresolved(item)),
+    rejection: null,
+    correction,
   };
 }

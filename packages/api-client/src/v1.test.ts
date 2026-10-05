@@ -170,6 +170,18 @@ test("C3 sync operations throw ApiRequestError for key reuse, errors and malform
   await assert.rejects(offline.syncEmployeeTaskDraft(taskId, syncBody), TypeError);
 });
 
+test("K4 sync operations send correctionOfOperationId only when it is given", async () => {
+  const correctionOfOperationId = "00000000-0000-4000-8000-000000000033";
+  const withReference = clientFor(acceptedBody);
+  await withReference.client.submitEmployeeTaskAudit(taskId, { ...syncBody, correctionOfOperationId });
+  assert.deepEqual(JSON.parse(String(withReference.calls[0]!.init?.body)), { ...syncBody, correctionOfOperationId });
+  const without = clientFor({ ...acceptedBody, kind: "sync-draft", submissionId: undefined });
+  await without.client.syncEmployeeTaskDraft(taskId, syncBody);
+  assert.equal("correctionOfOperationId" in JSON.parse(String(without.calls[0]!.init?.body)), false);
+  const rejected = { ...rejectedBody, code: "INVALID_CORRECTION_REFERENCE", message: "La référence de la soumission corrigée est invalide.", issues: [{ path: "correctionOfOperationId", code: "invalid-reference" }] };
+  assert.deepEqual(await clientFor(rejected, 422).client.submitEmployeeTaskAudit(taskId, { ...syncBody, correctionOfOperationId }), { status: 422, body: rejected });
+});
+
 const auditVersionBody = {
   revision: 2, state: "draft", lastChangedAt: "2026-10-04T09:00:00.000Z", lastChangedBy: actor, payload: syncBody.payload,
 };

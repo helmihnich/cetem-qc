@@ -197,6 +197,28 @@ test("the documented Graphie payload schema matches the catalogue 2.0.0 identity
   assert.equal(graphieDraftPayloadSchema.safeParse({ ...payload, values: { a: 1 } }).success, false);
 });
 
+test("K3 the envelope accepts an optional UUID correction reference and the rejection accepts INVALID_CORRECTION_REFERENCE", () => {
+  const valid = {
+    operationId: "00000000-0000-4000-8000-000000000001",
+    idempotencyKey: "00000000-0000-4000-8000-000000000002",
+    baseRevision: 1,
+    localDraftRevision: 2,
+    clientSavedAt: "2026-10-04T10:00:00.000Z",
+    payload: {},
+  };
+  const withReference = { ...valid, correctionOfOperationId: "00000000-0000-4000-8000-000000000004" };
+  assert.deepEqual(syncOperationRequestSchema.parse(withReference), withReference);
+  const both = { ...withReference, conflictOperationId: "00000000-0000-4000-8000-000000000003" };
+  assert.deepEqual(syncOperationRequestSchema.parse(both), both);
+  assert.equal("correctionOfOperationId" in syncOperationRequestSchema.parse(valid), false);
+  for (const correctionOfOperationId of ["correction-1", null, 3, ""]) {
+    assert.equal(syncOperationRequestSchema.safeParse({ ...valid, correctionOfOperationId }).success, false, String(correctionOfOperationId));
+  }
+  const rejected = { outcome: "rejected", operationId: valid.operationId, kind: "submit", code: "INVALID_CORRECTION_REFERENCE", message: "La référence de la soumission corrigée est invalide.", issues: [{ path: "correctionOfOperationId", code: "invalid-reference" }] } as const;
+  assert.deepEqual(syncOperationRejectedSchema.parse(rejected), rejected);
+  assert.equal(syncOperationRejectedSchema.safeParse({ ...rejected, code: "INVALID_REFERENCE" }).success, false);
+});
+
 test("K1 the envelope accepts an optional UUID conflict reference and the audit version body is strict", () => {
   const valid = {
     operationId: "00000000-0000-4000-8000-000000000001",

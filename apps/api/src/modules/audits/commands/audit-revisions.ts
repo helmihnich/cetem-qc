@@ -24,7 +24,11 @@ export type AcceptOperationInput = {
   clientSavedAt: string;
   /** A validated, not yet linked conflict outcome this revision resolves (keep-local): recorded as lineage. */
   conflictOperationId?: string;
+  /** A validated rejected submission this revision corrects; a lineage link is recorded only when it is not linked yet. */
+  correction?: { predecessorOperationId: string; alreadyLinked: boolean };
 };
+
+export type LineageLinkType = "sync-conflict-revision" | "rejected-submission-correction";
 
 export type AcceptedOperation = { serverRevision: number; acceptedAt: string; submissionId?: string };
 
@@ -79,15 +83,27 @@ export async function lockAndReadTaskAudit(transaction: Transaction, taskId: str
 export async function applyDraftSync(transaction: Transaction, input: AcceptOperationInput): Promise<AcceptedOperation> {
   const { auditId, revision, acceptedAt } = await advanceAudit(transaction, input, "draft");
   await insertRevision(transaction, input, auditId, revision, "draft-sync", null);
-  await insertConflictLineage(transaction, input, auditId, revision);
+  await insertLineage(transaction, input, auditId, revision);
   await auditCommandTestSeams.afterRevisionInsert?.();
   return { serverRevision: revision, acceptedAt };
 }
 
 /** True when the stored outcome is already the predecessor of a lineage link; read inside the operation's transaction. */
 export async function isLineagePredecessor(transaction: Transaction, operationId: string): Promise<boolean> {
-  const result = await transaction.query("SELECT 1 FROM audit_lineage_links WHERE predecessor_operation_id = $1", [operationId]);
-  return (result.rowCount ?? 0) > 0;
+  return (await readLineageLinkOfPredecessor(transaction, operationId)) !== null;
+}
+
+/** The lineage link (at most one) whose predecessor is the stored outcome; read inside the operation's transaction. */
+export async function readLineageLinkOfPredecessor(
+  transaction: Transaction,
+  operationId: string,
+): Promise<{ linkType: LineageLinkType; auditId: string } | null> {
+  const result = await transaction.query<{ link_type: LineageLinkType; audit_id: string }>(
+    "SELECT link_type, audit_id FROM audit_lineage_links WHERE predecessor_operation_id = $1",
+    [operationId],
+  );
+  const row = result.rows[0];
+  return row ? { linkType: row.link_type, auditId: row.audit_id } : null;
 }
 
 /**
@@ -112,7 +128,7 @@ export async function acceptSubmission(transaction: Transaction, input: AcceptOp
   }
   const { auditId, revision, acceptedAt } = await advanceAudit(transaction, input, "submitted");
   await insertRevision(transaction, input, auditId, revision, "submission", results);
-  await insertConflictLineage(transaction, input, auditId, revision);
+  await insertLineage(transaction, input, auditId, revision);
   await auditCommandTestSeams.afterRevisionInsert?.();
   const submission = await transaction.query<{ id: string }>(
     `INSERT INTO audit_submissions (audit_id, revision, submitted_by, accepted_at, operation_id)
@@ -144,12 +160,27 @@ async function advanceAudit(transaction: Transaction, input: AcceptOperationInpu
   return { auditId: input.audit.auditId, revision, acceptedAt };
 }
 
-async function insertConflictLineage(transaction: Transaction, input: AcceptOperationInput, auditId: string, revision: number) {
-  if (input.conflictOperationId === undefined) return;
+async function insertLineage(transaction: Transaction, input: AcceptOperationInput, auditId: string, revision: number) {
+  if (input.conflictOperationId !== undefined) {
+    await insertLineageLink(transaction, "sync-conflict-revision", auditId, revision, input.conflictOperationId, input.actor.id);
+  }
+  if (input.correction !== undefined && !input.correction.alreadyLinked) {
+    await insertLineageLink(transaction, "rejected-submission-correction", auditId, revision, input.correction.predecessorOperationId, input.actor.id);
+  }
+}
+
+async function insertLineageLink(
+  transaction: Transaction,
+  linkType: LineageLinkType,
+  auditId: string,
+  revision: number,
+  predecessorOperationId: string,
+  actorId: string,
+) {
   await transaction.query(
     `INSERT INTO audit_lineage_links (link_type, audit_id, revision, predecessor_operation_id, actor_id)
-     VALUES ('sync-conflict-revision', $1, $2, $3, $4)`,
-    [auditId, revision, input.conflictOperationId, input.actor.id],
+     VALUES ($1, $2, $3, $4, $5)`,
+    [linkType, auditId, revision, predecessorOperationId, actorId],
   );
 }
 

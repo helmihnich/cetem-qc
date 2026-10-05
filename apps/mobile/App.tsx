@@ -16,13 +16,15 @@ import { expoSecureKeyValueStore } from "./offline-authorization-storage";
 import { createDraftRepository } from "./local-drafts/model";
 import { createSqliteDraftDatabase } from "./local-drafts/sqlite-draft-database";
 import { createAuthorizedDrafts } from "./local-drafts/authorized-drafts";
-import { ConflictResolutionError, DraftListCorruptionError, LocalDraftPayloadCompatibilityError, PendingSubmissionError, SubmissionNotAllowedError, type LocalDraft } from "./local-drafts/model";
+import { ConflictResolutionError, CorrectionDraftError, DraftListCorruptionError, LocalDraftPayloadCompatibilityError, PendingSubmissionError, SubmissionNotAllowedError, SubmissionValidationError, type LocalDraft } from "./local-drafts/model";
 import { ConflictPanel, type ConflictActionResult, type PanelServerVersion } from "./sync/conflict-panel";
+import { CorrectionDraftInfo, IssueLines, RejectionPanel, type CorrectionActionResult } from "./sync/rejection-panel";
+import { fieldIssueTexts, rejectionIssueLines } from "./sync/rejection-panel-text";
 import type { SyncTransport } from "./sync/sync-engine";
 import { createAppSyncTransport } from "./sync/app-sync-transport";
 import { useTaskSync, useTaskSyncTriggers } from "./sync/use-task-sync";
 import { submissionAcceptedLine } from "./sync/acceptance-line";
-import { deriveTaskSyncState, type TaskSyncState } from "./sync/task-sync-state";
+import { deriveTaskSyncState, rejectionIssues, type RejectionIssue, type TaskSyncState } from "./sync/task-sync-state";
 import { runOnlyWhenOnlineAuthorized, ServerWorkAuthorizationError } from "./server-work-authorization";
 import { GRAPHIE_CALCULATION_RULE_ID, GRAPHIE_CALCULATION_RULE_VERSION, GRAPHIE_MOBILE_POV_CATALOGUE, GraphiePayloadCompatibilityError, createNewGraphieDraftValues, parseGraphiePayload, type CatalogueField, type CatalogueSection, type CatalogueTable, type GraphieFormValues } from "./graphie-pov-catalogue";
 import type { EmployeeTaskLayout } from "./employee-task-layout";
@@ -104,6 +106,8 @@ export default function App() {
   const [submitConfirmation, setSubmitConfirmation] = useState<{ employeeId: string; taskId: string }>();
   const [submitting, setSubmitting] = useState(false);
   const submittingRef = useRef(false);
+  // Issues of a submission refused locally by the shared domain validator (Story 8.2); nothing was queued.
+  const [submissionIssues, setSubmissionIssues] = useState<{ employeeId: string; taskId: string; issues: RejectionIssue[] }>();
   // Bumped when a submission request fails, so that the autosave it cancelled is scheduled again.
   const [autosaveRearm, setAutosaveRearm] = useState(0);
   const authorizationStateRef = useRef(authorization);
@@ -150,9 +154,16 @@ export default function App() {
   activeDraftScopeRef.current = user && screen.kind === "detail" ? `${user.id}\u0000${screen.id}` : null;
   const outboxItems = syncSnapshot.outbox && syncSnapshot.outbox.employeeId === user?.id ? syncSnapshot.outbox.items : [];
   const resolutionItems = syncSnapshot.resolutions && syncSnapshot.resolutions.employeeId === user?.id ? syncSnapshot.resolutions.items : [];
+  const correctionItems = syncSnapshot.corrections && syncSnapshot.corrections.employeeId === user?.id ? syncSnapshot.corrections.items : [];
   const taskSyncStateOf = (taskId: string): TaskSyncState => deriveTaskSyncState(
-    outboxItems.filter((item) => item.taskId === taskId), resolutionItems.filter((item) => item.taskId === taskId));
+    outboxItems.filter((item) => item.taskId === taskId), resolutionItems.filter((item) => item.taskId === taskId),
+    correctionItems.filter((item) => item.taskId === taskId));
   const currentSyncState = screen.kind === "detail" ? taskSyncStateOf(screen.id) : undefined;
+  // While a correction draft is worked on, the corrected refusal's issues are a reminder on their fields (Story 8.2).
+  const correctedItem = currentSyncState?.lifecycle === "draft" && currentSyncState.correction
+    ? outboxItems.find((item) => item.operationId === currentSyncState.correction!.rejectedOperationId) : undefined;
+  const correctionIssues = correctedItem ? rejectionIssues(correctedItem) : [];
+  const fieldIssues = fieldIssueTexts(correctionIssues);
   const acceptedLine = screen.kind === "detail" ? submissionAcceptedLine(outboxItems.filter((item) => item.taskId === screen.id)) : undefined;
   const locked = currentSyncState?.locked ?? false;
   // An open conflict pauses the task: no Soumettre, Supprimer or retry until an explicit resolution (Story 8.1).
@@ -211,27 +222,7 @@ export default function App() {
         const { draft } = await draftsRef.current.resolveConflictDiscardLocal(employeeId, taskId, {
           conflictOperationIds, server: { revision: server.revision, state: server.state, payload: server.payload },
         });
-        if (activeDraftScopeRef.current === scopeKey) {
-          draftGenerationRef.current++;
-          if (draft) {
-            const parsed = parseGraphiePayload(draft.payload);
-            formValuesRef.current = parsed.values;
-            setFormValues(parsed.values);
-            setFormIdentity(calculationIdentityOf(parsed));
-            draftContentRef.current = parsed.legacyContent ?? "";
-            setDraftContent(parsed.legacyContent ?? "");
-            legacyContentModeRef.current = parsed.legacyContent !== undefined;
-            setLegacyContentMode(parsed.legacyContent !== undefined);
-          } else resetFormToNewDraft();
-          setActiveDraft(draft ?? undefined);
-          draftRevisionRef.current = draft?.revision ?? 0;
-          draftRevisionByScopeRef.current.set(scopeKey, draft?.revision ?? 0);
-          clearUnreadableDraft();
-          setDraftNotice(undefined);
-          setDraftSaveState(draft ? "saved" : "idle");
-          setDraftHydration("ready");
-          setError(undefined);
-        }
+        if (activeDraftScopeRef.current === scopeKey) presentStoredDraft(scopeKey, draft);
       }
       await refreshOutbox(employeeId);
       await refreshLocalDrafts(employeeId);
@@ -245,6 +236,55 @@ export default function App() {
         return "stale";
       }
       await refreshOutbox(employeeId);
+      await redactDraftIfAuthorizationLost(employeeId);
+      return "failed";
+    });
+    draftSaveQueueRef.current = work.then(() => undefined);
+    return work;
+  }
+
+  /** Shows a draft the store just wrote (or no draft) as the editable working version of the open task. */
+  function presentStoredDraft(scopeKey: string, draft: LocalDraft | null) {
+    draftGenerationRef.current++;
+    if (draft) {
+      const parsed = parseGraphiePayload(draft.payload);
+      formValuesRef.current = parsed.values;
+      setFormValues(parsed.values);
+      setFormIdentity(calculationIdentityOf(parsed));
+      draftContentRef.current = parsed.legacyContent ?? "";
+      setDraftContent(parsed.legacyContent ?? "");
+      legacyContentModeRef.current = parsed.legacyContent !== undefined;
+      setLegacyContentMode(parsed.legacyContent !== undefined);
+    } else resetFormToNewDraft();
+    setActiveDraft(draft ?? undefined);
+    draftRevisionRef.current = draft?.revision ?? 0;
+    draftRevisionByScopeRef.current.set(scopeKey, draft?.revision ?? 0);
+    clearUnreadableDraft();
+    setDraftNotice(undefined);
+    setDraftSaveState(draft ? "saved" : "idle");
+    setDraftHydration("ready");
+    setError(undefined);
+  }
+
+  /**
+   * Creates the correction draft of the shown refusal in one store transaction (Story 8.2). It works offline
+   * and queues nothing: the next save or Soumettre follows the normal flow. A refusal or failure changes nothing.
+   */
+  async function createCorrection(): Promise<CorrectionActionResult> {
+    const rejection = currentSyncState?.rejection;
+    if (!user || screen.kind !== "detail" || !rejection?.canCorrect) return "failed";
+    const employeeId = user.id;
+    const taskId = screen.id;
+    const scopeKey = `${employeeId}\u0000${taskId}`;
+    const work = draftSaveQueueRef.current.then(async (): Promise<CorrectionActionResult> => {
+      const { draft } = await draftsRef.current.createCorrectionDraft(employeeId, taskId, { rejectedOperationId: rejection.operationId });
+      if (activeDraftScopeRef.current === scopeKey) presentStoredDraft(scopeKey, draft);
+      await refreshOutbox(employeeId);
+      await refreshLocalDrafts(employeeId);
+      return "done";
+    }).catch(async (cause): Promise<CorrectionActionResult> => {
+      await refreshOutbox(employeeId);
+      if (cause instanceof CorrectionDraftError && cause.reason === "stale") return "stale";
       await redactDraftIfAuthorizationLost(employeeId);
       return "failed";
     });
@@ -267,6 +307,7 @@ export default function App() {
     submittingRef.current = true;
     setSubmitting(true);
     setDraftNotice(undefined);
+    setSubmissionIssues(undefined);
     const { employeeId, taskId } = captured;
     const scopeKey = `${employeeId}\u0000${taskId}`;
     const request = draftSaveQueueRef.current.then(async () => {
@@ -291,7 +332,14 @@ export default function App() {
         void runSync(employeeId);
       } catch (cause) {
         if (cause instanceof PendingSubmissionError) await refreshOutbox(employeeId);
-        else if (cause instanceof SubmissionNotAllowedError) {
+        else if (cause instanceof SubmissionValidationError) {
+          // The shared domain validator refused the payload: nothing was queued and the form stays editable.
+          if (activeIdentityRef.current === employeeId) {
+            setError(fr.employeeTasks.submissionInvalid);
+            setSubmissionIssues({ employeeId, taskId, issues: cause.issues });
+            setAutosaveRearm((value) => value + 1);
+          }
+        } else if (cause instanceof SubmissionNotAllowedError) {
           if (activeIdentityRef.current === employeeId) { setError(fr.employeeTasks.submissionNotAllowed); setAutosaveRearm((value) => value + 1); }
         } else {
           if (activeIdentityRef.current === employeeId) { setError(fr.employeeTasks.submissionFailed); setAutosaveRearm((value) => value + 1); }
@@ -1201,6 +1249,12 @@ export default function App() {
     onKeepLocal={(server) => resolveConflict("keep-local", server)}
     onDiscard={(server) => resolveConflict("discard-local", server)}
   /> : null;
+  const rejectionPanel = user && detailTaskId && currentSyncState?.rejection
+    ? <RejectionPanel key={currentSyncState.rejection.operationId} rejection={currentSyncState.rejection} onCreateCorrection={createCorrection} /> : null;
+  const correctionInfo = user && detailTaskId && currentSyncState?.lifecycle === "draft" && currentSyncState.correction
+    ? <CorrectionDraftInfo correction={currentSyncState.correction} issues={correctionIssues} /> : null;
+  const shownSubmissionIssues = submissionIssues && user && submissionIssues.employeeId === user.id && submissionIssues.taskId === detailTaskId
+    && error === fr.employeeTasks.submissionInvalid ? rejectionIssueLines(submissionIssues.issues) : undefined;
 
   return (
     <SafeAreaView style={styles.safe}>
@@ -1283,13 +1337,15 @@ export default function App() {
                   <Detail label={fr.employeeTasks.type} value={fr.employeeTasks.graphieMobile} />
                   <Detail label={fr.employeeTasks.establishment} value={displayedTask.establishment} />
                   <Detail label={fr.employeeTasks.service} value={displayedTask.service || "—"} />
-                  <Detail label={fr.employeeTasks.state} value={lifecycleLabel(currentSyncState?.lifecycle ?? "draft")} />
+                  <Detail label={fr.employeeTasks.state} value={stateLabel(currentSyncState)} />
                   {acceptedLine ? <Text accessibilityRole="summary" style={styles.muted}>{acceptedLine}</Text> : null}
                   <Detail label={fr.employeeTasks.createdAt} value={new Date(displayedTask.createdAt).toLocaleDateString("fr-FR")} />
                   <View style={{ width: "100%", gap: 10, paddingTop: 12 }}>
                     {taskCacheWarning ? <Text accessibilityRole="alert" style={styles.error}>{taskCacheWarning}</Text> : null}
                     {currentSyncState ? <TaskSyncStatus state={currentSyncState} running={syncRunningFor === user.id} onRetry={() => void retrySync()} /> : null}
                     {conflictPanel}
+                    {rejectionPanel}
+                    {correctionInfo}
                     <Text style={styles.muted}>{fr.employeeTasks.connectivity}: {isOnline ? fr.employeeTasks.online : fr.employeeTasks.offline}</Text>
                     <Text style={styles.muted}>{fr.employeeTasks.localPersistence}: {presentedSaveState === "saving" ? fr.employeeTasks.savingLocally : presentedSaveState === "saved" ? fr.employeeTasks.savedLocally : presentedSaveState === "failed" ? fr.employeeTasks.saveFailed : fr.employeeTasks.notSavedLocally}</Text>
                     {locked ? <Text accessibilityRole="summary" style={styles.muted}>{fr.employeeTasks.readOnlyPending}</Text> : null}
@@ -1297,7 +1353,7 @@ export default function App() {
                     <View style={styles.sectionNavigation}>{GRAPHIE_MOBILE_POV_CATALOGUE.sections.map((section) => <Pressable key={section.id} accessibilityRole="button" accessibilityState={{ selected: section.id === activeSectionId }} onPress={() => { setActiveSectionId(section.id); if (draftSaveState === "saving") void saveDraft(); }} style={styles.sectionButton}><Text style={styles.muted}>{section.labelFr}</Text></Pressable>)}</View>
                     {draftHydration === "loading" ? <Text accessibilityRole="summary" style={styles.muted}>{fr.common.loading}</Text> : null}
                     {legacyContentMode ? <Field label={fr.employeeTasks.legacyDraftContent} value={draftContent} onChangeText={changeDraftContent} editable={formEditable} multiline /> : null}
-                    {GRAPHIE_MOBILE_POV_CATALOGUE.sections.filter((section) => section.id === activeSectionId).map((section) => <GraphieSectionForm key={section.id} section={section} layout={layout} values={formValues} results={calculationResults} onChange={changeFormField} editable={formEditable} />)}
+                    {GRAPHIE_MOBILE_POV_CATALOGUE.sections.filter((section) => section.id === activeSectionId).map((section) => <GraphieSectionForm key={section.id} section={section} layout={layout} values={formValues} results={calculationResults} onChange={changeFormField} editable={formEditable} issues={fieldIssues} />)}
                     <Text accessibilityRole={presentedSaveState === "failed" ? "alert" : "summary"} style={presentedSaveState === "failed" ? styles.error : styles.muted}>
                       {presentedSaveState === "failed" ? fr.employeeTasks.saveFailed : presentedSaveState === "saving" ? fr.employeeTasks.savingDraft : presentedSaveState === "saved" ? fr.employeeTasks.savedLocally : fr.workflow.draft}
                     </Text>
@@ -1320,15 +1376,17 @@ export default function App() {
                   <Text style={styles.heading}>{fr.employeeTasks.resumeDraft}</Text>
                   <Detail label={fr.employeeTasks.taskId} value={activeDraft.taskId} />
                   {draftHydration === "loading" ? <Text accessibilityRole="summary" style={styles.muted}>{fr.common.loading}</Text> : null}
-                  <Detail label={fr.employeeTasks.state} value={lifecycleLabel(currentSyncState?.lifecycle ?? "draft")} />
+                  <Detail label={fr.employeeTasks.state} value={stateLabel(currentSyncState)} />
                   {acceptedLine ? <Text accessibilityRole="summary" style={styles.muted}>{acceptedLine}</Text> : null}
                   {currentSyncState ? <TaskSyncStatus state={currentSyncState} running={syncRunningFor === user.id} onRetry={() => void retrySync()} /> : null}
                   {!displayedTask ? conflictPanel : null}
+                  {!displayedTask ? rejectionPanel : null}
+                  {!displayedTask ? correctionInfo : null}
                   {locked ? <Text accessibilityRole="summary" style={styles.muted}>{fr.employeeTasks.readOnlyPending}</Text> : null}
                   {legacyContentMode ? <Field label={fr.employeeTasks.legacyDraftContent} value={draftContent} onChangeText={changeDraftContent} editable={formEditable} multiline /> : null}
                   <Text style={styles.heading}>{fr.employeeTasks.sectionNavigation}</Text>
                   <View style={styles.sectionNavigation}>{GRAPHIE_MOBILE_POV_CATALOGUE.sections.map((section) => <Pressable key={section.id} accessibilityRole="button" accessibilityState={{ selected: section.id === activeSectionId }} onPress={() => { setActiveSectionId(section.id); if (draftSaveState === "saving") void saveDraft(); }} style={styles.sectionButton}><Text style={styles.muted}>{section.labelFr}</Text></Pressable>)}</View>
-                  {GRAPHIE_MOBILE_POV_CATALOGUE.sections.filter((section) => section.id === activeSectionId).map((section) => <GraphieSectionForm key={section.id} section={section} layout={layout} values={formValues} results={calculationResults} onChange={changeFormField} editable={formEditable} />)}
+                  {GRAPHIE_MOBILE_POV_CATALOGUE.sections.filter((section) => section.id === activeSectionId).map((section) => <GraphieSectionForm key={section.id} section={section} layout={layout} values={formValues} results={calculationResults} onChange={changeFormField} editable={formEditable} issues={fieldIssues} />)}
                   <Text accessibilityRole={presentedSaveState === "failed" ? "alert" : "summary"} style={presentedSaveState === "failed" ? styles.error : styles.muted}>
                     {presentedSaveState === "failed" ? fr.employeeTasks.saveFailed : presentedSaveState === "saving" ? fr.employeeTasks.savingDraft : fr.employeeTasks.savedLocally}
                   </Text>
@@ -1342,6 +1400,7 @@ export default function App() {
                 </View> : null}
                 {draftNotice ? <Text accessibilityRole="summary" style={styles.muted}>{draftNotice}</Text> : null}
                 {error ? <Text accessibilityRole="alert" style={styles.error}>{error}</Text> : null}
+                {shownSubmissionIssues ? <IssueLines lines={shownSubmissionIssues} /> : null}
                 {unreadableDraft && unreadableDraft.employeeId === user.id && screen.id === unreadableDraft.taskId && !inConflict ? <View style={{ gap: 10 }}>
                   <Button title={fr.employeeTasks.deleteDraft} secondary onPress={beginUnreadableDraftDelete} disabled={draftDeletingRef.current || Boolean(unreadableDeleteConfirmation)} />
                   {unreadableDeleteConfirmation && unreadableDeleteConfirmation.employeeId === user.id && unreadableDeleteConfirmation.taskId === screen.id ? <View style={styles.confirmation}>
@@ -1387,6 +1446,12 @@ function lifecycleLabel(lifecycle: TaskSyncState["lifecycle"]) {
         : lifecycle === "conflict" ? fr.employeeTasks.syncConflict : fr.employeeTasks.draft;
 }
 
+/** The « État »: the lifecycle, or « Brouillon de correction » while a correction draft is worked on (Story 8.2). */
+function stateLabel(state: TaskSyncState | undefined) {
+  if (!state) return lifecycleLabel("draft");
+  return state.lifecycle === "draft" && state.correction ? fr.employeeTasks.correctionDraft : lifecycleLabel(state.lifecycle);
+}
+
 const TRANSFER_LABELS: Record<TaskSyncState["transfer"], string> = {
   "none": fr.employeeTasks.notSynchronized,
   "queued": fr.employeeTasks.syncQueued,
@@ -1402,7 +1467,7 @@ const FAILED_TRANSFERS: ReadonlySet<TaskSyncState["transfer"]> = new Set(["retry
 /** Task list rows: the lifecycle, plus the transfer state while an item is unresolved or failed. */
 function taskListStateLabel(state: TaskSyncState) {
   const showTransfer = state.transfer !== "none" && state.transfer !== "draft-synchronized";
-  return showTransfer ? `${lifecycleLabel(state.lifecycle)} · ${TRANSFER_LABELS[state.transfer]}` : lifecycleLabel(state.lifecycle);
+  return showTransfer ? `${stateLabel(state)} · ${TRANSFER_LABELS[state.transfer]}` : stateLabel(state);
 }
 
 /** The « Synchronisation » line; resolved submissions need no line because the « État » already says it all. */
@@ -1420,15 +1485,16 @@ function TaskSyncStatus(props: { state: TaskSyncState; running: boolean; onRetry
 
 const fieldLabel = (field: CatalogueField) => `${field.labelFr}${field.unit ? ` (${field.unit})` : ""}`;
 
-function CatalogueInput(props: { field: CatalogueField; value: string; onChange: (fieldId: string, value: string) => void; editable: boolean; rowLabelFr?: string; style?: StyleProp<ViewStyle> }) {
+function CatalogueInput(props: { field: CatalogueField; value: string; onChange: (fieldId: string, value: string) => void; editable: boolean; rowLabelFr?: string; style?: StyleProp<ViewStyle>; issueFr?: string }) {
   const { field } = props;
-  if (field.type === "choice") return <ChoiceField field={field} value={props.value} onSelect={(value) => props.onChange(field.id, value)} editable={props.editable} />;
+  if (field.type === "choice") return <ChoiceField field={field} value={props.value} onSelect={(value) => props.onChange(field.id, value)} editable={props.editable} errorFr={props.issueFr} />;
   const label = fieldLabel(field);
+  const errorFr = [field.type === "number" && isInvalidGraphieReading(props.value) ? fr.graphieResults.invalidNumber : undefined, props.issueFr].filter(Boolean).join(" ");
   return <Field
     label={label}
     accessibilityLabel={props.rowLabelFr ? `${props.rowLabelFr} — ${label}` : label}
     helpFr={field.helpFr}
-    errorFr={field.type === "number" && isInvalidGraphieReading(props.value) ? fr.graphieResults.invalidNumber : undefined}
+    errorFr={errorFr || undefined}
     value={props.value}
     onChangeText={(value) => props.onChange(field.id, value)}
     editable={props.editable}
@@ -1439,7 +1505,7 @@ function CatalogueInput(props: { field: CatalogueField; value: string; onChange:
 }
 
 /** Renders one catalogue section in field order; table cells render as one labelled group per paper row. */
-function GraphieSectionForm(props: { section: CatalogueSection; layout: EmployeeTaskLayout; values: GraphieFormValues; results?: GraphieCalculationResults; onChange: (fieldId: string, value: string) => void; editable: boolean }) {
+function GraphieSectionForm(props: { section: CatalogueSection; layout: EmployeeTaskLayout; values: GraphieFormValues; results?: GraphieCalculationResults; onChange: (fieldId: string, value: string) => void; editable: boolean; issues: Readonly<Record<string, string>> }) {
   const { section } = props;
   const tableByFieldId = new Map<string, CatalogueTable>();
   for (const table of section.tables ?? []) for (const id of table.fieldIds.flat()) tableByFieldId.set(id, table);
@@ -1453,10 +1519,10 @@ function GraphieSectionForm(props: { section: CatalogueSection; layout: Employee
     if (!resultsPlaced && field.type === "textarea") { items.push(...resultBlocks); resultsPlaced = true; }
     const table = tableByFieldId.get(field.id);
     if (!table) {
-      items.push(<CatalogueInput key={field.id} field={field} value={props.values[field.id] ?? ""} onChange={props.onChange} editable={props.editable} />);
+      items.push(<CatalogueInput key={field.id} field={field} value={props.values[field.id] ?? ""} onChange={props.onChange} editable={props.editable} issueFr={props.issues[field.id]} />);
     } else if (!renderedTables.has(table.id)) {
       renderedTables.add(table.id);
-      items.push(<GraphieTable key={`table:${table.id}`} table={table} fields={section.fields} layout={props.layout} values={props.values} onChange={props.onChange} editable={props.editable} />);
+      items.push(<GraphieTable key={`table:${table.id}`} table={table} fields={section.fields} layout={props.layout} values={props.values} onChange={props.onChange} editable={props.editable} issues={props.issues} />);
     }
   }
   if (!resultsPlaced) items.push(...resultBlocks);
@@ -1466,7 +1532,7 @@ function GraphieSectionForm(props: { section: CatalogueSection; layout: Employee
   </View>;
 }
 
-function GraphieTable(props: { table: CatalogueTable; fields: readonly CatalogueField[]; layout: EmployeeTaskLayout; values: GraphieFormValues; onChange: (fieldId: string, value: string) => void; editable: boolean }) {
+function GraphieTable(props: { table: CatalogueTable; fields: readonly CatalogueField[]; layout: EmployeeTaskLayout; values: GraphieFormValues; onChange: (fieldId: string, value: string) => void; editable: boolean; issues: Readonly<Record<string, string>> }) {
   const { table } = props;
   const fieldById = new Map(props.fields.map((field) => [field.id, field]));
   const tablet = props.layout === "tablet";
@@ -1477,14 +1543,14 @@ function GraphieTable(props: { table: CatalogueTable; fields: readonly Catalogue
       return <View key={`${table.id}:${rowIndex}`} accessibilityLabel={rowLabel} style={[styles.tableRow, tablet && styles.tableRowTablet]}>
         <Text accessibilityRole="header" style={[styles.tableRowLabel, tablet && styles.tableRowLabelTablet]}>{rowLabel}</Text>
         <View style={tablet ? styles.tableCellsTablet : styles.tableCellsPhone}>
-          {row.map((id) => <CatalogueInput key={id} field={fieldById.get(id)!} rowLabelFr={rowLabel} value={props.values[id] ?? ""} onChange={props.onChange} editable={props.editable} style={tablet ? styles.tableCellTablet : undefined} />)}
+          {row.map((id) => <CatalogueInput key={id} field={fieldById.get(id)!} rowLabelFr={rowLabel} value={props.values[id] ?? ""} onChange={props.onChange} editable={props.editable} style={tablet ? styles.tableCellTablet : undefined} issueFr={props.issues[id]} />)}
         </View>
       </View>;
     })}
   </View>;
 }
 
-function ChoiceField(props: { field: CatalogueField; value: string; onSelect: (value: string) => void; editable?: boolean }) {
+function ChoiceField(props: { field: CatalogueField; value: string; onSelect: (value: string) => void; editable?: boolean; errorFr?: string }) {
   const label = fieldLabel(props.field);
   return <View style={styles.field}>
     <Text style={styles.label}>{label}</Text>
@@ -1496,6 +1562,7 @@ function ChoiceField(props: { field: CatalogueField; value: string; onSelect: (v
         </Pressable>;
       })}
     </View>
+    {props.errorFr ? <Text style={styles.error}>{props.errorFr}</Text> : null}
   </View>;
 }
 

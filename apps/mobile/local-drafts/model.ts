@@ -1,4 +1,4 @@
-import { GRAPHIE_CALCULATION_IDENTITY } from "@cetem-qc/domain";
+import { GRAPHIE_CALCULATION_IDENTITY, validateGraphiePayload } from "@cetem-qc/domain";
 
 export const LOCAL_DRAFT_SCHEMA_VERSION = 1;
 
@@ -47,7 +47,52 @@ export type OutboxItem = {
   conflictOperationId?: string | null;
   /** For a `conflict` item: the resolution that covers it, or null while the conflict is open. Set by the store. */
   conflictResolutionId?: string | null;
+  /** Correction lineage: the refused `submit` this item corrects (sent as `correctionOfOperationId`). Set by the store. */
+  correctionOperationId?: string | null;
 };
+
+/** An insert-only record: the refused submission was corrected by local draft revision `draftRevision`. */
+export type CorrectionDraft = {
+  correctionId: string;
+  employeeId: string;
+  taskId: string;
+  rejectedOperationId: string;
+  rejectedSnapshotId: string;
+  /** `resolvedAt` of the refused item, shown on the correction link line. */
+  rejectedAt: number;
+  draftRevision: number;
+  createdAt: number;
+};
+
+export type CorrectionDraftWrite = {
+  correctionId: string;
+  employeeId: string;
+  taskId: string;
+  rejectedOperationId: string;
+  /** Used only when no local draft row exists. */
+  draftId: string;
+  createdAt: number;
+};
+
+/** The server code for which a correction draft is never offered (the audit was accepted; recovery is 8.3/8.4). */
+export const NON_CORRECTABLE_REJECTION_CODE = "AUDIT_ALREADY_SUBMITTED";
+
+/** The `code` of a rejected item's stored detail, or null when it is missing or unreadable. */
+export function rejectionCode(item: OutboxItem): string | null {
+  const detail = item.outcomeMetadata?.detail;
+  const code = typeof detail === "object" && detail !== null ? (detail as { code?: unknown }).code : undefined;
+  return typeof code === "string" ? code : null;
+}
+
+/**
+ * The task's open refusal: its latest `submit` item when it is resolved `rejected`, its code is not
+ * AUDIT_ALREADY_SUBMITTED and no correction names it. `items` and `corrections` are one task's rows.
+ */
+export function findOpenRefusal(items: OutboxItem[], corrections: CorrectionDraft[]): OutboxItem | null {
+  const latestSubmit = items.filter((item) => item.kind === "submit").sort((a, b) => a.sequence - b.sequence).at(-1);
+  if (!latestSubmit || latestSubmit.outcome !== "rejected" || rejectionCode(latestSubmit) === NON_CORRECTABLE_REJECTION_CODE) return null;
+  return corrections.some((correction) => correction.rejectedOperationId === latestSubmit.operationId) ? null : latestSubmit;
+}
 
 export type NewOutboxOperation = {
   operationId: string;
@@ -118,6 +163,22 @@ export class SubmissionNotAllowedError extends Error {
   constructor() {
     super("This local draft cannot be submitted.");
     this.name = "SubmissionNotAllowedError";
+  }
+}
+
+/** The payload would be refused by the shared domain validator for a submission; nothing was written. */
+export class SubmissionValidationError extends SubmissionNotAllowedError {
+  constructor(readonly issues: { path: string; code: string }[]) {
+    super();
+    this.name = "SubmissionValidationError";
+  }
+}
+
+/** The correction draft cannot be created as shown; nothing changed. */
+export class CorrectionDraftError extends Error {
+  constructor(readonly reason: "stale" | "open-conflict" | "unresolved" | "snapshot-unavailable") {
+    super("The correction draft could not be created.");
+    this.name = "CorrectionDraftError";
   }
 }
 
@@ -218,6 +279,9 @@ export interface DraftRepository {
     conflictOperationIds: string[]; server: FetchedServerVersion;
   }): Promise<{ draft: LocalDraft | null }>;
   listConflictResolutions(employeeId: string): Promise<ConflictResolution[]>;
+  /** Makes the refused submission's snapshot payload the next local draft revision, with an insert-only correction record. */
+  createCorrectionDraft(employeeId: string, taskId: string, input: { rejectedOperationId: string }): Promise<{ draft: LocalDraft; correction: CorrectionDraft }>;
+  listCorrectionDrafts(employeeId: string): Promise<CorrectionDraft[]>;
 }
 
 export interface DraftDatabase {
@@ -243,6 +307,12 @@ export interface DraftDatabase {
    */
   resolveConflict(write: ConflictResolutionWrite): Promise<{ draft: LocalDraft | null; operation: OutboxItem | null }>;
   listConflictResolutions(employeeId: string): Promise<ConflictResolution[]>;
+  /**
+   * In one exclusive transaction: checks the open refusal, inserts the correction record and writes the refused
+   * snapshot payload as the next local draft revision. Queues nothing. Refused with `CorrectionDraftError`.
+   */
+  createCorrectionDraft(write: CorrectionDraftWrite): Promise<{ draft: LocalDraft; correction: CorrectionDraft }>;
+  listCorrectionDrafts(employeeId: string): Promise<CorrectionDraft[]>;
 }
 
 export class DraftListCorruptionError extends Error {
@@ -341,6 +411,9 @@ export function createDraftRepository(database: DraftDatabase, now: () => number
         if (changed) {
           try { parseLocalDraft(JSON.stringify(draft)); } catch { throw new SubmissionNotAllowedError(); }
         }
+        // The shared domain validator: a payload the server would refuse is not queued (no new rule, DEP-01R/02 stay gated).
+        const validation = validateGraphiePayload(payload, "submit");
+        if (!validation.ok) throw new SubmissionValidationError(validation.issues);
         const operation = await database.requestSubmission(changed ? draft : null, previous?.revision, newOperation("submit", draft));
         return { draft, operation };
       });
@@ -462,6 +535,14 @@ export function createDraftRepository(database: DraftDatabase, now: () => number
     },
     async listConflictResolutions(employeeId) {
       return database.listConflictResolutions(employeeId);
+    },
+    async createCorrectionDraft(employeeId, taskId, input) {
+      return serialize(scope(employeeId, taskId), () => database.createCorrectionDraft({
+        correctionId: createId(), employeeId, taskId, rejectedOperationId: input.rejectedOperationId, draftId: createId(), createdAt: now(),
+      }));
+    },
+    async listCorrectionDrafts(employeeId) {
+      return database.listCorrectionDrafts(employeeId);
     },
   };
 }

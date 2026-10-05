@@ -1,15 +1,19 @@
-import type { ConflictResolution, OutboxItem } from "../local-drafts/model";
+import type { ConflictResolution, CorrectionDraft, OutboxItem } from "../local-drafts/model";
 import { createSyncEngine, type SyncStore, type SyncTransport } from "./sync-engine";
 
 /** The durable rows of the signed-in employee and the active run; every presented sync state is derived from them. */
 export type TaskSyncSnapshot = {
   outbox?: { employeeId: string; items: OutboxItem[] };
   resolutions?: { employeeId: string; items: ConflictResolution[] };
+  corrections?: { employeeId: string; items: CorrectionDraft[] };
   /** The employee whose run is active; another identity never sees it as running. */
   runningFor?: string;
 };
 
-export type TaskSyncStore = SyncStore & { listConflictResolutions(employeeId: string): Promise<ConflictResolution[]> };
+export type TaskSyncStore = SyncStore & {
+  listConflictResolutions(employeeId: string): Promise<ConflictResolution[]>;
+  listCorrectionDrafts(employeeId: string): Promise<CorrectionDraft[]>;
+};
 
 /** What the App knows at call time about connectivity and the server-confirmed authorization. */
 export type SyncAuthorizationContext = { online: boolean; status: string; identityId: string | undefined };
@@ -57,14 +61,16 @@ export function createTaskSyncController(options: {
     isAuthorized,
   }) : null;
 
-  /** Re-reads the durable outbox and resolutions; a read failure keeps the previous state and returns false. */
+  /** Re-reads the durable outbox, resolutions and corrections; a read failure keeps the previous state and returns false. */
   async function refreshOutbox(employeeId: string | undefined) {
     if (!employeeId) return false;
     const generation = ++refreshGeneration;
     try {
-      const [items, resolutions] = await Promise.all([store.listOutbox(employeeId), store.listConflictResolutions(employeeId)]);
+      const [items, resolutions, corrections] = await Promise.all([
+        store.listOutbox(employeeId), store.listConflictResolutions(employeeId), store.listCorrectionDrafts(employeeId),
+      ]);
       if (generation !== refreshGeneration || !isActiveIdentity(employeeId)) return true;
-      update({ outbox: { employeeId, items }, resolutions: { employeeId, items: resolutions } });
+      update({ outbox: { employeeId, items }, resolutions: { employeeId, items: resolutions }, corrections: { employeeId, items: corrections } });
       return true;
     } catch {
       // Never fall back to « Brouillon »: the last derived state stays on screen.

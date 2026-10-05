@@ -88,7 +88,7 @@ development_status:
 
   epic-8: in-progress
   8-1-resolve-a-synchronization-conflict-explicitly: done
-  8-2-create-a-correction-draft-after-validation-rejection: backlog
+  8-2-create-a-correction-draft-after-validation-rejection: done
   8-3-create-a-responsable-only-replacement-after-acceptance: backlog
   8-4-handle-unfinished-tasks-after-employee-deactivation: backlog
   epic-8-retrospective: optional
@@ -307,7 +307,11 @@ action_items:
       to the domain validateGraphiePayload so device and server accept and refuse
       the same payloads (NUL, lone surrogates)."
     owner: "Mobile and domain maintainers (Story 8.2 or next validation change)"
-    status: open
+    status: done
+    note: "Story 8.2: parseGraphiePayload delegates to the domain checkGraphiePayloadStructure
+      (one copy of each structural rule); the domain refuses unpaired surrogates and
+      requestSubmission runs validateGraphiePayload(submit); parity test P1 in
+      apps/mobile/graphie-pov-catalogue.test.ts, domain V1/V2."
     ref: "_bmad-output/implementation-artifacts/epic-7-retro-2026-10-05.md"
   - id: "epic-7-retro-item-21-extract-the-mobile-sync-wiring-engine-cr"
     epic: 7

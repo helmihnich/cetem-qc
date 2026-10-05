@@ -699,7 +699,7 @@ So that the original attempt remains intact while valid data can be resubmitted.
 **And** the original submission attempt remains preserved read-only and is not labeled a synchronization conflict or server-accepted submission
 **And** the correction uses the normal save/submission flow and reports unresolved DEP-01R/02-dependent fields as gated rather than inventing rules.
 
-**Traceability:** FR-023, FR-024, UX-DR5, AD-4, AD-5, AD-6. **Dependency:** DEP-01/02 for unresolved validations.
+**Traceability:** spec `_bmad-output/specs/spec-8-2-create-a-correction-draft-after-validation-rejection/SPEC.md` (also places the `correctionOfOperationId` envelope field, the `rejected-submission-correction` lineage link, and the shared device/server structural validator from epic-7 retro item 20); FR-023, FR-024, UX-DR5, AD-4, AD-5, AD-6. **Dependency:** Stories 7.1–7.4 and 8.1 (done); DEP-01/02 for unresolved validations (gated, not invented).
 
 ### Story 8.3: Create a Responsable-only replacement after acceptance
 
