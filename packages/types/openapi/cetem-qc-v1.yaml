@@ -781,6 +781,80 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
+  /tasks/{taskId}/replacements:
+    post:
+      operationId: createReplacementControl
+      summary: Create a replacement control linked to a server-accepted audit
+      description: >-
+        Responsable only. Creates, in one transaction, a new draft Graphie Mobile task assigned like POST /tasks and one
+        insert-only `replacement-control` link to the accepted audit of the own-team task `taskId`. The original task,
+        audit and evidence are never written. One replacement per original. Nothing is copied from the original.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: taskId
+          in: path
+          required: true
+          description: The task holding the accepted audit to replace.
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateTaskRequest'
+      responses:
+        '201':
+          description: Replacement task and lineage link created (Cache-Control no-store)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReplacementTaskResponse'
+        '400':
+          description: Invalid task details (VALIDATION_ERROR)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '401':
+          description: Session rejected
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '403':
+          description: Responsable role required (FORBIDDEN)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: >-
+            Malformed, unknown or another team's task (TASK_NOT_FOUND); the cases are not told apart.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '409':
+          description: >-
+            The task has no server-accepted audit (AUDIT_NOT_ACCEPTED) or already has a replacement
+            (REPLACEMENT_ALREADY_EXISTS).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '422':
+          description: Assignee is not an active employee in the Responsable's team (TASK_ASSIGNEE_UNAVAILABLE)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '500':
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
 components:
   securitySchemes:
     bearerAuth:
@@ -927,6 +1001,20 @@ components:
         state:
           type: string
           const: draft
+    ReplacementTaskResponse:
+      type: object
+      additionalProperties: false
+      required: [task, replacementOf]
+      properties:
+        task:
+          $ref: '#/components/schemas/Task'
+        replacementOf:
+          type: object
+          additionalProperties: false
+          required: [taskId, auditId]
+          properties:
+            taskId: { type: string, format: uuid }
+            auditId: { type: string, format: uuid }
     TaskListResponse:
       type: object
       additionalProperties: false
@@ -939,7 +1027,7 @@ components:
     TaskListItem:
       type: object
       additionalProperties: false
-      required: [id, type, establishment, assignee, state, lastUpdatedAt]
+      required: [id, type, establishment, assignee, state, lastUpdatedAt, replacementOf, replacedBy]
       properties:
         id: { type: string, format: uuid }
         type:
@@ -949,8 +1037,17 @@ components:
         assignee: { type: string }
         state:
           type: string
-          const: draft
+          enum: [draft, submitted]
+          description: submitted when the task's audit was accepted by the server; draft otherwise.
         lastUpdatedAt: { type: string, format: date-time }
+        replacementOf:
+          type: [string, 'null']
+          format: uuid
+          description: The original task ID when this task is a replacement control.
+        replacedBy:
+          type: [string, 'null']
+          format: uuid
+          description: The replacement task ID when this task's accepted audit was replaced.
     EmployeeTaskListResponse:
       type: object
       additionalProperties: false
@@ -1142,7 +1239,8 @@ components:
       type: object
       description: >-
         Error envelope. Codes include VALIDATION_ERROR, AUTHENTICATION_FAILED, FORBIDDEN, TASK_NOT_FOUND,
-        PAYLOAD_TOO_LARGE, IDEMPOTENCY_KEY_REUSED and INTERNAL_ERROR.
+        PAYLOAD_TOO_LARGE, IDEMPOTENCY_KEY_REUSED, AUDIT_NOT_ACCEPTED, REPLACEMENT_ALREADY_EXISTS,
+        TASK_ASSIGNEE_UNAVAILABLE and INTERNAL_ERROR.
       required: [error]
       properties:
         error:

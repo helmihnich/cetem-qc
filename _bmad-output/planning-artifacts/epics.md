@@ -715,7 +715,7 @@ So that a material submitted error can be corrected without altering original ev
 **And** only Responsable is authorized to invoke it; Employé cannot see or call a post-acceptance replacement action
 **And** the original task, accepted measurements/comments, reports and history remain unchanged and show reciprocal replacement lineage.
 
-**Traceability:** FR-024, FR-040, DR-001, DR-006, SEC-002, SEC-003, AD-3, AD-4, AD-6, UX-DR11, OD-03.
+**Traceability:** spec `_bmad-output/specs/spec-8-3-create-a-responsable-only-replacement-after-acceptance/SPEC.md` (also places the `audit_replacement_links` table, the `POST /tasks/{taskId}/replacements` route, and the accepted state and reciprocal lineage on the Responsable task list); FR-024, FR-040, DR-001, DR-006, SEC-002, SEC-003, AD-3, AD-4, AD-6, UX-DR11, OD-03. **Dependency:** Stories 7.1–7.4, 8.1 and 8.2 (done).
 
 ### Story 8.4: Handle unfinished tasks after employee deactivation
 

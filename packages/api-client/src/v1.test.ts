@@ -182,6 +182,56 @@ test("K4 sync operations send correctionOfOperationId only when it is given", as
   assert.deepEqual(await clientFor(rejected, 422).client.submitEmployeeTaskAudit(taskId, { ...syncBody, correctionOfOperationId }), { status: 422, body: rejected });
 });
 
+const replacementInput = { establishment: "Centre B", service: "Radiologie", type: "graphie_mobile", assigneeId: "00000000-0000-4000-8000-000000000050" } as const;
+const replacementBody = {
+  task: { id: "00000000-0000-4000-8000-000000000051", establishment: "Centre B", service: "Radiologie", type: "graphie_mobile", assigneeId: replacementInput.assigneeId, creatorId: "00000000-0000-4000-8000-000000000052", createdAt: "2026-10-05T10:00:00.000Z", state: "draft" },
+  replacementOf: { taskId, auditId: "00000000-0000-4000-8000-000000000053" },
+};
+
+test("K6 a replacement posts the task request with the bearer token to the original task's route and returns the 201 body", async () => {
+  const { client, calls } = clientFor(replacementBody, 201);
+  assert.deepEqual(await client.createReplacementControl(taskId, replacementInput), { status: 201, body: replacementBody });
+  assert.equal(calls[0]!.url, `https://cetem-qc.example.test/api/v1/tasks/${taskId}/replacements`);
+  assert.equal(calls[0]!.init?.method, "POST");
+  assert.deepEqual(calls[0]!.init?.headers, { accept: "application/json", "content-type": "application/json", authorization: `Bearer ${token}` });
+  assert.deepEqual(JSON.parse(String(calls[0]!.init?.body)), replacementInput);
+  const encoded = clientFor(replacementBody, 201);
+  await encoded.client.createReplacementControl("tâche / 1", replacementInput);
+  assert.equal(encoded.calls[0]!.url, "https://cetem-qc.example.test/api/v1/tasks/t%C3%A2che%20%2F%201/replacements");
+});
+
+test("K6 a replacement returns typed 404, 409 and 422 outcomes and throws on anything else", async () => {
+  const outcomes: Array<[number, string, string]> = [
+    [404, "TASK_NOT_FOUND", "Tâche introuvable."],
+    [409, "AUDIT_NOT_ACCEPTED", "Cette tâche n’a pas d’audit accepté par le serveur."],
+    [409, "REPLACEMENT_ALREADY_EXISTS", "Un contrôle de remplacement existe déjà pour cet audit."],
+    [422, "TASK_ASSIGNEE_UNAVAILABLE", "Cet Employé n’est pas actif ou ne fait pas partie de votre équipe."],
+  ];
+  for (const [status, code, message] of outcomes) {
+    assert.deepEqual(await clientFor({ error: { code, message } }, status).client.createReplacementControl(taskId, replacementInput), { status, code, message });
+  }
+  const failures: Array<[unknown, number, string]> = [
+    [{ error: { code: "VALIDATION_ERROR", message: "Invalide." } }, 400, "VALIDATION_ERROR"],
+    [{ error: { code: "AUTHENTICATION_FAILED", message: "Email ou mot de passe invalide." } }, 401, "AUTHENTICATION_FAILED"],
+    [{ error: { code: "FORBIDDEN", message: "Action réservée au Responsable de l’équipe." } }, 403, "FORBIDDEN"],
+    [{ error: { code: "INTERNAL_ERROR", message: "Le contrôle de remplacement n’a pas pu être créé." } }, 500, "INTERNAL_ERROR"],
+    [{ error: { code: "TASK_NOT_FOUND", message: "Tâche introuvable." } }, 409, "TASK_NOT_FOUND"],
+    [{ error: { code: "AUDIT_NOT_ACCEPTED", message: "x" } }, 422, "AUDIT_NOT_ACCEPTED"],
+    [{ ...replacementBody, extra: true }, 201, "UNEXPECTED_API_RESPONSE"],
+    [replacementBody, 200, "UNEXPECTED_API_RESPONSE"],
+  ];
+  for (const [payload, status, code] of failures) {
+    await assert.rejects(clientFor(payload, status).client.createReplacementControl(taskId, replacementInput), (error: unknown) => {
+      assert.ok(error instanceof ApiRequestError, `${status} ${code}`);
+      assert.deepEqual([error.status, error.code], [status, code]);
+      return true;
+    });
+  }
+  const { client, calls } = clientFor(replacementBody, 201);
+  await assert.rejects(client.createReplacementControl(taskId, { ...replacementInput, assigneeId: "employe" }), { name: "ZodError" });
+  assert.equal(calls.length, 0, "an invalid request is never sent");
+});
+
 const auditVersionBody = {
   revision: 2, state: "draft", lastChangedAt: "2026-10-04T09:00:00.000Z", lastChangedBy: actor, payload: syncBody.payload,
 };

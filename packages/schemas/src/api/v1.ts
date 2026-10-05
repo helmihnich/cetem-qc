@@ -21,6 +21,7 @@ type TaskAssigneeListResponseContract = apiV1Operations["listTaskAssignees"]["re
 type TaskListResponseContract = apiV1Operations["listOwnTeamTasks"]["responses"][200]["content"]["application/json"];
 type CreateTaskRequestContract = apiV1Operations["createAssignedTask"]["requestBody"]["content"]["application/json"];
 type TaskResponseContract = apiV1Operations["createAssignedTask"]["responses"][201]["content"]["application/json"];
+type ReplacementTaskResponseContract = apiV1Operations["createReplacementControl"]["responses"][201]["content"]["application/json"];
 type EmployeeTaskListResponseContract = apiV1Operations["listAssignedEmployeeTasks"]["responses"][200]["content"]["application/json"];
 type EmployeeTaskResponseContract = apiV1Operations["getAssignedEmployeeTask"]["responses"][200]["content"]["application/json"];
 
@@ -79,7 +80,8 @@ export const taskAssigneeListResponseSchema: z.ZodType<TaskAssigneeListResponseC
 export const taskListQuerySchema = z.object({}).strict();
 const taskListItemSchema = z.object({
   id: z.string().uuid(), type: z.literal("graphie_mobile"), establishment: z.string(), assignee: z.string(),
-  state: z.literal("draft"), lastUpdatedAt: z.string().datetime(),
+  state: z.enum(["draft", "submitted"]), lastUpdatedAt: z.string().datetime(),
+  replacementOf: z.string().uuid().nullable(), replacedBy: z.string().uuid().nullable(),
 }).strict();
 export const taskListResponseSchema: z.ZodType<TaskListResponseContract> = z.object({ tasks: z.array(taskListItemSchema) }).strict();
 // PostgreSQL text cannot store NUL; reject it as a validation error instead of a database failure.
@@ -92,6 +94,10 @@ const taskSchema = z.object({
   assigneeId: z.string().uuid(), creatorId: z.string().uuid(), createdAt: z.string().datetime(), state: z.literal("draft"),
 }).strict();
 export const taskResponseSchema: z.ZodType<TaskResponseContract> = z.object({ task: taskSchema }).strict();
+export const replacementTaskResponseSchema: z.ZodType<ReplacementTaskResponseContract> = z.object({
+  task: taskSchema,
+  replacementOf: z.object({ taskId: z.string().uuid(), auditId: z.string().uuid() }).strict(),
+}).strict();
 const employeeTaskSchema = z.object({
   id: z.string().uuid(), type: z.literal("graphie_mobile"), establishment: z.string(), service: z.string(),
   state: z.literal("draft"), createdAt: z.string().datetime(),
@@ -172,6 +178,7 @@ export type TaskAssigneeListResponse = z.infer<typeof taskAssigneeListResponseSc
 export type TaskListResponse = z.infer<typeof taskListResponseSchema>;
 export type CreateTaskRequest = z.infer<typeof createTaskRequestSchema>;
 export type TaskResponse = z.infer<typeof taskResponseSchema>;
+export type ReplacementTaskResponse = z.infer<typeof replacementTaskResponseSchema>;
 export type EmployeeTaskListResponse = z.infer<typeof employeeTaskListResponseSchema>;
 export type EmployeeTaskResponse = z.infer<typeof employeeTaskResponseSchema>;
 export type SessionTokenResponse = z.infer<typeof sessionTokenResponseSchema>;

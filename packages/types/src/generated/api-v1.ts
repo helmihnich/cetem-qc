@@ -280,6 +280,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/tasks/{taskId}/replacements": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create a replacement control linked to a server-accepted audit
+         * @description Responsable only. Creates, in one transaction, a new draft Graphie Mobile task assigned like POST /tasks and one insert-only `replacement-control` link to the accepted audit of the own-team task `taskId`. The original task, audit and evidence are never written. One replacement per original. Nothing is copied from the original.
+         */
+        post: operations["createReplacementControl"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -377,6 +397,15 @@ export interface components {
             /** @constant */
             state: "draft";
         };
+        ReplacementTaskResponse: {
+            task: components["schemas"]["Task"];
+            replacementOf: {
+                /** Format: uuid */
+                taskId: string;
+                /** Format: uuid */
+                auditId: string;
+            };
+        };
         TaskListResponse: {
             tasks: components["schemas"]["TaskListItem"][];
         };
@@ -387,10 +416,23 @@ export interface components {
             type: "graphie_mobile";
             establishment: string;
             assignee: string;
-            /** @constant */
-            state: "draft";
+            /**
+             * @description submitted when the task's audit was accepted by the server; draft otherwise.
+             * @enum {string}
+             */
+            state: "draft" | "submitted";
             /** Format: date-time */
             lastUpdatedAt: string;
+            /**
+             * Format: uuid
+             * @description The original task ID when this task is a replacement control.
+             */
+            replacementOf: string | null;
+            /**
+             * Format: uuid
+             * @description The replacement task ID when this task's accepted audit was replaced.
+             */
+            replacedBy: string | null;
         };
         EmployeeTaskListResponse: {
             tasks: components["schemas"]["EmployeeTaskListItem"][];
@@ -519,7 +561,7 @@ export interface components {
             /** @constant */
             version: "v1";
         };
-        /** @description Error envelope. Codes include VALIDATION_ERROR, AUTHENTICATION_FAILED, FORBIDDEN, TASK_NOT_FOUND, PAYLOAD_TOO_LARGE, IDEMPOTENCY_KEY_REUSED and INTERNAL_ERROR. */
+        /** @description Error envelope. Codes include VALIDATION_ERROR, AUTHENTICATION_FAILED, FORBIDDEN, TASK_NOT_FOUND, PAYLOAD_TOO_LARGE, IDEMPOTENCY_KEY_REUSED, AUDIT_NOT_ACCEPTED, REPLACEMENT_ALREADY_EXISTS, TASK_ASSIGNEE_UNAVAILABLE and INTERNAL_ERROR. */
         ApiError: {
             error: {
                 code: string;
@@ -1597,6 +1639,96 @@ export interface operations {
                 };
             };
             /** @description Assignee is not an active employee in the Responsable's team */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    createReplacementControl: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The task holding the accepted audit to replace. */
+                taskId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateTaskRequest"];
+            };
+        };
+        responses: {
+            /** @description Replacement task and lineage link created (Cache-Control no-store) */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReplacementTaskResponse"];
+                };
+            };
+            /** @description Invalid task details (VALIDATION_ERROR) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Session rejected */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Responsable role required (FORBIDDEN) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Malformed, unknown or another team's task (TASK_NOT_FOUND); the cases are not told apart. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description The task has no server-accepted audit (AUDIT_NOT_ACCEPTED) or already has a replacement (REPLACEMENT_ALREADY_EXISTS). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Assignee is not an active employee in the Responsable's team (TASK_ASSIGNEE_UNAVAILABLE) */
             422: {
                 headers: {
                     [name: string]: unknown;

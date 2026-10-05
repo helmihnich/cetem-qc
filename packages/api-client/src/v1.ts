@@ -1,13 +1,20 @@
-import { apiErrorSchema, authenticationRequestSchema, authenticationResponseSchema, createEmployeeRequestSchema, createTaskRequestSchema, employeeCredentialResponseSchema, employeeListResponseSchema, employeeTaskAuditVersionSchema, employeeTaskListQuerySchema, employeeTaskListResponseSchema, employeeTaskResponseSchema, healthResponseSchema, passwordReplacementRequestSchema, sessionResponseSchema, syncOperationAcceptedSchema, syncOperationConflictSchema, syncOperationRejectedSchema, syncOperationRequestSchema, taskAssigneeListResponseSchema, taskListResponseSchema, taskResponseSchema } from "@cetem-qc/schemas/api/v1";
-import type { AuthenticationRequest, AuthenticationResponse, CreateEmployeeRequest, CreateTaskRequest, EmployeeCredentialResponse, EmployeeListResponse, EmployeeTaskAuditVersion, EmployeeTaskListResponse, EmployeeTaskResponse, HealthResponse, PasswordReplacementRequest, SyncOperationAccepted, SyncOperationConflict, SyncOperationRejected, SyncOperationRequest, TaskListResponse, TaskResponse } from "@cetem-qc/schemas/api/v1";
+import { apiErrorSchema, authenticationRequestSchema, authenticationResponseSchema, createEmployeeRequestSchema, createTaskRequestSchema, employeeCredentialResponseSchema, employeeListResponseSchema, employeeTaskAuditVersionSchema, employeeTaskListQuerySchema, employeeTaskListResponseSchema, employeeTaskResponseSchema, healthResponseSchema, passwordReplacementRequestSchema, replacementTaskResponseSchema, sessionResponseSchema, syncOperationAcceptedSchema, syncOperationConflictSchema, syncOperationRejectedSchema, syncOperationRequestSchema, taskAssigneeListResponseSchema, taskListResponseSchema, taskResponseSchema } from "@cetem-qc/schemas/api/v1";
+import type { AuthenticationRequest, AuthenticationResponse, CreateEmployeeRequest, CreateTaskRequest, EmployeeCredentialResponse, EmployeeListResponse, EmployeeTaskAuditVersion, EmployeeTaskListResponse, EmployeeTaskResponse, HealthResponse, PasswordReplacementRequest, ReplacementTaskResponse, SyncOperationAccepted, SyncOperationConflict, SyncOperationRejected, SyncOperationRequest, TaskListResponse, TaskResponse } from "@cetem-qc/schemas/api/v1";
 
-export { taskListResponseSchema };
-export type { EmployeeTaskAuditVersion, EmployeeTaskListResponse, EmployeeTaskResponse, SyncOperationAccepted, SyncOperationConflict, SyncOperationRejected, SyncOperationRequest, TaskListResponse };
+export { replacementTaskResponseSchema, taskListResponseSchema };
+export type { CreateTaskRequest, EmployeeTaskAuditVersion, EmployeeTaskListResponse, EmployeeTaskResponse, ReplacementTaskResponse, SyncOperationAccepted, SyncOperationConflict, SyncOperationRejected, SyncOperationRequest, TaskListResponse };
 
 export type SyncOperationResponse =
   | { status: 200; body: SyncOperationAccepted }
   | { status: 409; body: SyncOperationConflict }
   | { status: 422; body: SyncOperationRejected };
+
+/** The documented outcomes of a replacement request; any other status or body throws `ApiRequestError`. */
+export type ReplacementControlResponse =
+  | { status: 201; body: ReplacementTaskResponse }
+  | { status: 404; code: "TASK_NOT_FOUND"; message: string }
+  | { status: 409; code: "AUDIT_NOT_ACCEPTED" | "REPLACEMENT_ALREADY_EXISTS"; message: string }
+  | { status: 422; code: "TASK_ASSIGNEE_UNAVAILABLE"; message: string };
 
 export class ApiRequestError extends Error {
   constructor(
@@ -92,6 +99,24 @@ export function createApiClient({ baseUrl, fetch: fetcher = fetch, sessionToken:
       const payload = await request("/tasks", { method: "POST", headers: { accept: "application/json", "content-type": "application/json", ...sessionHeaders() }, body: JSON.stringify(createTaskRequestSchema.parse(input)) });
       if (!payload.response.ok) throw toRequestError(payload.response.status, payload.data);
       return taskResponseSchema.parse(payload.data);
+    },
+    /** Creates a replacement control linked to the accepted audit of `originalTaskId` (Responsable only). */
+    async createReplacementControl(originalTaskId: string, input: CreateTaskRequest): Promise<ReplacementControlResponse> {
+      const payload = await request(`/tasks/${encodeURIComponent(originalTaskId)}/replacements`, { method: "POST", headers: { accept: "application/json", "content-type": "application/json", ...sessionHeaders() }, body: JSON.stringify(createTaskRequestSchema.parse(input)) });
+      const status = payload.response.status;
+      if (status === 201) {
+        const parsed = replacementTaskResponseSchema.safeParse(payload.data);
+        if (parsed.success) return { status: 201, body: parsed.data };
+        throw toRequestError(status, payload.data);
+      }
+      const error = apiErrorSchema.safeParse(payload.data);
+      if (error.success) {
+        const { code, message } = error.data.error;
+        if (status === 404 && code === "TASK_NOT_FOUND") return { status, code, message };
+        if (status === 409 && (code === "AUDIT_NOT_ACCEPTED" || code === "REPLACEMENT_ALREADY_EXISTS")) return { status, code, message };
+        if (status === 422 && code === "TASK_ASSIGNEE_UNAVAILABLE") return { status, code, message };
+      }
+      throw toRequestError(status, payload.data);
     },
     async regenerateEmployeeCredential(employeeId: string): Promise<EmployeeCredentialResponse> {
       const payload = await request(`/employees/${encodeURIComponent(employeeId)}/credential`, { method: "POST", headers: { accept: "application/json", ...sessionHeaders() } });

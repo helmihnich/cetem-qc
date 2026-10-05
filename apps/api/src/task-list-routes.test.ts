@@ -51,6 +51,11 @@ function fakePool(): Pool {
         assert.doesNotMatch(sql, /ORDER BY/i);
         return { rows: values?.[0] === ownerId ? [ownTask, inactiveTask] : [], rowCount: values?.[0] === ownerId ? 2 : 0 };
       }
+      if (sql.includes("FROM unnest($1::uuid[]) AS listed(id)")) {
+        return { rows: [{ id: ownTask.id, has_submitted_audit: false, replacement_of: null, replaced_by: null }, {
+          id: inactiveTask.id, has_submitted_audit: true, replacement_of: ownTask.id, replaced_by: null,
+        }], rowCount: 2 };
+      }
       return { rows: [], rowCount: 0 };
     },
   } as unknown as Pool;
@@ -67,7 +72,7 @@ async function withServer(run: (root: string) => Promise<void>) {
   }
 }
 
-test("GET /tasks returns six scoped fields with inactive assignee labels and denies unsupported or unauthorized access", async () => {
+test("GET /tasks returns the scoped fields with inactive assignee labels and denies unsupported or unauthorized access", async () => {
   taskQueryCount = 0;
   await withServer(async (root) => {
     const getTasks = (token?: string, path = "/tasks") => fetch(`${root}${path}`, { headers: token ? { authorization: `Bearer ${token}` } : {} });
@@ -82,15 +87,20 @@ test("GET /tasks returns six scoped fields with inactive assignee labels and den
       assignee: "Amel Ben Ali",
       state: "draft",
       lastUpdatedAt: "2026-09-28T10:00:00.000Z",
+      replacementOf: null,
+      replacedBy: null,
     }, {
       id: inactiveTask.id,
       type: "graphie_mobile",
       establishment: "Centre inactif",
       assignee: "Sami Ben Ali — Inactif",
-      state: "draft",
+      state: "submitted",
       lastUpdatedAt: "2026-09-28T10:00:00.000Z",
+      replacementOf: ownTask.id,
+      replacedBy: null,
     }] });
-    for (const task of ownPayload.tasks) assert.deepEqual(Object.keys(task).sort(), ["assignee", "establishment", "id", "lastUpdatedAt", "state", "type"]);
+    // Story 8.3 adds the two lineage fields (null without a replacement-control link).
+    for (const task of ownPayload.tasks) assert.deepEqual(Object.keys(task).sort(), ["assignee", "establishment", "id", "lastUpdatedAt", "replacedBy", "replacementOf", "state", "type"]);
     assert.equal(taskQueryCount, 1);
 
     const unsupportedTeam = await getTasks(ownerToken, "/tasks?teamId=other-team");

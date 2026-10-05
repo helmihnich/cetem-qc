@@ -85,6 +85,7 @@ const OTHER_MUTATING_ROUTES = [
   "POST /authenticate",
   "DELETE /session",
   "POST /tasks",
+  "POST /tasks/:taskId/replacements",
   "POST /employees",
   "POST /employees/:employeeId/credential",
   "POST /employees/:employeeId/password-reset",
@@ -175,6 +176,8 @@ test("F5 every other mutating route, called by both roles, leaves the accepted e
     const calls: Array<[string, () => string, unknown]> = [
       ["POST", () => "/authenticate", { email: "inconnu@example.test", password: "mot-de-passe" }],
       ["POST", () => "/tasks", { establishment: "Établissement B", service: "Radiologie", type: "graphie_mobile", assigneeId: employee }],
+      // Story 8.3: a replacement control of the accepted task creates a new task and leaves the original's evidence unchanged.
+      ["POST", () => `/tasks/${taskId}/replacements`, { establishment: "Établissement B", service: "Radiologie", type: "graphie_mobile", assigneeId: employee }],
       ["POST", () => "/employees", { firstName: "Nouveau", surname: "Test", email: `${randomUUID()}@example.test` }],
       ["POST", () => `/employees/${createdEmployee}/credential`, undefined],
       ["POST", () => `/employees/${colleague}/password-reset`, undefined],
@@ -194,12 +197,15 @@ test("F5 every other mutating route, called by both roles, leaves the accepted e
         assert.equal(await evidenceFingerprint(pool, taskId), before, `${method} ${path()}`);
       }
     }
-    const called = new Set(statuses.map((line) => line.split(" ").slice(1, 3).join(" ").replace(/\/[0-9a-f-]{36}\//, "/:employeeId/")));
+    const routeOf = (line: string) => line.replace(/\/tasks\/[0-9a-f-]{36}\//, "/tasks/:taskId/").replace(/\/[0-9a-f-]{36}\//, "/:employeeId/");
+    const called = new Set(statuses.map((line) => routeOf(line.split(" ").slice(1, 3).join(" "))));
     assert.deepEqual([...called].sort(), [...OTHER_MUTATING_ROUTES].sort());
     // The Responsable's routes really wrote, so the unchanged fingerprint is not only the result of refusals.
-    const ownerWrites = statuses.filter((line) => line.startsWith("owner ")).map((line) => line.replace(/\/[0-9a-f-]{36}\//, "/:employeeId/"));
+    const ownerWrites = statuses.filter((line) => line.startsWith("owner ")).map(routeOf);
+    assert.ok(statuses.includes(`employee POST /tasks/${taskId}/replacements 403`), "the Employé's replacement call is refused");
     for (const expected of [
       "owner POST /tasks 201",
+      "owner POST /tasks/:taskId/replacements 201",
       "owner POST /employees 201",
       "owner POST /employees/:employeeId/credential 200",
       "owner POST /employees/:employeeId/password-reset 200",

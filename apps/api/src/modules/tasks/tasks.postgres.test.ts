@@ -78,6 +78,10 @@ test("PostgreSQL scopes the operational task list by assigned team and tracks th
       const updatedList = await listOwnTeamTasks(scopedPool, owner);
       assert.equal(updatedList.find((task) => task.id === ownTask.id)?.lastUpdatedAt, timestamps.rows[0]!.updated_at.toISOString());
 
+      // Keep the 0007 backfill assertions above on the staged schema, then bring the current API
+      // through all migrations before exercising GET /tasks (Story 8.3 reads accepted audits/lineage).
+      await migrate();
+
       const ownerToken = await addSession(scopedPool, owner);
       const otherOwnerToken = await addSession(scopedPool, otherOwner);
       const employeeToken = await addSession(scopedPool, ownEmployee);

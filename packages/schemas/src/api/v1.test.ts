@@ -4,7 +4,7 @@ import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import type { apiV1Components, apiV1Operations } from "@cetem-qc/types";
-import { apiErrorSchema, createEmployeeRequestSchema, createTaskRequestSchema, employeeCredentialResponseSchema, employeeListResponseSchema, employeeTaskListQuerySchema, employeeTaskListResponseSchema, employeeTaskAuditVersionSchema, employeeTaskResponseSchema, graphieDraftPayloadSchema, healthQuerySchema, healthResponseSchema, syncOperationAcceptedSchema, syncOperationConflictSchema, syncOperationRejectedSchema, syncOperationRequestSchema, taskListQuerySchema, taskListResponseSchema, updateEmployeeStatusRequestSchema, updateEmployeeStatusResponseSchema } from "./v1.js";
+import { apiErrorSchema, createEmployeeRequestSchema, createTaskRequestSchema, employeeCredentialResponseSchema, employeeListResponseSchema, employeeTaskListQuerySchema, employeeTaskListResponseSchema, employeeTaskAuditVersionSchema, employeeTaskResponseSchema, graphieDraftPayloadSchema, healthQuerySchema, healthResponseSchema, replacementTaskResponseSchema, syncOperationAcceptedSchema, syncOperationConflictSchema, syncOperationRejectedSchema, syncOperationRequestSchema, taskListQuerySchema, taskListResponseSchema, updateEmployeeStatusRequestSchema, updateEmployeeStatusResponseSchema } from "./v1.js";
 
 const contractPath = fileURLToPath(new URL("../../../types/openapi/cetem-qc-v1.yaml", import.meta.url));
 
@@ -52,7 +52,7 @@ test("employee status schemas enforce the OpenAPI contract and reject extra owne
   assert.equal(updateEmployeeStatusRequestSchema.safeParse({ active: "false" }).success, false);
 });
 
-test("task list schema exposes only the six authorized fields and rejects scope parameters", async () => {
+test("task list schema exposes only the authorized fields and rejects scope parameters", async () => {
   const item: apiV1Components["schemas"]["TaskListItem"] = {
     id: "00000000-0000-4000-8000-000000000010",
     type: "graphie_mobile",
@@ -60,6 +60,8 @@ test("task list schema exposes only the six authorized fields and rejects scope 
     assignee: "Amel Ben Ali",
     state: "draft",
     lastUpdatedAt: "2026-09-28T10:00:00.000Z",
+    replacementOf: null,
+    replacedBy: null,
   };
   const response: apiV1Operations["listOwnTeamTasks"]["responses"][200]["content"]["application/json"] = { tasks: [item] };
   assert.deepEqual(taskListQuerySchema.parse({}), {});
@@ -70,7 +72,47 @@ test("task list schema exposes only the six authorized fields and rejects scope 
 
   const openapi = await readFile(path.resolve(contractPath), "utf8");
   assert.match(openapi, /listOwnTeamTasks[\s\S]*?TaskListResponse/);
-  assert.match(openapi, /TaskListItem:[\s\S]*?required: \[id, type, establishment, assignee, state, lastUpdatedAt\]/);
+  assert.match(openapi, /TaskListItem:[\s\S]*?required: \[id, type, establishment, assignee, state, lastUpdatedAt, replacementOf, replacedBy\]/);
+});
+
+test("K5 the task list carries the accepted state and both lineage fields; the replacement 201 body is strict", async () => {
+  const original = "00000000-0000-4000-8000-000000000010";
+  const replacement = "00000000-0000-4000-8000-000000000011";
+  const item: apiV1Components["schemas"]["TaskListItem"] = {
+    id: original, type: "graphie_mobile", establishment: "Centre de contrôle", assignee: "Employé Test",
+    state: "submitted", lastUpdatedAt: "2026-09-28T10:00:00.000Z", replacementOf: null, replacedBy: replacement,
+  };
+  const replacementItem: apiV1Components["schemas"]["TaskListItem"] = { ...item, id: replacement, state: "draft", replacementOf: original, replacedBy: null };
+  assert.deepEqual(taskListResponseSchema.parse({ tasks: [item, replacementItem] }), { tasks: [item, replacementItem] });
+  for (const state of ["accepted", "rejected", "", null]) {
+    assert.equal(taskListResponseSchema.safeParse({ tasks: [{ ...item, state }] }).success, false, String(state));
+  }
+  for (const field of ["replacementOf", "replacedBy"] as const) {
+    const missing: Record<string, unknown> = { ...item };
+    delete missing[field];
+    assert.equal(taskListResponseSchema.safeParse({ tasks: [missing] }).success, false, `${field} is required`);
+    for (const value of ["tache-1", 3, ""]) {
+      assert.equal(taskListResponseSchema.safeParse({ tasks: [{ ...item, [field]: value }] }).success, false, `${field} ${String(value)}`);
+    }
+  }
+  assert.equal(taskListResponseSchema.safeParse({ tasks: [{ ...item, replacementAuditId: original }] }).success, false);
+
+  const body: apiV1Operations["createReplacementControl"]["responses"][201]["content"]["application/json"] = {
+    task: {
+      id: replacement, establishment: "Centre de contrôle", service: "Radiologie", type: "graphie_mobile",
+      assigneeId: "00000000-0000-4000-8000-000000000002", creatorId: "00000000-0000-4000-8000-000000000001",
+      createdAt: "2026-10-05T10:00:00.000Z", state: "draft",
+    },
+    replacementOf: { taskId: original, auditId: "00000000-0000-4000-8000-000000000020" },
+  };
+  assert.deepEqual(replacementTaskResponseSchema.parse(body), body);
+  assert.equal(replacementTaskResponseSchema.safeParse({ ...body, extra: true }).success, false);
+  assert.equal(replacementTaskResponseSchema.safeParse({ ...body, replacementOf: { taskId: original } }).success, false);
+  assert.equal(replacementTaskResponseSchema.safeParse({ ...body, replacementOf: { ...body.replacementOf, revision: 2 } }).success, false);
+  assert.equal(replacementTaskResponseSchema.safeParse({ ...body, task: { ...body.task, state: "submitted" } }).success, false);
+
+  const openapi = await readFile(path.resolve(contractPath), "utf8");
+  assert.match(openapi, /\/tasks\/\{taskId\}\/replacements:[\s\S]*?operationId: createReplacementControl[\s\S]*?CreateTaskRequest[\s\S]*?ReplacementTaskResponse/);
 });
 
 test("employee task contracts are strict and reject unsupported list scope", async () => {

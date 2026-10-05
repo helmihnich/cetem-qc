@@ -1,7 +1,7 @@
 import express from "express";
 import type { Server } from "node:http";
 import type { Pool } from "pg";
-import { apiErrorSchema, authenticationRequestSchema, authenticationResponseSchema, createEmployeeRequestSchema, createTaskRequestSchema, employeeCredentialResponseSchema, employeeListResponseSchema, employeeTaskAuditVersionSchema, employeeTaskListQuerySchema, employeeTaskListResponseSchema, employeeTaskResponseSchema, healthQuerySchema, passwordReplacementRequestSchema, sessionResponseSchema, syncOperationRequestSchema, taskAssigneeListResponseSchema, taskListQuerySchema, taskListResponseSchema, taskResponseSchema, updateEmployeeStatusRequestSchema, updateEmployeeStatusResponseSchema } from "@cetem-qc/schemas/api/v1";
+import { apiErrorSchema, authenticationRequestSchema, authenticationResponseSchema, createEmployeeRequestSchema, createTaskRequestSchema, employeeCredentialResponseSchema, employeeListResponseSchema, employeeTaskAuditVersionSchema, employeeTaskListQuerySchema, employeeTaskListResponseSchema, employeeTaskResponseSchema, healthQuerySchema, passwordReplacementRequestSchema, replacementTaskResponseSchema, sessionResponseSchema, syncOperationRequestSchema, taskAssigneeListResponseSchema, taskListQuerySchema, taskListResponseSchema, taskResponseSchema, updateEmployeeStatusRequestSchema, updateEmployeeStatusResponseSchema } from "@cetem-qc/schemas/api/v1";
 import { getHealth } from "./modules/health/health-query.js";
 import {
   authenticateWithPassword,
@@ -14,6 +14,8 @@ import { createOwnTeamEmployee, DuplicateEmployeeEmailError, regenerateOwnTeamEm
 import { createAssignedTask, listAssignedEmployeeTasks, listEligibleTaskAssignees, listOwnTeamTasks, TaskAssigneeUnavailableError } from "./modules/tasks/tasks.js";
 import { getAssignedEmployeeTask } from "./modules/tasks/queries/assigned-employee-task.js";
 import { getCurrentAuditVersion } from "./modules/audits/queries/current-audit-version.js";
+import { readTaskAcceptanceAndLineage } from "./modules/audits/queries/task-audit-lineage.js";
+import { createReplacementControl } from "./modules/audits/commands/create-replacement-control.js";
 import { processSyncOperation } from "./modules/sync/commands/process-sync-operation.js";
 import type { SyncOperationKind } from "./modules/sync/commands/process-sync-operation.js";
 
@@ -215,7 +217,11 @@ export function createApp(pool?: Pool) {
     }
     try {
       const tasks = await listOwnTeamTasks(getPool(), session.id);
-      response.status(200).json(taskListResponseSchema.parse({ tasks }));
+      // The accepted state and the replacement lineage are derived by `audits`, never stored on the task.
+      const lineage = await readTaskAcceptanceAndLineage(getPool(), tasks.map((task) => task.id));
+      response.status(200).json(taskListResponseSchema.parse({
+        tasks: tasks.map((task) => ({ ...task, ...lineage.get(task.id)! })),
+      }));
     } catch {
       response.status(500).json(apiErrorSchema.parse({ error: { code: "INTERNAL_ERROR", message: "La liste des tâches n'a pas pu être chargée." } }));
     }
@@ -353,6 +359,49 @@ export function createApp(pool?: Pool) {
         return;
       }
       response.status(500).json(apiErrorSchema.parse({ error: { code: "INTERNAL_ERROR", message: "La tâche n’a pas pu être créée." } }));
+    }
+  });
+
+  v1.post("/tasks/:taskId/replacements", async (request, response) => {
+    response.set("Cache-Control", "no-store");
+    const session = response.locals.session as NonNullable<Awaited<ReturnType<typeof findActiveSession>>>;
+    if (session.role !== "responsable") {
+      response.status(403).json(apiErrorSchema.parse({ error: { code: "FORBIDDEN", message: "Action réservée au Responsable de l’équipe." } }));
+      return;
+    }
+    const taskNotFound = () => response.status(404).json(apiErrorSchema.parse({ error: { code: "TASK_NOT_FOUND", message: "Tâche introuvable." } }));
+    const taskId = String(request.params.taskId ?? "");
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(taskId)) {
+      taskNotFound();
+      return;
+    }
+    const parsed = createTaskRequestSchema.safeParse(request.body);
+    if (!parsed.success) {
+      response.status(400).json(apiErrorSchema.parse({ error: { code: "VALIDATION_ERROR", message: "L’établissement, le type Graphie Mobile et un Employé responsable sont requis.", details: parsed.error.issues.map((issue) => ({ path: issue.path.join("."), message: "Valeur invalide." })) } }));
+      return;
+    }
+    try {
+      const outcome = await createReplacementControl(getPool(), { responsableId: session.id, originalTaskId: taskId.toLowerCase(), task: parsed.data });
+      switch (outcome.type) {
+        case "created":
+          response.status(201).json(replacementTaskResponseSchema.parse({ task: outcome.task, replacementOf: outcome.replacementOf }));
+          return;
+        case "not-found":
+          taskNotFound();
+          return;
+        case "not-accepted":
+          response.status(409).json(apiErrorSchema.parse({ error: { code: "AUDIT_NOT_ACCEPTED", message: "Cette tâche n’a pas d’audit accepté par le serveur." } }));
+          return;
+        case "already-replaced":
+          response.status(409).json(apiErrorSchema.parse({ error: { code: "REPLACEMENT_ALREADY_EXISTS", message: "Un contrôle de remplacement existe déjà pour cet audit." } }));
+          return;
+        case "assignee-unavailable":
+          response.status(422).json(apiErrorSchema.parse({ error: { code: "TASK_ASSIGNEE_UNAVAILABLE", message: "Cet Employé n’est pas actif ou ne fait pas partie de votre équipe." } }));
+          return;
+      }
+    } catch {
+      // Never log the error: it may carry request values.
+      response.status(500).json(apiErrorSchema.parse({ error: { code: "INTERNAL_ERROR", message: "Le contrôle de remplacement n’a pas pu être créé." } }));
     }
   });
 
