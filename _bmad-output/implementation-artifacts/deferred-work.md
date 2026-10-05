@@ -132,3 +132,9 @@
 - source_spec: `_bmad-output/specs/spec-7-3-accept-submissions-transactionally-and-idempotently/mobile-transport.md`
   summary: No engine test covers an explicit `run()` (retryBlocked) that joins an active automatic run while a blocked item exists. In that case the follow-up run should send the blocked item (`followUpRetryBlocked`).
   evidence: The UI hides the retry button while a run is active, so the path is narrow. Add the engine test when Story 8.x changes retry handling.
+
+## Deferred from: code review of spec-7-4-freeze-accepted-measurements-and-comments (2026-10-05)
+
+- source_spec: `_bmad-output/specs/spec-7-4-freeze-accepted-measurements-and-comments/freeze-model.md`
+  summary: The 0009/0010 freeze triggers hold only for a role that cannot alter them. The table owner can still run `ALTER TABLE … DISABLE TRIGGER`, `SET session_replication_role = replica` or `DROP TABLE` and then change or remove accepted evidence.
+  evidence: Migrations and the API both connect with `DATABASE_URL`, so by default the runtime role owns the tables. Separating a migration/owner role from a runtime role without TRIGGER, TRUNCATE or DDL rights is a deployment decision. Story 12.x (deployment templates and guide) should cover it.

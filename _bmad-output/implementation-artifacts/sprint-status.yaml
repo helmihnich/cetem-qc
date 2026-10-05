@@ -83,7 +83,7 @@ development_status:
   7-1-queue-durable-synchronization-operations: done
   7-2-show-synchronization-and-submission-state-distinctly: done
   7-3-accept-submissions-transactionally-and-idempotently: done
-  7-4-freeze-accepted-measurements-and-comments: backlog
+  7-4-freeze-accepted-measurements-and-comments: done
   epic-7-retrospective: optional
 
   epic-8: backlog

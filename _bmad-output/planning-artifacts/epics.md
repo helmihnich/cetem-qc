@@ -664,7 +664,7 @@ So that later review and reporting refer to the actual submitted snapshot.
 **And** the accepted snapshot, submitting actor/date, schema/rule versions and linked task remain available to authorized review
 **And** correction or replacement creates a distinct linked record rather than altering the accepted audit in place.
 
-**Traceability:** FR-023, FR-024, DR-001, DR-005, AD-4, AD-6, SEC-008.
+**Traceability:** spec `_bmad-output/specs/spec-7-4-freeze-accepted-measurements-and-comments/SPEC.md` (database freeze of submitted audits, authorized review query; the review route stays in 9.1); FR-023, FR-024, DR-001, DR-005, AD-4, AD-6, SEC-008. **Dependency:** Story 7.3 (done).
 
 ## Epic 8: Conflict, Correction and Replacement Recovery
 
