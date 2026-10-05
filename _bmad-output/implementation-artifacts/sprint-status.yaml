@@ -29,7 +29,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 # - Retrospective appends its action items to action_items; the status view surfaces open ones
 generated: 09-26-2026 18:00
-last_updated: 10-05-2026 12:00
+last_updated: 10-05-2026 07:04
 project: cetem-qc
 project_key: NOKEY
 tracking_system: file-system
@@ -79,12 +79,12 @@ development_status:
   6-7-harden-the-test-harness-and-recover-unreadable-drafts: done
   epic-6-retrospective: done
 
-  epic-7: in-progress
+  epic-7: done
   7-1-queue-durable-synchronization-operations: done
   7-2-show-synchronization-and-submission-state-distinctly: done
   7-3-accept-submissions-transactionally-and-idempotently: done
   7-4-freeze-accepted-measurements-and-comments: done
-  epic-7-retrospective: optional
+  epic-7-retrospective: done
 
   epic-8: backlog
   8-1-resolve-a-synchronization-conflict-explicitly: backlog
@@ -301,3 +301,35 @@ action_items:
     owner: "Product Owner (Helmi)"
     status: open
     ref: "_bmad-output/implementation-artifacts/epic-6-retro-2026-10-04.md"
+  - id: "epic-7-retro-item-20-make-the-mobile-parsegraphiepayload-dele"
+    epic: 7
+    action: "Make the mobile parseGraphiePayload delegate its shared structural rules
+      to the domain validateGraphiePayload so device and server accept and refuse
+      the same payloads (NUL, lone surrogates)."
+    owner: "Mobile and domain maintainers (Story 8.2 or next validation change)"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-7-retro-2026-10-05.md"
+  - id: "epic-7-retro-item-21-extract-the-mobile-sync-wiring-engine-cr"
+    epic: 7
+    action: "Extract the mobile sync wiring (engine creation, triggers, outbox refresh,
+      run state) from App.tsx into its own hook or module with tests before Stories
+      8.1/8.2 add conflict and correction UI."
+    owner: "Mobile maintainers / Story 8.1 author"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-7-retro-2026-10-05.md"
+  - id: "epic-7-retro-item-22-in-the-epic-12-deployment-templates-and"
+    epic: 7
+    action: "In the Epic 12 deployment templates and French guide, separate a migration/owner
+      database role from a runtime role without TRIGGER, TRUNCATE or DDL rights so
+      the 0009/0010 evidence freeze cannot be disabled by the API connection."
+    owner: "Epic 12 story author (12.1)"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-7-retro-2026-10-05.md"
+  - id: "epic-7-retro-item-23-story-12-4-must-exercise-the-real-mobile"
+    epic: 7
+    action: "Story 12.4 must exercise the real mobile sync engine and HTTP adapter
+      against a live API on PostgreSQL (offline save, reconnect, acceptance, replay,
+      freeze)."
+    owner: "Story 12.4 author"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-7-retro-2026-10-05.md"
