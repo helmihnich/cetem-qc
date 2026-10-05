@@ -100,6 +100,53 @@ export const employeeTaskListQuerySchema = z.object({}).strict();
 export const employeeTaskListResponseSchema: z.ZodType<EmployeeTaskListResponseContract> = z.object({ tasks: z.array(employeeTaskSchema) }).strict();
 export const employeeTaskResponseSchema: z.ZodType<EmployeeTaskResponseContract> = z.object({ task: employeeTaskSchema }).strict();
 export const sessionTokenResponseSchema = z.object({ token: sessionTokenSchema });
+
+type GraphieDraftPayloadContract = apiV1Components["schemas"]["GraphieDraftPayload"];
+type SyncOperationRequestContract = apiV1Components["schemas"]["SyncOperationRequest"];
+type SyncOperationAcceptedContract = apiV1Components["schemas"]["SyncOperationAccepted"];
+type SyncOperationConflictContract = apiV1Components["schemas"]["SyncOperationConflict"];
+type SyncOperationRejectedContract = apiV1Components["schemas"]["SyncOperationRejected"];
+
+export const graphieDraftPayloadSchema: z.ZodType<GraphieDraftPayloadContract> = z.object({
+  catalogueId: z.literal("graphie-mobile-pov"), catalogueVersion: z.literal("2.0.0"), schemaVersion: z.literal(3),
+  ruleId: z.literal("cetem-paper-form"), ruleVersion: z.literal("2.0.0"),
+  values: z.record(z.string(), z.string()), legacyContent: z.string().optional(),
+}).strict();
+const plainObject = (value: unknown) => typeof value === "object" && value !== null && !Array.isArray(value);
+/** The payload is any JSON object here; its content is validated by the domain and refused with a stored 422. */
+export const syncOperationRequestSchema: z.ZodType<SyncOperationRequestContract> = z.object({
+  operationId: z.string().uuid(),
+  idempotencyKey: z.string().uuid(),
+  baseRevision: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
+  localDraftRevision: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER),
+  clientSavedAt: z.string().datetime({ offset: true }),
+  payload: z.custom<Record<string, unknown>>(plainObject),
+}).strict();
+const syncOperationKindSchema = z.enum(["sync-draft", "submit"]);
+const syncActorSchema = z.object({ id: z.string().uuid(), displayName: z.string() }).strict();
+export const syncOperationAcceptedSchema: z.ZodType<SyncOperationAcceptedContract> = z.object({
+  outcome: z.literal("accepted"), operationId: z.string().uuid(), kind: syncOperationKindSchema,
+  serverRevision: z.number().int().min(1), acceptedAt: z.string().datetime({ offset: true }),
+  acceptedBy: syncActorSchema, submissionId: z.string().uuid().optional(),
+}).strict();
+export const syncOperationConflictSchema: z.ZodType<SyncOperationConflictContract> = z.object({
+  outcome: z.literal("conflict"), operationId: z.string().uuid(), kind: syncOperationKindSchema,
+  serverRevision: z.number().int().min(0),
+  current: z.object({
+    revision: z.number().int().min(0), state: z.enum(["draft", "submitted"]),
+    lastChangedAt: z.string().datetime({ offset: true }).nullable(), lastChangedBy: syncActorSchema.nullable(),
+  }).strict(),
+}).strict();
+export const syncOperationRejectedSchema: z.ZodType<SyncOperationRejectedContract> = z.object({
+  outcome: z.literal("rejected"), operationId: z.string().uuid(), kind: syncOperationKindSchema,
+  code: z.enum(["UNSUPPORTED_PAYLOAD", "UNSUPPORTED_PAYLOAD_VERSION", "INVALID_PAYLOAD", "AUDIT_ALREADY_SUBMITTED"]),
+  message: z.string(), issues: z.array(z.object({ path: z.string(), code: z.string() }).strict()),
+}).strict();
+export type GraphieDraftPayload = z.infer<typeof graphieDraftPayloadSchema>;
+export type SyncOperationRequest = z.infer<typeof syncOperationRequestSchema>;
+export type SyncOperationAccepted = z.infer<typeof syncOperationAcceptedSchema>;
+export type SyncOperationConflict = z.infer<typeof syncOperationConflictSchema>;
+export type SyncOperationRejected = z.infer<typeof syncOperationRejectedSchema>;
 export type HealthQuery = z.infer<typeof healthQuerySchema>;
 export type HealthResponse = z.infer<typeof healthResponseSchema>;
 export type ApiError = z.infer<typeof apiErrorSchema>;

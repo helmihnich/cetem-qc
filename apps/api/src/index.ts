@@ -1,7 +1,7 @@
 import express from "express";
 import type { Server } from "node:http";
 import type { Pool } from "pg";
-import { apiErrorSchema, authenticationRequestSchema, authenticationResponseSchema, createEmployeeRequestSchema, createTaskRequestSchema, employeeCredentialResponseSchema, employeeListResponseSchema, employeeTaskListQuerySchema, employeeTaskListResponseSchema, employeeTaskResponseSchema, healthQuerySchema, passwordReplacementRequestSchema, sessionResponseSchema, taskAssigneeListResponseSchema, taskListQuerySchema, taskListResponseSchema, taskResponseSchema, updateEmployeeStatusRequestSchema, updateEmployeeStatusResponseSchema } from "@cetem-qc/schemas/api/v1";
+import { apiErrorSchema, authenticationRequestSchema, authenticationResponseSchema, createEmployeeRequestSchema, createTaskRequestSchema, employeeCredentialResponseSchema, employeeListResponseSchema, employeeTaskListQuerySchema, employeeTaskListResponseSchema, employeeTaskResponseSchema, healthQuerySchema, passwordReplacementRequestSchema, sessionResponseSchema, syncOperationRequestSchema, taskAssigneeListResponseSchema, taskListQuerySchema, taskListResponseSchema, taskResponseSchema, updateEmployeeStatusRequestSchema, updateEmployeeStatusResponseSchema } from "@cetem-qc/schemas/api/v1";
 import { getHealth } from "./modules/health/health-query.js";
 import {
   authenticateWithPassword,
@@ -11,7 +11,10 @@ import {
 import { createSession, findActiveSession, hasLiveDeactivatedSession, revokeSession } from "./modules/identity-auth/sessions.js";
 import { listOwnTeamEmployees } from "./modules/team-access/queries/list-own-team-employees.js";
 import { createOwnTeamEmployee, DuplicateEmployeeEmailError, regenerateOwnTeamEmployeeCredential, resetOwnTeamEmployeePassword, updateOwnTeamEmployeeStatus } from "./modules/team-access/employee-credentials.js";
-import { createAssignedTask, getAssignedEmployeeTask, listAssignedEmployeeTasks, listEligibleTaskAssignees, listOwnTeamTasks, TaskAssigneeUnavailableError } from "./modules/tasks/tasks.js";
+import { createAssignedTask, listAssignedEmployeeTasks, listEligibleTaskAssignees, listOwnTeamTasks, TaskAssigneeUnavailableError } from "./modules/tasks/tasks.js";
+import { getAssignedEmployeeTask } from "./modules/tasks/queries/assigned-employee-task.js";
+import { processSyncOperation } from "./modules/sync/commands/process-sync-operation.js";
+import type { SyncOperationKind } from "./modules/sync/commands/process-sync-operation.js";
 
 export function createApp(pool?: Pool) {
   const app = express();
@@ -19,10 +22,22 @@ export function createApp(pool?: Pool) {
   const getPool = () => sharedPool ??= createDatabasePool();
   app.locals.closeDatabase = async () => { if (sharedPool && sharedPool !== pool) await sharedPool.end(); };
 
-  app.use(express.json({ limit: "32kb" }));
+  // Synchronization operations carry a whole form snapshot; only their two routes accept up to 256 kB.
+  const defaultJson = express.json({ limit: "32kb" });
+  const syncOperationJson = express.json({ limit: "256kb" });
+  // Case-insensitive like Express routing, so every path that reaches the two routes gets their limit.
+  const syncOperationPath = /^\/api\/v1\/employee\/tasks\/[^/]+\/(?:draft-syncs|submissions)\/?$/i;
+  app.use((request, response, next) => {
+    const parser = request.method === "POST" && syncOperationPath.test(request.path) ? syncOperationJson : defaultJson;
+    parser(request, response, next);
+  });
   app.use((error: unknown, _request: express.Request, response: express.Response, next: express.NextFunction) => {
     if (error instanceof SyntaxError && "body" in error) {
       response.status(400).json(apiErrorSchema.parse({ error: { code: "VALIDATION_ERROR", message: "Les informations saisies sont invalides." } }));
+      return;
+    }
+    if ((error as { type?: unknown } | null)?.type === "entity.too.large") {
+      response.status(413).json(apiErrorSchema.parse({ error: { code: "PAYLOAD_TOO_LARGE", message: "Les données envoyées sont trop volumineuses." } }));
       return;
     }
     next(error);
@@ -251,6 +266,46 @@ export function createApp(pool?: Pool) {
       response.status(500).json(apiErrorSchema.parse({ error: { code: "INTERNAL_ERROR", message: "La tâche n’a pas pu être chargée." } }));
     }
   });
+
+  const syncOperationRoute = (kind: SyncOperationKind) => async (request: express.Request, response: express.Response) => {
+    const session = response.locals.session as NonNullable<Awaited<ReturnType<typeof findActiveSession>>>;
+    if (session.role !== "employe") {
+      response.status(403).json(apiErrorSchema.parse({ error: { code: "FORBIDDEN", message: "Accès réservé à l’Employé." } }));
+      return;
+    }
+    const taskNotFound = () => response.status(404).json(apiErrorSchema.parse({ error: { code: "TASK_NOT_FOUND", message: "Tâche introuvable." } }));
+    const taskId = String(request.params.taskId ?? "");
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(taskId)) {
+      taskNotFound();
+      return;
+    }
+    try {
+      // Assignment is checked on every call, replays included, before anything else is read.
+      if (!await getAssignedEmployeeTask(getPool(), session.id, taskId)) {
+        taskNotFound();
+        return;
+      }
+      const parsed = syncOperationRequestSchema.safeParse(request.body);
+      if (!parsed.success) {
+        // Issue paths only: payload values never appear in an error body.
+        response.status(400).json(apiErrorSchema.parse({ error: { code: "VALIDATION_ERROR", message: "Les informations saisies sont invalides.", details: parsed.error.issues.map((issue) => ({ path: issue.path.join("."), message: "Valeur invalide." })) } }));
+        return;
+      }
+      const outcome = await processSyncOperation(getPool(), {
+        kind, taskId: taskId.toLowerCase(), actor: { id: session.id, displayName: session.displayName }, request: parsed.data,
+      });
+      if (outcome.type === "key-reused") {
+        response.status(422).json(apiErrorSchema.parse({ error: { code: "IDEMPOTENCY_KEY_REUSED", message: "Cette clé d’opération a déjà été utilisée pour une autre requête." } }));
+        return;
+      }
+      response.status(outcome.httpStatus).json(outcome.body);
+    } catch {
+      // Never log the error: it may carry payload values.
+      response.status(500).json(apiErrorSchema.parse({ error: { code: "INTERNAL_ERROR", message: "Une erreur est survenue." } }));
+    }
+  };
+  v1.post("/employee/tasks/:taskId/draft-syncs", syncOperationRoute("sync-draft"));
+  v1.post("/employee/tasks/:taskId/submissions", syncOperationRoute("submit"));
 
   v1.post("/tasks", async (request, response) => {
     const session = response.locals.session as NonNullable<Awaited<ReturnType<typeof findActiveSession>>>;

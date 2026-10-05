@@ -110,6 +110,66 @@ test("assigned task detail rejects malformed or Epic 5 fields through response v
   await assert.rejects(client.getAssignedEmployeeTask(taskId), { name: "ZodError" });
 });
 
+const syncBody = {
+  operationId: "00000000-0000-4000-8000-000000000031",
+  idempotencyKey: "00000000-0000-4000-8000-000000000032",
+  baseRevision: 0,
+  localDraftRevision: 2,
+  clientSavedAt: "2026-10-04T10:00:00.000Z",
+  payload: { catalogueId: "graphie-mobile-pov", catalogueVersion: "2.0.0", schemaVersion: 3, ruleId: "cetem-paper-form", ruleVersion: "2.0.0", values: {} },
+};
+const actor = { id: "00000000-0000-4000-8000-000000000040", displayName: "Employé Test" };
+const acceptedBody = { outcome: "accepted", operationId: syncBody.operationId, kind: "submit", serverRevision: 1, acceptedAt: "2026-10-04T10:00:01.000Z", acceptedBy: actor, submissionId: "00000000-0000-4000-8000-000000000041" };
+const conflictBody = { outcome: "conflict", operationId: syncBody.operationId, kind: "sync-draft", serverRevision: 2, current: { revision: 2, state: "draft", lastChangedAt: "2026-10-04T09:00:00.000Z", lastChangedBy: actor } };
+const rejectedBody = { outcome: "rejected", operationId: syncBody.operationId, kind: "submit", code: "INVALID_PAYLOAD", message: "Les données du contrôle sont invalides.", issues: [{ path: "values.x", code: "unknown-field" }] };
+
+test("C3 sync operations post the envelope with the bearer token to the route of their kind", async () => {
+  const { client, calls } = clientFor(acceptedBody);
+  assert.deepEqual(await client.submitEmployeeTaskAudit(taskId, syncBody), { status: 200, body: acceptedBody });
+  assert.equal(calls[0]!.url, `https://cetem-qc.example.test/api/v1/employee/tasks/${taskId}/submissions`);
+  assert.equal(calls[0]!.init?.method, "POST");
+  assert.deepEqual(calls[0]!.init?.headers, { accept: "application/json", "content-type": "application/json", authorization: `Bearer ${token}` });
+  assert.deepEqual(JSON.parse(String(calls[0]!.init?.body)), syncBody);
+
+  const draft = clientFor({ ...acceptedBody, kind: "sync-draft", submissionId: undefined });
+  const controller = new AbortController();
+  const result = await draft.client.syncEmployeeTaskDraft(taskId, syncBody, { signal: controller.signal });
+  assert.equal(result.status, 200);
+  assert.equal(draft.calls[0]!.url, `https://cetem-qc.example.test/api/v1/employee/tasks/${taskId}/draft-syncs`);
+  assert.equal(draft.calls[0]!.init?.signal, controller.signal);
+});
+
+test("C3 sync operations return conflict and rejected outcome bodies with their status", async () => {
+  assert.deepEqual(await clientFor(conflictBody, 409).client.syncEmployeeTaskDraft(taskId, syncBody), { status: 409, body: conflictBody });
+  assert.deepEqual(await clientFor(rejectedBody, 422).client.submitEmployeeTaskAudit(taskId, syncBody), { status: 422, body: rejectedBody });
+});
+
+test("C3 sync operations throw ApiRequestError for key reuse, errors and malformed bodies", async () => {
+  const cases: Array<[unknown, number, string]> = [
+    [{ error: { code: "IDEMPOTENCY_KEY_REUSED", message: "Cette clé d’opération a déjà été utilisée pour une autre requête." } }, 422, "IDEMPOTENCY_KEY_REUSED"],
+    [{ error: { code: "VALIDATION_ERROR", message: "Les informations saisies sont invalides." } }, 400, "VALIDATION_ERROR"],
+    [{ error: { code: "AUTHENTICATION_FAILED", message: "Email ou mot de passe invalide." } }, 401, "AUTHENTICATION_FAILED"],
+    [{ error: { code: "FORBIDDEN", message: "Accès réservé à l’Employé." } }, 403, "FORBIDDEN"],
+    [{ error: { code: "TASK_NOT_FOUND", message: "Tâche introuvable." } }, 404, "TASK_NOT_FOUND"],
+    [{ error: { code: "INTERNAL_ERROR", message: "Une erreur est survenue." } }, 500, "INTERNAL_ERROR"],
+    [{ ...acceptedBody, outcome: "rejected" }, 200, "UNEXPECTED_API_RESPONSE"],
+    [{ ...conflictBody, extra: true }, 409, "UNEXPECTED_API_RESPONSE"],
+    [{ outcome: "rejected" }, 422, "UNEXPECTED_API_RESPONSE"],
+    [acceptedBody, 201, "UNEXPECTED_API_RESPONSE"],
+  ];
+  for (const [payload, status, code] of cases) {
+    await assert.rejects(clientFor(payload, status).client.submitEmployeeTaskAudit(taskId, syncBody), (error: unknown) => {
+      assert.ok(error instanceof ApiRequestError, `${status} ${code}`);
+      assert.deepEqual([error.status, error.code], [status, code]);
+      return true;
+    });
+  }
+  const unreadable = createApiClient({ baseUrl, sessionToken: token, fetch: async () => ({ ok: true, status: 200, json: async () => { throw new SyntaxError("Unexpected token"); } }) as unknown as Response });
+  await assert.rejects(unreadable.syncEmployeeTaskDraft(taskId, syncBody), (error: unknown) => error instanceof ApiRequestError && error.code === "UNEXPECTED_API_RESPONSE");
+  const offline = createApiClient({ baseUrl, sessionToken: token, fetch: async () => { throw new TypeError("Network request failed"); } });
+  await assert.rejects(offline.syncEmployeeTaskDraft(taskId, syncBody), TypeError);
+});
+
 test("employee password reset posts to the versioned endpoint and maps the inactive conflict", async () => {
   const employeeId = "00000000-0000-4000-8000-000000000020";
   const expected = {

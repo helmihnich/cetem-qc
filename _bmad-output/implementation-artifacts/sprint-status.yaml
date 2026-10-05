@@ -29,7 +29,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 # - Retrospective appends its action items to action_items; the status view surfaces open ones
 generated: 09-26-2026 18:00
-last_updated: 10-04-2026 21:00
+last_updated: 10-05-2026 12:00
 project: cetem-qc
 project_key: NOKEY
 tracking_system: file-system
@@ -82,7 +82,7 @@ development_status:
   epic-7: in-progress
   7-1-queue-durable-synchronization-operations: done
   7-2-show-synchronization-and-submission-state-distinctly: done
-  7-3-accept-submissions-transactionally-and-idempotently: backlog
+  7-3-accept-submissions-transactionally-and-idempotently: done
   7-4-freeze-accepted-measurements-and-comments: backlog
   epic-7-retrospective: optional
 
@@ -265,7 +265,10 @@ action_items:
       and enforce that the stored identity matches the identity the results were computed
       under."
     owner: "Epic 7 story authors / API maintainers"
-    status: open
+    status: done
+    note: "Story 7.3: acceptSubmission stores calculateGraphieResults(identity, values)
+      run on the raw strings and refuses (500, nothing written) any result whose identity
+      differs from the revision columns; API test A14."
     ref: "_bmad-output/implementation-artifacts/epic-6-retro-2026-10-04.md"
   - id: "epic-6-retro-item-16-make-every-pipeline-commit-subject-name"
     epic: 6

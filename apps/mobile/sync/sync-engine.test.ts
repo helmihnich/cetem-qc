@@ -368,3 +368,105 @@ test("P1 a restarted engine and repository see byte-identical unresolved items a
   assert.deepEqual({ outbox: restarted.dump("outbox_operations"), snapshots: restarted.dump("audit_snapshots") }, before);
   assert.equal((await restarted.repository.listOutbox("employee-a")).filter((item) => item.status !== "resolved").length, 3);
 });
+
+/** A server double with the 7.3 idempotency rule: the same key replays the stored outcome. */
+function replayingServer() {
+  const stored = new Map<string, SyncResult>();
+  let revision = 0;
+  return {
+    stored,
+    respond(request: SyncRequest): SyncResult {
+      const previous = stored.get(request.idempotencyKey);
+      if (previous) return previous;
+      const outcome: SyncResult = request.baseRevision === revision
+        ? { type: "accepted", serverRevision: ++revision, detail: { acceptedAt: "2026-10-04T08:00:00.000Z" } }
+        : { type: "conflict", serverRevision: revision, detail: { revision } };
+      stored.set(request.idempotencyKey, outcome);
+      return outcome;
+    },
+  };
+}
+
+test("7.3 E1 a lost response is retried with the same key, the server replays it and one accepted outcome is stored", async () => {
+  const f = await setup();
+  await f.repository.requestSubmission("employee-a", "task-a", form("submitted"));
+  const server = replayingServer();
+  const sent: SyncRequest[] = [];
+  let lose = true;
+  const transport = {
+    sent,
+    async send(request: SyncRequest): Promise<SyncResult> {
+      sent.push(structuredClone(request));
+      const response = server.respond(request);
+      if (lose) { lose = false; throw new Error("response lost"); }
+      return response;
+    },
+  };
+  const summary = await f.engine(transport as ReturnType<typeof fakeTransport>).run("employee-a");
+  assert.equal(sent.length, 2);
+  assert.equal(sent[1]!.idempotencyKey, sent[0]!.idempotencyKey);
+  assert.equal(server.stored.size, 1, "the server recorded one effect");
+  assert.equal(summary.resolved, 1);
+  const items = await f.repository.listOutbox("employee-a");
+  assert.deepEqual(items.map((item) => [item.kind, item.status, item.outcome, item.outcomeMetadata?.serverRevision]), [["submit", "resolved", "accepted", 1]]);
+});
+
+test("7.3 E2 TASK_NOT_FOUND blocks only its task and the run continues; other blocking codes still stop it", async () => {
+  const f = await setup();
+  await f.repository.save("employee-a", "task-a", form("A"));
+  await f.repository.save("employee-a", "task-b", form("B"));
+  const transport = fakeTransport([{ type: "blocking", code: "TASK_NOT_FOUND" }, { type: "accepted", serverRevision: 1 }]);
+  const summary = await f.engine(transport).run("employee-a");
+  assert.deepEqual(transport.sent.map((request) => request.taskId), ["task-a", "task-b"]);
+  assert.equal(summary.blocked, false);
+  assert.deepEqual((await f.repository.listOutbox("employee-a")).map((item) => [item.taskId, item.status, item.lastError]), [
+    ["task-a", "blocked", "TASK_NOT_FOUND"],
+    ["task-b", "resolved", null],
+  ]);
+
+  const g = await setup();
+  await g.repository.save("employee-a", "task-a", form("A"));
+  await g.repository.save("employee-a", "task-b", form("B"));
+  const unauthorized = fakeTransport([{ type: "blocking", code: "HTTP_401" }]);
+  assert.equal((await g.engine(unauthorized).run("employee-a")).blocked, true);
+  assert.equal(unauthorized.sent.length, 1, "an account-level refusal still stops the run");
+});
+
+test("7.3 E3 calls during an active run give exactly one follow-up run, which sends items added meanwhile", async () => {
+  const f = await setup();
+  await f.repository.save("employee-a", "task-a", form("1"));
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  const inner = fakeTransport([], { type: "accepted", serverRevision: 1 });
+  let executions = 0;
+  const transport = { ...inner, async send(request: SyncRequest) { executions++; if (executions === 1) await gate; return inner.send(request); } };
+  const engine = f.engine(transport);
+  const first = engine.run("employee-a");
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  await f.repository.save("employee-a", "task-b", form("added during the run"));
+  const second = engine.run("employee-a");
+  const third = engine.run("employee-a");
+  release();
+  const [a, b, c] = await Promise.all([first, second, third]);
+  assert.deepEqual(inner.sent.map((request) => request.taskId), ["task-a", "task-b"], "the follow-up run sent the new item");
+  assert.deepEqual(a, b);
+  assert.deepEqual(b, c);
+  assert.equal(a.resolved, 2);
+  assert.ok((await f.repository.listOutbox("employee-a")).every((item) => item.status === "resolved"));
+  const idle = fakeTransport([]);
+  await f.engine(idle).run("employee-a");
+  assert.equal(idle.sent.length, 0);
+});
+
+test("automatic runs leave a blocked item and its task for an explicit retry", async () => {
+  const f = await setup();
+  await f.repository.save("employee-a", "task-a", form("A"));
+  await f.repository.save("employee-a", "task-b", form("B"));
+  const [blocked] = await f.repository.listOutbox("employee-a");
+  await f.repository.recordOutboxTransition("employee-a", blocked!.operationId, { type: "blocking", code: "HTTP_401", at: 1 });
+  const transport = fakeTransport([], { type: "accepted", serverRevision: 1 });
+  await f.engine(transport).run("employee-a", { retryBlocked: false });
+  assert.deepEqual(transport.sent.map((request) => request.taskId), ["task-b"]);
+  await f.engine(transport).run("employee-a");
+  assert.deepEqual(transport.sent.map((request) => request.taskId), ["task-b", "task-a"], "an explicit retry sends it");
+});

@@ -648,7 +648,7 @@ So that submitted evidence has one authoritative version.
 **And** a retry with the same idempotency key returns the stored outcome without creating a duplicate; a stale base revision returns conflict metadata without overwriting current data
 **And** validations whose definitions are unresolved by DEP-01/02 are not invented; affected acceptance claims remain blocked while already confirmed validation rules can be enforced.
 
-**Traceability:** FR-023, NFR-002, SEC-002, SEC-003, SEC-008, DR-001, DR-004, DR-005, AD-3, AD-4, AD-6. **Dependency:** DEP-01/02 for affected validation behavior.
+**Traceability:** spec `_bmad-output/specs/spec-7-3-accept-submissions-transactionally-and-idempotently/SPEC.md` (also places the server draft-sync command, the HTTP transport and the automatic sync triggers); FR-021, FR-023, NFR-002, SEC-002, SEC-003, SEC-008, DR-001, DR-004, DR-005, AD-3, AD-4, AD-6. **Dependency:** Stories 7.1 and 7.2 (done); DEP-01/02 for affected validation behavior.
 
 ### Story 7.4: Freeze accepted measurements and comments
 

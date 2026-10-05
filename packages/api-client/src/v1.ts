@@ -1,8 +1,13 @@
-import { apiErrorSchema, authenticationRequestSchema, authenticationResponseSchema, createEmployeeRequestSchema, createTaskRequestSchema, employeeCredentialResponseSchema, employeeListResponseSchema, employeeTaskListQuerySchema, employeeTaskListResponseSchema, employeeTaskResponseSchema, healthResponseSchema, passwordReplacementRequestSchema, sessionResponseSchema, taskAssigneeListResponseSchema, taskListResponseSchema, taskResponseSchema } from "@cetem-qc/schemas/api/v1";
-import type { AuthenticationRequest, AuthenticationResponse, CreateEmployeeRequest, CreateTaskRequest, EmployeeCredentialResponse, EmployeeListResponse, EmployeeTaskListResponse, EmployeeTaskResponse, HealthResponse, PasswordReplacementRequest, TaskListResponse, TaskResponse } from "@cetem-qc/schemas/api/v1";
+import { apiErrorSchema, authenticationRequestSchema, authenticationResponseSchema, createEmployeeRequestSchema, createTaskRequestSchema, employeeCredentialResponseSchema, employeeListResponseSchema, employeeTaskListQuerySchema, employeeTaskListResponseSchema, employeeTaskResponseSchema, healthResponseSchema, passwordReplacementRequestSchema, sessionResponseSchema, syncOperationAcceptedSchema, syncOperationConflictSchema, syncOperationRejectedSchema, syncOperationRequestSchema, taskAssigneeListResponseSchema, taskListResponseSchema, taskResponseSchema } from "@cetem-qc/schemas/api/v1";
+import type { AuthenticationRequest, AuthenticationResponse, CreateEmployeeRequest, CreateTaskRequest, EmployeeCredentialResponse, EmployeeListResponse, EmployeeTaskListResponse, EmployeeTaskResponse, HealthResponse, PasswordReplacementRequest, SyncOperationAccepted, SyncOperationConflict, SyncOperationRejected, SyncOperationRequest, TaskListResponse, TaskResponse } from "@cetem-qc/schemas/api/v1";
 
 export { taskListResponseSchema };
-export type { EmployeeTaskListResponse, EmployeeTaskResponse, TaskListResponse };
+export type { EmployeeTaskListResponse, EmployeeTaskResponse, SyncOperationAccepted, SyncOperationConflict, SyncOperationRejected, SyncOperationRequest, TaskListResponse };
+
+export type SyncOperationResponse =
+  | { status: 200; body: SyncOperationAccepted }
+  | { status: 409; body: SyncOperationConflict }
+  | { status: 422; body: SyncOperationRejected };
 
 export class ApiRequestError extends Error {
   constructor(
@@ -103,6 +108,12 @@ export function createApiClient({ baseUrl, fetch: fetcher = fetch, sessionToken:
       setSessionToken(session.token);
       return session;
     },
+    syncEmployeeTaskDraft(taskId: string, body: SyncOperationRequest, options: { signal?: AbortSignal } = {}): Promise<SyncOperationResponse> {
+      return sendSyncOperation(`/employee/tasks/${encodeURIComponent(taskId)}/draft-syncs`, body, options.signal);
+    },
+    submitEmployeeTaskAudit(taskId: string, body: SyncOperationRequest, options: { signal?: AbortSignal } = {}): Promise<SyncOperationResponse> {
+      return sendSyncOperation(`/employee/tasks/${encodeURIComponent(taskId)}/submissions`, body, options.signal);
+    },
     async logout(): Promise<void> {
       const payload = await request("/session", { method: "DELETE", headers: { accept: "application/json", ...sessionHeaders() } });
       if (!payload.response.ok) throw toRequestError(payload.response.status, payload.data);
@@ -131,6 +142,34 @@ export function createApiClient({ baseUrl, fetch: fetcher = fetch, sessionToken:
       parsedError.success ? parsedError.data.error.message : "The API request failed.", status,
       parsedError.success ? parsedError.data.error.code : "UNEXPECTED_API_RESPONSE",
     );
+  }
+
+  /** Only a schema-valid outcome body is returned; everything else throws, and network failures and aborts propagate. */
+  async function sendSyncOperation(path: string, body: SyncOperationRequest, signal: AbortSignal | undefined): Promise<SyncOperationResponse> {
+    const response = await fetcher(`${root}${path}`, {
+      method: "POST",
+      headers: { accept: "application/json", "content-type": "application/json", ...sessionHeaders() },
+      body: JSON.stringify(syncOperationRequestSchema.parse(body)),
+      ...(signal ? { signal } : {}),
+    });
+    let data: unknown;
+    try {
+      data = await response.json();
+    } catch (error) {
+      if (signal?.aborted) throw error;
+      throw new ApiRequestError("The API response could not be read.", response.status, "UNEXPECTED_API_RESPONSE");
+    }
+    if (response.status === 200) {
+      const parsed = syncOperationAcceptedSchema.safeParse(data);
+      if (parsed.success) return { status: 200, body: parsed.data };
+    } else if (response.status === 409) {
+      const parsed = syncOperationConflictSchema.safeParse(data);
+      if (parsed.success) return { status: 409, body: parsed.data };
+    } else if (response.status === 422) {
+      const parsed = syncOperationRejectedSchema.safeParse(data);
+      if (parsed.success) return { status: 422, body: parsed.data };
+    }
+    throw toRequestError(response.status, data);
   }
 
   async function post(path: string, body: unknown, authenticated = true): Promise<AuthenticationResponse> {

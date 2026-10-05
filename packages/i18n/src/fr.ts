@@ -97,6 +97,8 @@ export const fr = {
     confirmSubmit: "Soumettre ce contrôle ? Après la demande, les mesures et commentaires ne pourront plus être modifiés sur cet appareil.",
     submissionPending: "Soumission en attente de synchronisation",
     submitted: "Soumis — accepté par le serveur",
+    /** {date} is JJ/MM/AAAA and {time} HH:MM, in the device's local time. */
+    submittedAt: "Soumission acceptée par le serveur le {date} à {time}.",
     acceptanceBlocked: "Soumission bloquée — non acceptée par le serveur",
     syncConflict: "Conflit de synchronisation",
     retrySync: "Réessayer la synchronisation",

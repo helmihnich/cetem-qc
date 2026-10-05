@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { GRAPHIE_CALCULATION_CATALOGUE, GRAPHIE_CALCULATION_FIELD_ID_LIST, GRAPHIE_CALCULATION_RULE_ID, GRAPHIE_CALCULATION_RULE_VERSION } from "@cetem-qc/domain";
+import { GRAPHIE_CALCULATION_CATALOGUE, GRAPHIE_CALCULATION_FIELD_ID_LIST, GRAPHIE_CALCULATION_RULE_ID, GRAPHIE_CALCULATION_RULE_VERSION, GRAPHIE_MOBILE_POV_CATALOGUE as DOMAIN_CATALOGUE, validateGraphiePayload } from "@cetem-qc/domain";
 import { GRAPHIE_RESULT_ORDER, presentGraphieMeasurements } from "@cetem-qc/i18n/graphie-results";
 import { GRAPHIE_CATALOGUE_VERSION, GRAPHIE_FORM_SCHEMA_VERSION, GRAPHIE_MOBILE_POV_CATALOGUE, GraphiePayloadCompatibilityError, KERMA_REUSE_HELP_FR, createNewGraphieDraftValues, parseGraphiePayload } from "./graphie-pov-catalogue.js";
 
@@ -227,6 +227,43 @@ test("C1 every field ID read by the domain calculation mapping is a catalogue nu
   for (const id of GRAPHIE_CALCULATION_FIELD_ID_LIST) {
     assert.equal(fieldById.get(id)?.type, "number", id);
   }
+});
+
+test("V4 the device parser and the domain validator agree on every non-legacy payload", () => {
+  const supported = { ...current(), values: { "header.etablissement": "CHU", "visual.integrity": "" } };
+  const inputs: unknown[] = [
+    supported,
+    { ...supported, legacyContent: "old" },
+    { ...supported, values: { "voltage.accuracy.row1.kvMeasured": "abc" } },
+    { ...supported, schemaVersion: GRAPHIE_FORM_SCHEMA_VERSION + 1 },
+    { ...supported, catalogueId: "unknown" },
+    { ...supported, ruleVersion: "1.0.0" },
+    { ...supported, schemaVersion: "3" },
+    { ...supported, values: ["not", "a", "record"] },
+    { ...supported, values: { "header.etablissement": 12 } },
+    { ...supported, values: { "future.field": "x" } },
+    { ...supported, values: { "visual.integrity": "Conforme" } },
+    { ...supported, content: "x" },
+    { ...supported, values: null },
+    { ...supported, legacyContent: 4 },
+    { catalogueId: supported.catalogueId, values: {} },
+    null,
+    [],
+  ];
+  for (const input of inputs) {
+    let parsed = true;
+    try { parseGraphiePayload(input); } catch { parsed = false; }
+    assert.equal(validateGraphiePayload(input, "sync-draft").ok, parsed, JSON.stringify(input));
+  }
+  // Legacy content is converted on the device and refused by the server.
+  assert.equal(parseGraphiePayload({ content: "x" }).legacyContent, "x");
+  assert.equal(validateGraphiePayload({ content: "x" }, "sync-draft").ok, false);
+});
+
+test("V5 the device catalogue is the domain catalogue object", () => {
+  assert.equal(GRAPHIE_MOBILE_POV_CATALOGUE, DOMAIN_CATALOGUE);
+  const choices = (catalogue: typeof DOMAIN_CATALOGUE) => catalogue.sections.flatMap((candidate) => candidate.fields).map((field) => [field.id, field.options]);
+  assert.deepEqual(choices(GRAPHIE_MOBILE_POV_CATALOGUE), choices(DOMAIN_CATALOGUE));
 });
 
 test("C2 every measured-value label and unit shown to the Responsable is the catalogue label and unit of that field", () => {

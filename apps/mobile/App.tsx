@@ -17,8 +17,9 @@ import { createDraftRepository } from "./local-drafts/model";
 import { createSqliteDraftDatabase } from "./local-drafts/sqlite-draft-database";
 import { createAuthorizedDrafts } from "./local-drafts/authorized-drafts";
 import { DraftListCorruptionError, LocalDraftPayloadCompatibilityError, PendingSubmissionError, SubmissionNotAllowedError, type LocalDraft, type OutboxItem } from "./local-drafts/model";
-import { createSyncEngine } from "./sync/sync-engine";
+import { createSyncEngine, type SyncTransport } from "./sync/sync-engine";
 import { createAppSyncTransport } from "./sync/app-sync-transport";
+import { submissionAcceptedLine } from "./sync/acceptance-line";
 import { deriveTaskSyncState, type TaskSyncState } from "./sync/task-sync-state";
 import { runOnlyWhenOnlineAuthorized, ServerWorkAuthorizationError } from "./server-work-authorization";
 import { GRAPHIE_CALCULATION_RULE_ID, GRAPHIE_CALCULATION_RULE_VERSION, GRAPHIE_MOBILE_POV_CATALOGUE, GraphiePayloadCompatibilityError, createNewGraphieDraftValues, parseGraphiePayload, type CatalogueField, type CatalogueSection, type CatalogueTable, type GraphieFormValues } from "./graphie-pov-catalogue";
@@ -112,7 +113,9 @@ export default function App() {
   authorizationStateRef.current = authorization;
   const syncEngineRef = useRef<ReturnType<typeof createSyncEngine> | null | undefined>(undefined);
   if (syncEngineRef.current === undefined) {
-    const transport = createAppSyncTransport();
+    // One HTTP transport per App, using its single API client so the signed-in token is the one sent.
+    // Test doubles of this module may provide no transport, in which case no run ever starts.
+    const transport: SyncTransport | null = createAppSyncTransport(api);
     syncEngineRef.current = transport ? createSyncEngine({
       store: draftsRef.current,
       transport,
@@ -153,6 +156,7 @@ export default function App() {
   const outboxItems = outbox && outbox.employeeId === user?.id ? outbox.items : [];
   const taskSyncStateOf = (taskId: string): TaskSyncState => deriveTaskSyncState(outboxItems.filter((item) => item.taskId === taskId));
   const currentSyncState = screen.kind === "detail" ? taskSyncStateOf(screen.id) : undefined;
+  const acceptedLine = screen.kind === "detail" ? submissionAcceptedLine(outboxItems.filter((item) => item.taskId === screen.id)) : undefined;
   const locked = currentSyncState?.locked ?? false;
   const lockedRef = useRef(locked);
   lockedRef.current = locked;
@@ -188,12 +192,13 @@ export default function App() {
     if (!await refreshOutbox(employeeId)) throw new Error("Outbox unavailable.");
   }
 
-  async function runSync(employeeId: string) {
+  /** `automatic` runs (connectivity, authorization, foreground, save) leave blocked items for an explicit retry. */
+  async function runSync(employeeId: string, automatic = false) {
     const engine = syncEngineRef.current;
     if (!engine || !await isSyncAuthorized(employeeId)) return false;
     setSyncRunningFor(employeeId);
     try {
-      await engine.run(employeeId);
+      await engine.run(employeeId, { retryBlocked: !automatic });
     } catch {
       // A failed run keeps every item, snapshot and draft; the refreshed rows tell the state.
     } finally {
@@ -500,6 +505,7 @@ export default function App() {
     const completion = draftSaveQueueRef.current.then(async () => {
       if (operationGeneration !== draftOperationGenerationRef.current || draftDeletingRef.current) return false;
       let saveGeneration = draftGenerationRef.current;
+      const revisionBefore = draftRevisionByScopeRef.current.get(scopeKey) ?? 0;
       let saved!: LocalDraft;
       do {
         saved = await draftsRef.current.save(employeeId, taskId, {
@@ -521,6 +527,8 @@ export default function App() {
         setDraftSaveState("saved");
         await refreshLocalDrafts(employeeId);
       }
+      // A save that created a revision queued a draft synchronization: send it when allowed.
+      if (saved.revision !== revisionBefore) void runSync(employeeId, true);
       return true;
     }).catch(async (cause) => {
       if (cause instanceof PendingSubmissionError) {
@@ -567,6 +575,21 @@ export default function App() {
     if (!user) { localRefreshGenerationRef.current++; setLocalDrafts([]); setCachedTaskContext(undefined); return; }
     void refreshLocalDrafts(user.id);
   }, [user?.id, authorization.status]);
+
+  // Automatic synchronization: online authorization established or confirmed (sign-in, server revalidation,
+  // reconnection), and return to the foreground. runSync checks connectivity and authorization itself.
+  useEffect(() => {
+    if (user && isOnline && authorization.status === "online-authorized" && authorization.identity?.id === user.id) void runSync(user.id, true);
+  }, [authorization.status, authorization.identity?.id, isOnline, user?.id]);
+
+  useEffect(() => {
+    if (!user) return;
+    const employeeId = user.id;
+    const subscription = AppState.addEventListener("change", (state) => {
+      if (state === "active" && activeIdentityRef.current === employeeId) void runSync(employeeId, true);
+    });
+    return () => subscription.remove();
+  }, [user?.id]);
 
   async function revalidateServerAuthorization(expectedUser: AuthenticatedUser): Promise<OfflineAuthorizationState> {
     try {
@@ -1221,6 +1244,7 @@ export default function App() {
                   <Detail label={fr.employeeTasks.establishment} value={displayedTask.establishment} />
                   <Detail label={fr.employeeTasks.service} value={displayedTask.service || "—"} />
                   <Detail label={fr.employeeTasks.state} value={lifecycleLabel(currentSyncState?.lifecycle ?? "draft")} />
+                  {acceptedLine ? <Text accessibilityRole="summary" style={styles.muted}>{acceptedLine}</Text> : null}
                   <Detail label={fr.employeeTasks.createdAt} value={new Date(displayedTask.createdAt).toLocaleDateString("fr-FR")} />
                   <View style={{ width: "100%", gap: 10, paddingTop: 12 }}>
                     {taskCacheWarning ? <Text accessibilityRole="alert" style={styles.error}>{taskCacheWarning}</Text> : null}
@@ -1256,6 +1280,7 @@ export default function App() {
                   <Detail label={fr.employeeTasks.taskId} value={activeDraft.taskId} />
                   {draftHydration === "loading" ? <Text accessibilityRole="summary" style={styles.muted}>{fr.common.loading}</Text> : null}
                   <Detail label={fr.employeeTasks.state} value={lifecycleLabel(currentSyncState?.lifecycle ?? "draft")} />
+                  {acceptedLine ? <Text accessibilityRole="summary" style={styles.muted}>{acceptedLine}</Text> : null}
                   {currentSyncState ? <TaskSyncStatus state={currentSyncState} running={syncRunningFor === user.id} onRetry={() => void retrySync()} /> : null}
                   {locked ? <Text accessibilityRole="summary" style={styles.muted}>{fr.employeeTasks.readOnlyPending}</Text> : null}
                   {legacyContentMode ? <Field label={fr.employeeTasks.legacyDraftContent} value={draftContent} onChangeText={changeDraftContent} editable={formEditable} multiline /> : null}

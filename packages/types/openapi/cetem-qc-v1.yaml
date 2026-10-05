@@ -463,6 +463,161 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
+  /employee/tasks/{taskId}/draft-syncs:
+    post:
+      operationId: syncEmployeeTaskDraft
+      summary: Synchronize a saved draft of an assigned task as a new server revision
+      description: >-
+        Idempotent by idempotencyKey. Accepted, rejected and conflict outcomes are stored and replayed
+        byte-equal for the same actor and request. Request bodies are limited to 256 kB.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: taskId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SyncOperationRequest'
+      responses:
+        '200':
+          description: Operation accepted (or replayed)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SyncOperationAccepted'
+        '400':
+          description: Invalid request envelope (not stored)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '401':
+          description: Session rejected
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '403':
+          description: Employé role required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: Task not found or not assigned to the authenticated employee
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '409':
+          description: Stale base revision; nothing was written except the stored outcome
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SyncOperationConflict'
+        '413':
+          description: Request body too large (PAYLOAD_TOO_LARGE)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '422':
+          description: Payload rejected (stored outcome), or IDEMPOTENCY_KEY_REUSED (ApiError, not stored)
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/SyncOperationRejected'
+                  - $ref: '#/components/schemas/ApiError'
+        '500':
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+  /employee/tasks/{taskId}/submissions:
+    post:
+      operationId: submitEmployeeTaskAudit
+      summary: Submit an assigned task's audit; the server accepts exactly one submission per audit
+      description: >-
+        Idempotent by idempotencyKey. On acceptance the server records the revision, the accepted submission
+        with the submitting actor and server date, and its own calculation results in one transaction.
+        Request bodies are limited to 256 kB.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: taskId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SyncOperationRequest'
+      responses:
+        '200':
+          description: Submission accepted (or replayed)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SyncOperationAccepted'
+        '400':
+          description: Invalid request envelope (not stored)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '401':
+          description: Session rejected
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '403':
+          description: Employé role required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '404':
+          description: Task not found or not assigned to the authenticated employee
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '409':
+          description: Stale base revision; nothing was written except the stored outcome
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SyncOperationConflict'
+        '413':
+          description: Request body too large (PAYLOAD_TOO_LARGE)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
+        '422':
+          description: Payload rejected (stored outcome), or IDEMPOTENCY_KEY_REUSED (ApiError, not stored)
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/SyncOperationRejected'
+                  - $ref: '#/components/schemas/ApiError'
+        '500':
+          description: Internal error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiError'
   /task-assignees:
     get:
       operationId: listTaskAssignees
@@ -781,6 +936,115 @@ components:
       properties:
         task:
           $ref: '#/components/schemas/EmployeeTaskListItem'
+    GraphieDraftPayload:
+      type: object
+      description: >-
+        Graphie Mobile form payload, catalogue graphie-mobile-pov 2.0.0, schema 3, rule cetem-paper-form 2.0.0.
+        Values are raw strings, kept unchanged; blank and unparseable readings are valid. legacyContent is refused
+        on a submission.
+      additionalProperties: false
+      required: [catalogueId, catalogueVersion, schemaVersion, ruleId, ruleVersion, values]
+      properties:
+        catalogueId: { type: string, const: graphie-mobile-pov }
+        catalogueVersion: { type: string, const: 2.0.0 }
+        schemaVersion: { type: integer, const: 3 }
+        ruleId: { type: string, const: cetem-paper-form }
+        ruleVersion: { type: string, const: 2.0.0 }
+        values:
+          type: object
+          additionalProperties: { type: string }
+        legacyContent: { type: string }
+    SyncOperationRequest:
+      type: object
+      additionalProperties: false
+      required: [operationId, idempotencyKey, baseRevision, localDraftRevision, clientSavedAt, payload]
+      properties:
+        operationId: { type: string, format: uuid }
+        idempotencyKey: { type: string, format: uuid }
+        baseRevision: { type: integer, minimum: 0 }
+        localDraftRevision: { type: integer, minimum: 1 }
+        clientSavedAt: { type: string, format: date-time }
+        payload:
+          type: object
+          description: >-
+            A GraphieDraftPayload. Its content is validated by the server and refused with a stored 422
+            SyncOperationRejected (UNSUPPORTED_PAYLOAD, UNSUPPORTED_PAYLOAD_VERSION, INVALID_PAYLOAD), not by the envelope.
+          additionalProperties: true
+    SyncOperationKind:
+      type: string
+      enum: [sync-draft, submit]
+    SyncActor:
+      type: object
+      additionalProperties: false
+      required: [id, displayName]
+      properties:
+        id: { type: string, format: uuid }
+        displayName: { type: string }
+    SyncOperationAccepted:
+      type: object
+      additionalProperties: false
+      required: [outcome, operationId, kind, serverRevision, acceptedAt, acceptedBy]
+      properties:
+        outcome: { type: string, const: accepted }
+        operationId: { type: string, format: uuid }
+        kind:
+          $ref: '#/components/schemas/SyncOperationKind'
+        serverRevision: { type: integer, minimum: 1 }
+        acceptedAt: { type: string, format: date-time }
+        acceptedBy:
+          $ref: '#/components/schemas/SyncActor'
+        submissionId:
+          type: string
+          format: uuid
+          description: Present only for a submission.
+    SyncOperationConflict:
+      type: object
+      additionalProperties: false
+      required: [outcome, operationId, kind, serverRevision, current]
+      properties:
+        outcome: { type: string, const: conflict }
+        operationId: { type: string, format: uuid }
+        kind:
+          $ref: '#/components/schemas/SyncOperationKind'
+        serverRevision: { type: integer, minimum: 0 }
+        current:
+          type: object
+          additionalProperties: false
+          required: [revision, state, lastChangedAt, lastChangedBy]
+          properties:
+            revision: { type: integer, minimum: 0 }
+            state:
+              type: string
+              enum: [draft, submitted]
+            lastChangedAt:
+              type: [string, 'null']
+              format: date-time
+            lastChangedBy:
+              oneOf:
+                - $ref: '#/components/schemas/SyncActor'
+                - type: 'null'
+    SyncOperationRejected:
+      type: object
+      additionalProperties: false
+      required: [outcome, operationId, kind, code, message, issues]
+      properties:
+        outcome: { type: string, const: rejected }
+        operationId: { type: string, format: uuid }
+        kind:
+          $ref: '#/components/schemas/SyncOperationKind'
+        code:
+          type: string
+          enum: [UNSUPPORTED_PAYLOAD, UNSUPPORTED_PAYLOAD_VERSION, INVALID_PAYLOAD, AUDIT_ALREADY_SUBMITTED]
+        message: { type: string }
+        issues:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [path, code]
+            properties:
+              path: { type: string }
+              code: { type: string }
     HealthResponse:
       type: object
       required: [status, version]
@@ -793,6 +1057,9 @@ components:
           const: v1
     ApiError:
       type: object
+      description: >-
+        Error envelope. Codes include VALIDATION_ERROR, AUTHENTICATION_FAILED, FORBIDDEN, TASK_NOT_FOUND,
+        PAYLOAD_TOO_LARGE, IDEMPOTENCY_KEY_REUSED and INTERNAL_ERROR.
       required: [error]
       properties:
         error:

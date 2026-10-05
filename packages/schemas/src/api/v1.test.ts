@@ -4,7 +4,7 @@ import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import type { apiV1Components, apiV1Operations } from "@cetem-qc/types";
-import { apiErrorSchema, createEmployeeRequestSchema, createTaskRequestSchema, employeeCredentialResponseSchema, employeeListResponseSchema, employeeTaskListQuerySchema, employeeTaskListResponseSchema, employeeTaskResponseSchema, healthQuerySchema, healthResponseSchema, taskListQuerySchema, taskListResponseSchema, updateEmployeeStatusRequestSchema, updateEmployeeStatusResponseSchema } from "./v1.js";
+import { apiErrorSchema, createEmployeeRequestSchema, createTaskRequestSchema, employeeCredentialResponseSchema, employeeListResponseSchema, employeeTaskListQuerySchema, employeeTaskListResponseSchema, employeeTaskResponseSchema, graphieDraftPayloadSchema, healthQuerySchema, healthResponseSchema, syncOperationAcceptedSchema, syncOperationConflictSchema, syncOperationRejectedSchema, syncOperationRequestSchema, taskListQuerySchema, taskListResponseSchema, updateEmployeeStatusRequestSchema, updateEmployeeStatusResponseSchema } from "./v1.js";
 
 const contractPath = fileURLToPath(new URL("../../../types/openapi/cetem-qc-v1.yaml", import.meta.url));
 
@@ -141,4 +141,58 @@ test("OpenAPI task creation patterns match the runtime NUL and blank-establishme
   assert.equal(establishment.test("Cen\u0000tre"), false);
   assert.equal(service.test(""), true);
   assert.equal(service.test("Radio\u0000logie"), false);
+});
+
+test("C1 the sync operation envelope is strict about keys, identifiers and revisions", () => {
+  const valid = {
+    operationId: "00000000-0000-4000-8000-000000000001",
+    idempotencyKey: "00000000-0000-4000-8000-000000000002",
+    baseRevision: 0,
+    localDraftRevision: 1,
+    clientSavedAt: "2026-10-04T10:00:00.000Z",
+    payload: { content: "any object reaches the domain validator" },
+  };
+  assert.deepEqual(syncOperationRequestSchema.parse(valid), valid);
+  const { payload: _payload, ...withoutPayload } = valid;
+  for (const invalid of [
+    withoutPayload,
+    { ...valid, employeeId: "00000000-0000-4000-8000-000000000003" },
+    { ...valid, operationId: "op-1" },
+    { ...valid, idempotencyKey: "key-1" },
+    { ...valid, baseRevision: -1 },
+    { ...valid, baseRevision: 1.5 },
+    { ...valid, localDraftRevision: 0 },
+    { ...valid, clientSavedAt: "hier" },
+    { ...valid, payload: [] },
+    { ...valid, payload: null },
+    { ...valid, payload: "text" },
+  ]) assert.equal(syncOperationRequestSchema.safeParse(invalid).success, false, JSON.stringify(invalid));
+});
+
+test("C2 the three outcome schemas parse the documented bodies and reject extra keys", () => {
+  const operationId = "00000000-0000-4000-8000-000000000001";
+  const actor = { id: "00000000-0000-4000-8000-000000000009", displayName: "Employé Test" };
+  const accepted = { outcome: "accepted", operationId, kind: "submit", serverRevision: 1, acceptedAt: "2026-10-04T10:00:00.000Z", acceptedBy: actor, submissionId: "00000000-0000-4000-8000-000000000005" } as const;
+  const { submissionId: _submissionId, ...acceptedDraft } = { ...accepted, kind: "sync-draft" as const };
+  const conflict = { outcome: "conflict", operationId, kind: "sync-draft", serverRevision: 2, current: { revision: 2, state: "draft", lastChangedAt: "2026-10-04T10:00:00.000Z", lastChangedBy: actor } } as const;
+  const conflictWithoutAudit = { ...conflict, serverRevision: 0, current: { revision: 0, state: "draft", lastChangedAt: null, lastChangedBy: null } } as const;
+  const rejected = { outcome: "rejected", operationId, kind: "submit", code: "INVALID_PAYLOAD", message: "Les données du contrôle sont invalides.", issues: [{ path: "values.visual.integrity", code: "unknown-option" }] } as const;
+  assert.deepEqual(syncOperationAcceptedSchema.parse(accepted), accepted);
+  assert.deepEqual(syncOperationAcceptedSchema.parse(acceptedDraft), acceptedDraft);
+  assert.deepEqual(syncOperationConflictSchema.parse(conflict), conflict);
+  assert.deepEqual(syncOperationConflictSchema.parse(conflictWithoutAudit), conflictWithoutAudit);
+  assert.deepEqual(syncOperationRejectedSchema.parse(rejected), rejected);
+  assert.equal(syncOperationAcceptedSchema.safeParse({ ...accepted, results: [] }).success, false);
+  assert.equal(syncOperationAcceptedSchema.safeParse({ ...accepted, outcome: "rejected" }).success, false);
+  assert.equal(syncOperationAcceptedSchema.safeParse({ ...accepted, serverRevision: 0 }).success, false);
+  assert.equal(syncOperationConflictSchema.safeParse({ ...conflict, current: { ...conflict.current, payload: {} } }).success, false);
+  assert.equal(syncOperationRejectedSchema.safeParse({ ...rejected, values: {} }).success, false);
+  assert.equal(syncOperationRejectedSchema.safeParse({ ...rejected, code: "SOMETHING_ELSE" }).success, false);
+});
+
+test("the documented Graphie payload schema matches the catalogue 2.0.0 identity", () => {
+  const payload = { catalogueId: "graphie-mobile-pov", catalogueVersion: "2.0.0", schemaVersion: 3, ruleId: "cetem-paper-form", ruleVersion: "2.0.0", values: { "header.reportNumber": "" } } as const;
+  assert.deepEqual(graphieDraftPayloadSchema.parse(payload), payload);
+  assert.equal(graphieDraftPayloadSchema.safeParse({ ...payload, ruleVersion: "1.0.0" }).success, false);
+  assert.equal(graphieDraftPayloadSchema.safeParse({ ...payload, values: { a: 1 } }).success, false);
 });

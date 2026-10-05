@@ -16,7 +16,7 @@ export type SyncResult =
   | { type: "conflict"; serverRevision: number; detail: unknown }
   /** Network error, timeout, no response, HTTP 408/429/5xx. */
   | { type: "retryable"; code: string }
-  /** 401, 403 (including ACCOUNT_DEACTIVATED and TASK_NOT_ASSIGNED) and anything unexpected. */
+  /** 400, 401, 403, 404 (TASK_NOT_FOUND blocks only its task), 413, a reused idempotency key and anything unexpected. */
   | { type: "blocking"; code: string };
 
 /** Implemented by the HTTP adapter in Story 7.3; tests use a fake. */
@@ -31,6 +31,9 @@ export type RunSummary = { attempts: number; resolved: number; paused: number; b
 /** Technical retry settings, not CETEM rules: 5 attempts per item per run, waiting 1, 2, 4 then 8 s between them. */
 export const MAX_ATTEMPTS_PER_RUN = 5;
 export const RETRY_WAITS_MS = [1000, 2000, 4000, 8000] as const;
+
+/** Blocking codes that concern only one task (e.g. a reassigned task): that task stops, the run continues with the others. */
+export const TASK_LEVEL_BLOCKING_CODES: readonly string[] = ["TASK_NOT_FOUND"];
 
 type ItemResult = "resolved" | "gone" | "paused" | "skip-task" | "blocked" | "unauthorized";
 
@@ -54,7 +57,7 @@ export function createSyncEngine(options: {
   isAuthorized: (employeeId: string) => boolean | Promise<boolean>;
 }) {
   const { store, transport, now, sleep, isAuthorized } = options;
-  let active: { employeeId: string; promise: Promise<RunSummary> } | null = null;
+  let active: { employeeId: string; promise: Promise<RunSummary>; followUp: boolean; followUpRetryBlocked: boolean } | null = null;
 
   /** Returns null when the item was deleted (explicit discard) or resolved meanwhile. */
   async function record(employeeId: string, operationId: string, transition: OutboxTransition): Promise<OutboxItem | null> {
@@ -98,7 +101,8 @@ export function createSyncEngine(options: {
         continue;
       }
       if (result.type === "blocking") {
-        return await record(employeeId, item.operationId, { type: "blocking", code: result.code, at: now() }) ? "blocked" : "gone";
+        if (!await record(employeeId, item.operationId, { type: "blocking", code: result.code, at: now() })) return "gone";
+        return TASK_LEVEL_BLOCKING_CODES.includes(result.code) ? "skip-task" : "blocked";
       }
       const resolved = await record(employeeId, item.operationId, {
         type: "outcome", outcome: result.type, at: now(),
@@ -110,7 +114,7 @@ export function createSyncEngine(options: {
     }
   }
 
-  async function execute(employeeId: string): Promise<RunSummary> {
+  async function execute(employeeId: string, retryBlocked: boolean): Promise<RunSummary> {
     const summary: RunSummary = { attempts: 0, resolved: 0, paused: 0, blocked: false };
     if (!await isAuthorized(employeeId)) return summary;
     const initial = (await store.listOutbox(employeeId)).filter(isUnresolved);
@@ -122,6 +126,8 @@ export function createSyncEngine(options: {
           .filter((item) => item.taskId === taskId && item.employeeId === employeeId && isUnresolved(item))
           .sort((a, b) => a.sequence - b.sequence)[0];
         if (!next) break;
+        // A blocked item holds its task back until an explicit retry; automatic runs leave it alone.
+        if (!retryBlocked && next.status === "blocked") break;
         const result = await sendItem(employeeId, next, summary);
         if (result === "unauthorized") return summary;
         if (result === "blocked") { summary.blocked = true; return summary; }
@@ -131,13 +137,38 @@ export function createSyncEngine(options: {
     return summary;
   }
 
-  /** One run at a time: a call for the same employee during an active run returns that run's promise; another employee's run starts after it. */
-  function run(employeeId: string): Promise<RunSummary> {
-    if (active?.employeeId === employeeId) return active.promise;
-    if (active) return active.promise.then(() => run(employeeId), () => run(employeeId));
-    const promise = execute(employeeId).finally(() => { if (active?.promise === promise) active = null; });
-    active = { employeeId, promise };
-    return promise;
+  /**
+   * One run at a time. A call for the same employee during an active run asks for exactly one follow-up run
+   * (several calls still give one), and every caller's promise resolves after it with the combined summary.
+   * Another employee's run starts after the active one. `retryBlocked: false` (automatic triggers) leaves
+   * blocked items and their tasks waiting for an explicit retry.
+   */
+  function run(employeeId: string, options: { retryBlocked?: boolean } = {}): Promise<RunSummary> {
+    const retryBlocked = options.retryBlocked ?? true;
+    if (active?.employeeId === employeeId) {
+      active.followUp = true;
+      active.followUpRetryBlocked ||= retryBlocked;
+      return active.promise;
+    }
+    if (active) return active.promise.then(() => run(employeeId, options), () => run(employeeId, options));
+    const current = { employeeId, followUp: false, followUpRetryBlocked: false, promise: Promise.resolve() as unknown as Promise<RunSummary> };
+    current.promise = (async () => {
+      const total: RunSummary = { attempts: 0, resolved: 0, paused: 0, blocked: false };
+      let includeBlocked = retryBlocked;
+      do {
+        current.followUp = false;
+        current.followUpRetryBlocked = false;
+        const summary = await execute(employeeId, includeBlocked);
+        includeBlocked = current.followUpRetryBlocked;
+        total.attempts += summary.attempts;
+        total.resolved += summary.resolved;
+        total.paused += summary.paused;
+        total.blocked = summary.blocked;
+      } while (current.followUp);
+      return total;
+    })().finally(() => { if (active === current) active = null; });
+    active = current;
+    return current.promise;
   }
 
   return { run };

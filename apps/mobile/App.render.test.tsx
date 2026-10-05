@@ -42,6 +42,7 @@ const runtime = globalThis as typeof globalThis & {
   __failDraftList?: boolean;
   __failDraftDelete?: boolean;
   __syncTransport?: SyncTransport | null;
+  __appStateListeners?: Set<(state: string) => void>;
   __failOutboxList?: boolean;
   __failOutboxInsert?: boolean;
 };
@@ -112,7 +113,13 @@ function outboxStatement(kind: "first" | "all" | "run", sql: string, params: unk
 mock.module("react-native", {
   namedExports: {
     ActivityIndicator: "ActivityIndicator",
-    AppState: { addEventListener: () => ({ remove: () => undefined }) },
+    AppState: {
+      addEventListener: (_type: string, listener: (state: string) => void) => {
+        runtime.__appStateListeners ??= new Set();
+        runtime.__appStateListeners.add(listener);
+        return { remove: () => { runtime.__appStateListeners?.delete(listener); } };
+      },
+    },
     Pressable: "Pressable",
     SafeAreaView: "SafeAreaView",
     ScrollView: "ScrollView",
@@ -239,7 +246,8 @@ mock.module("@cetem-qc/api-client/v1", {
     createApiClient: () => runtime.__mobileTestApi,
   },
 });
-// Story 7.2: the real module returns null (no run, items stay queued); tests may install a fake transport per mount.
+// The real module is the HTTP adapter (Story 7.3, tested in sync/app-sync-transport.test.ts). Here a test installs a
+// fake transport per mount; without one, the double provides none and no run starts.
 mock.module("./sync/app-sync-transport.js", { namedExports: { createAppSyncTransport: () => runtime.__syncTransport ?? null } });
 let App: typeof import("./App.js")["default"] | undefined;
 async function loadApp() {
@@ -2681,16 +2689,20 @@ test("Story 7.2 R6 retry does not send while offline or when the stored authoriz
   }
 });
 
-test("Story 7.2 R7 without a transport the submission starts no run and stays queued on the device", async () => {
+test("Story 7.2 R7 (7.3 contract) offline, the transport is never called and the submission stays queued on the device", async () => {
   await loadApp();
   installMocks();
+  const transport = fakeTransport([], { type: "accepted", serverRevision: 1 });
+  runtime.__syncTransport = transport;
   let tree!: ReactTestRenderer;
   await act(async () => { tree = create(<App />); });
   await signIn(tree);
   await openFirstTask(tree);
+  await act(async () => { runtime.__networkListener?.({ isConnected: false, isInternetReachable: false }); await settle(); });
   await requestSubmission(tree);
   const [row] = submitRows(firstTask.id);
   assert.deepEqual({ status: row!.status, attempts: row!.attempt_count }, { status: "queued", attempts: 0 });
+  assert.equal(transport.sent.length, 0);
   assert.ok(findText(tree, fr.employeeTasks.submissionPending));
   assert.equal(syncLine(tree, fr.employeeTasks.syncQueued)?.props.accessibilityRole, "summary");
   assert.equal(hasButton(tree, fr.employeeTasks.retrySync), false);
@@ -2859,5 +2871,134 @@ test("Story 7.2 R14 a refused submission keeps autosaving the pending edit", asy
   assert.ok(runtime.__draftRows!.get(key)!.includes("R14 edited notes"), "the edit is saved after the refusal");
   assert.equal(findText(tree, fr.employeeTasks.savingDraft), undefined);
   assert.equal(submitRows(firstTask.id).length, 0);
+  await act(async () => { tree.unmount(); });
+});
+
+// Story 7.3 — automatic synchronization triggers and the server acceptance date.
+test("Story 7.3 R15 sign-in, reconnection, return to the foreground and a changed save each start a run", async () => {
+  await loadApp();
+  installMocks();
+  seedDraft(firstTask.id);
+  seedOutbox(firstTask.id, 1, "sync-draft", "queued");
+  const transport = fakeTransport([], { type: "accepted", serverRevision: 1 });
+  runtime.__syncTransport = transport;
+  let tree!: ReactTestRenderer;
+  await act(async () => { tree = create(<App />); });
+  await signIn(tree);
+  await act(async () => { await settle(); });
+  assert.deepEqual(transport.sent.map((request) => request.operationId), [`seed-op-${firstTask.id}-1`], "online sign-in sends the queued item");
+
+  await act(async () => { runtime.__networkListener?.({ isConnected: false, isInternetReachable: false }); await settle(); });
+  seedOutbox(secondTask.id, 2, "sync-draft", "queued");
+  assert.equal(transport.sent.length, 1, "nothing is sent offline");
+  await act(async () => { runtime.__networkListener?.({ isConnected: true, isInternetReachable: true }); await settle(); });
+  assert.equal(transport.sent.at(-1)?.operationId, `seed-op-${secondTask.id}-2`, "reconnection sends");
+  assert.equal(transport.sent.length, 2);
+
+  seedOutbox(thirdTask.id, 3, "sync-draft", "queued");
+  await act(async () => { for (const listener of runtime.__appStateListeners ?? []) listener("active"); await settle(); });
+  assert.equal(transport.sent.at(-1)?.operationId, `seed-op-${thirdTask.id}-3`, "returning to the foreground sends");
+  assert.equal(transport.sent.length, 3);
+
+  await openFirstTask(tree);
+  await act(async () => { findInput(tree, reportField().labelFr)!.props.onChangeText("R15-changed"); });
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 650)); await settle(); });
+  assert.equal(transport.sent.length, 4, "a save that created a revision sends its draft synchronization");
+  assert.equal(transport.sent[3]!.kind, "sync-draft");
+  assert.equal((transport.sent[3]!.snapshot.payload as { values: Record<string, string> }).values["header.reportNumber"], "R15-changed");
+  await act(async () => { await findButton(tree, fr.employeeTasks.saveDraft).props.onPress(); await settle(); });
+  assert.equal(transport.sent.length, 4, "an unchanged save starts nothing");
+  await act(async () => { tree.unmount(); });
+});
+
+test("Story 7.3 R15 sign-in, reconnection, return to the foreground and a changed save never resend a blocked item", async () => {
+  await loadApp();
+  installMocks();
+  seedDraft(firstTask.id);
+  seedOutbox(firstTask.id, 1, "sync-draft", "queued");
+  seedOutbox(secondTask.id, 50, "submit", "blocked");
+  const blocked = `seed-op-${secondTask.id}-50`;
+  const transport = fakeTransport([], { type: "accepted", serverRevision: 1 });
+  runtime.__syncTransport = transport;
+  let tree!: ReactTestRenderer;
+  await act(async () => { tree = create(<App />); });
+  await signIn(tree);
+  await act(async () => { await settle(); });
+  assert.deepEqual(transport.sent.map((request) => request.operationId), [`seed-op-${firstTask.id}-1`], "sign-in sends only the queued item");
+
+  await act(async () => { runtime.__networkListener?.({ isConnected: false, isInternetReachable: false }); await settle(); });
+  seedOutbox(thirdTask.id, 3, "sync-draft", "queued");
+  await act(async () => { runtime.__networkListener?.({ isConnected: true, isInternetReachable: true }); await settle(); });
+  assert.equal(transport.sent.at(-1)?.operationId, `seed-op-${thirdTask.id}-3`, "reconnection sends the queued item");
+  assert.equal(transport.sent.length, 2);
+
+  await act(async () => { for (const listener of runtime.__appStateListeners ?? []) listener("active"); await settle(); });
+  assert.equal(transport.sent.length, 2, "returning to the foreground leaves the blocked item alone");
+
+  await openFirstTask(tree);
+  await act(async () => { findInput(tree, reportField().labelFr)!.props.onChangeText("R15-blocked-changed"); });
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 650)); await settle(); });
+  assert.equal(transport.sent.length, 3, "a changed save sends only its own draft synchronization");
+  assert.equal(transport.sent.some((request) => request.operationId === blocked), false);
+  assert.equal(runtime.__outboxRows!.get(blocked)!.status, "blocked");
+  await act(async () => { tree.unmount(); });
+});
+
+test("Story 7.3 R16 an accepted submission shows the server acceptance date in local time, and nothing without it", async () => {
+  await loadApp();
+  const acceptedAt = "2026-10-04T08:05:00.000Z";
+  const local = new Date(acceptedAt);
+  const pad = (value: number) => String(value).padStart(2, "0");
+  const expected = `Soumission acceptée par le serveur le ${pad(local.getDate())}/${pad(local.getMonth() + 1)}/${local.getFullYear()} à ${pad(local.getHours())}:${pad(local.getMinutes())}.`;
+  for (const outcomeJson of [JSON.stringify({ serverRevision: 1, detail: { acceptedAt } }), "{}", JSON.stringify({ serverRevision: 1, detail: { acceptedAt: "hier" } })]) {
+    installMocks();
+    seedDraft(firstTask.id);
+    seedOutbox(firstTask.id, 1, "submit", "resolved", "accepted");
+    runtime.__outboxRows!.get(`seed-op-${firstTask.id}-1`)!.outcome_json = outcomeJson;
+    let tree!: ReactTestRenderer;
+    await act(async () => { tree = create(<App />); });
+    await signIn(tree);
+    await openFirstTask(tree);
+    assert.ok(findText(tree, fr.employeeTasks.submitted), "the lifecycle label is unchanged");
+    const lines = allTexts(tree).filter((text) => text.startsWith("Soumission acceptée par le serveur"));
+    if (outcomeJson.includes(acceptedAt)) {
+      assert.deepEqual(lines, [expected]);
+      assert.equal(findText(tree, expected)!.props.accessibilityRole, "summary");
+    } else assert.deepEqual(lines, [], outcomeJson);
+    await act(async () => { tree.unmount(); });
+  }
+});
+
+test("Story 7.3 R17 no trigger sends anything offline or without an online authorization", async () => {
+  await loadApp();
+  installMocks();
+  const transport = fakeTransport([], { type: "accepted", serverRevision: 1 });
+  runtime.__syncTransport = transport;
+  let tree!: ReactTestRenderer;
+  await act(async () => { tree = create(<App />); });
+  await signIn(tree);
+  await act(async () => { tree.unmount(); });
+  seedDraft(firstTask.id);
+  seedOutbox(firstTask.id, 1, "sync-draft", "queued");
+
+  runtime.__networkOnline = false;
+  try {
+    await act(async () => { tree = create(<App />); await settle(1); });
+    await act(async () => { (await waitForButton(tree, firstTask.id)).props.onPress(); await settle(100); });
+    await act(async () => { findInput(tree, reportField().labelFr)!.props.onChangeText("R17-offline"); });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 650)); await settle(); });
+    await act(async () => { for (const listener of runtime.__appStateListeners ?? []) listener("active"); await settle(); });
+    assert.equal(transport.sent.length, 0, "offline: no send");
+    await act(async () => { tree.unmount(); });
+  } finally {
+    runtime.__networkOnline = true;
+  }
+
+  runtime.__sessionAvailable = false;
+  await act(async () => { tree = create(<App />); await settle(); });
+  assert.ok(findText(tree, fr.auth.reauthenticateOnline), "online but not authorized by the server");
+  await act(async () => { for (const listener of runtime.__appStateListeners ?? []) listener("active"); await settle(); });
+  assert.equal(transport.sent.length, 0, "without an online authorization: no send");
+  assert.ok([...runtime.__outboxRows!.values()].every((row) => row.status === "queued"));
   await act(async () => { tree.unmount(); });
 });

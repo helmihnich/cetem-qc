@@ -182,6 +182,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/employee/tasks/{taskId}/draft-syncs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Synchronize a saved draft of an assigned task as a new server revision
+         * @description Idempotent by idempotencyKey. Accepted, rejected and conflict outcomes are stored and replayed byte-equal for the same actor and request. Request bodies are limited to 256 kB.
+         */
+        post: operations["syncEmployeeTaskDraft"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/employee/tasks/{taskId}/submissions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Submit an assigned task's audit; the server accepts exactly one submission per audit
+         * @description Idempotent by idempotencyKey. On acceptance the server records the revision, the accepted submission with the submitting actor and server date, and its own calculation results in one transaction. Request bodies are limited to 256 kB.
+         */
+        post: operations["submitEmployeeTaskAudit"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/task-assignees": {
         parameters: {
             query?: never;
@@ -350,12 +390,97 @@ export interface components {
         EmployeeTaskResponse: {
             task: components["schemas"]["EmployeeTaskListItem"];
         };
+        /** @description Graphie Mobile form payload, catalogue graphie-mobile-pov 2.0.0, schema 3, rule cetem-paper-form 2.0.0. Values are raw strings, kept unchanged; blank and unparseable readings are valid. legacyContent is refused on a submission. */
+        GraphieDraftPayload: {
+            /** @constant */
+            catalogueId: "graphie-mobile-pov";
+            /** @constant */
+            catalogueVersion: "2.0.0";
+            /** @constant */
+            schemaVersion: 3;
+            /** @constant */
+            ruleId: "cetem-paper-form";
+            /** @constant */
+            ruleVersion: "2.0.0";
+            values: {
+                [key: string]: string;
+            };
+            legacyContent?: string;
+        };
+        SyncOperationRequest: {
+            /** Format: uuid */
+            operationId: string;
+            /** Format: uuid */
+            idempotencyKey: string;
+            baseRevision: number;
+            localDraftRevision: number;
+            /** Format: date-time */
+            clientSavedAt: string;
+            /** @description A GraphieDraftPayload. Its content is validated by the server and refused with a stored 422 SyncOperationRejected (UNSUPPORTED_PAYLOAD, UNSUPPORTED_PAYLOAD_VERSION, INVALID_PAYLOAD), not by the envelope. */
+            payload: {
+                [key: string]: unknown;
+            };
+        };
+        /** @enum {string} */
+        SyncOperationKind: "sync-draft" | "submit";
+        SyncActor: {
+            /** Format: uuid */
+            id: string;
+            displayName: string;
+        };
+        SyncOperationAccepted: {
+            /** @constant */
+            outcome: "accepted";
+            /** Format: uuid */
+            operationId: string;
+            kind: components["schemas"]["SyncOperationKind"];
+            serverRevision: number;
+            /** Format: date-time */
+            acceptedAt: string;
+            acceptedBy: components["schemas"]["SyncActor"];
+            /**
+             * Format: uuid
+             * @description Present only for a submission.
+             */
+            submissionId?: string;
+        };
+        SyncOperationConflict: {
+            /** @constant */
+            outcome: "conflict";
+            /** Format: uuid */
+            operationId: string;
+            kind: components["schemas"]["SyncOperationKind"];
+            serverRevision: number;
+            current: {
+                revision: number;
+                /** @enum {string} */
+                state: "draft" | "submitted";
+                /** Format: date-time */
+                lastChangedAt: string | null;
+                lastChangedBy: components["schemas"]["SyncActor"] | null;
+            };
+        };
+        SyncOperationRejected: {
+            /** @constant */
+            outcome: "rejected";
+            /** Format: uuid */
+            operationId: string;
+            kind: components["schemas"]["SyncOperationKind"];
+            /** @enum {string} */
+            code: "UNSUPPORTED_PAYLOAD" | "UNSUPPORTED_PAYLOAD_VERSION" | "INVALID_PAYLOAD" | "AUDIT_ALREADY_SUBMITTED";
+            message: string;
+            issues: {
+                path: string;
+                code: string;
+            }[];
+        };
         HealthResponse: {
             /** @constant */
             status: "ok";
             /** @constant */
             version: "v1";
         };
+        /** @description Error envelope. Codes include VALIDATION_ERROR, AUTHENTICATION_FAILED, FORBIDDEN, TASK_NOT_FOUND, PAYLOAD_TOO_LARGE, IDEMPOTENCY_KEY_REUSED and INTERNAL_ERROR. */
         ApiError: {
             error: {
                 code: string;
@@ -1013,6 +1138,202 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    syncEmployeeTaskDraft: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                taskId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SyncOperationRequest"];
+            };
+        };
+        responses: {
+            /** @description Operation accepted (or replayed) */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SyncOperationAccepted"];
+                };
+            };
+            /** @description Invalid request envelope (not stored) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Session rejected */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Employé role required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Task not found or not assigned to the authenticated employee */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Stale base revision; nothing was written except the stored outcome */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SyncOperationConflict"];
+                };
+            };
+            /** @description Request body too large (PAYLOAD_TOO_LARGE) */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Payload rejected (stored outcome), or IDEMPOTENCY_KEY_REUSED (ApiError, not stored) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SyncOperationRejected"] | components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    submitEmployeeTaskAudit: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                taskId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SyncOperationRequest"];
+            };
+        };
+        responses: {
+            /** @description Submission accepted (or replayed) */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SyncOperationAccepted"];
+                };
+            };
+            /** @description Invalid request envelope (not stored) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Session rejected */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Employé role required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Task not found or not assigned to the authenticated employee */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Stale base revision; nothing was written except the stored outcome */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SyncOperationConflict"];
+                };
+            };
+            /** @description Request body too large (PAYLOAD_TOO_LARGE) */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Payload rejected (stored outcome), or IDEMPOTENCY_KEY_REUSED (ApiError, not stored) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SyncOperationRejected"] | components["schemas"]["ApiError"];
                 };
             };
             /** @description Internal error */

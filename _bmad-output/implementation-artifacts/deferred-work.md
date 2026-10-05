@@ -77,6 +77,7 @@
 - source_spec: `_bmad-output/specs/spec-6-4-display-calculation-results-in-responsable-review/review-view.md`
   summary: `GraphieCalculationReview` does not check that `evidence.identity` matches the identity the `evidence.results` snapshot was calculated under. A supported identity paired with old-rule results would show « Version de règle non prise en charge » next to a supported identity, and an old identity paired with current-rule results would show verdicts with no warning.
   evidence: Not reachable today. No producer exists yet, and `calculateGraphieResults` builds the results from that same identity. Stories 7.3/7.4 (server snapshot) and 9.1 (W4 wiring) should keep identity and results consistent, either with a server invariant or with a view-level check.
+  resolved: Story 7.3 (2026-10-05), server side — `acceptSubmission` stores `calculateGraphieResults(identity, values)` and refuses (500, nothing written) any result whose identity differs from the revision columns; API test A14. The view-level check stays with 9.1.
 
 ## Deferred from: code review of SPEC-6-5-separate-regression-and-acceptance-fixtures (2026-10-04)
 
@@ -95,12 +96,14 @@
 - source_spec: `_bmad-output/specs/spec-7-1-queue-durable-synchronization-operations/SPEC.md`
   summary: No story in `epics.md` owns the server command that receives `sync-draft` outbox operations (FR-021 « Synchronize saved drafts », AD-5 « synchronized editable drafts »). Story 7.3 covers only submission acceptance.
   evidence: Story 7.1 queues `sync-draft` items behind a transport port. Without a server command they stay `queued` on the device, which is safe but means drafts never synchronize. The 7.3 author or the Product Owner should place it in 7.3 or in a new story (see delivery-notes.md).
+  resolved: Story 7.3 (2026-10-05) — `POST /api/v1/employee/tasks/{taskId}/draft-syncs` accepts draft synchronizations with the same idempotency store and revision check as submissions; API test A2.
 
 ## Deferred from: code review of spec-7-1-queue-durable-synchronization-operations (2026-10-04)
 
 - source_spec: `_bmad-output/specs/spec-7-1-queue-durable-synchronization-operations/sync-engine.md`
   summary: Every `blocking` result stops the whole run, including task-level codes such as `TASK_NOT_ASSIGNED`. The blocked item has the lowest sequence, so each later run stops on it again and the employee's other tasks never sync.
   evidence: The spec lists `TASK_NOT_ASSIGNED` as blocking. Story 7.3 (HTTP mapping) or 8.4 (deactivation/unassignment) should map task-level refusals to a per-task skip.
+  resolved: Story 7.3 (2026-10-05) — `TASK_LEVEL_BLOCKING_CODES = ["TASK_NOT_FOUND"]` blocks only that task and the run continues; automatic runs leave blocked items for an explicit retry; engine test 7.3 E2.
 - source_spec: `_bmad-output/specs/spec-7-1-queue-durable-synchronization-operations/outbox-model.md`
   summary: After a `conflict` outcome, later unresolved items of the same task keep the stale base revision and will predictably conflict as well.
   evidence: Only `accepted` moves later items' base revision. Conflict recovery is Story 8.1.
@@ -110,3 +113,22 @@
 - source_spec: `_bmad-output/specs/spec-7-2-show-synchronization-and-submission-state-distinctly/SPEC.md`
   summary: A submission requested while a run is already active joins that run (`engine.run` returns the active promise), whose task list was read before the new `submit` item existed. The item stays « En attente de synchronisation » with no retry button until the next trigger.
   evidence: Not reachable in 7.2 (the App transport is `null`). Story 7.3 adds the automatic triggers (app start, reconnect, foreground, after save); it should also start a follow-up run when a trigger arrives during an active run.
+  resolved: Story 7.3 (2026-10-05) — a `run()` call during an active run for the same employee schedules exactly one follow-up run, and every caller resolves after it; engine test 7.3 E3.
+
+## Deferred from: Story 7.3 spec (2026-10-04)
+
+- source_spec: `_bmad-output/specs/spec-7-3-accept-submissions-transactionally-and-idempotently/SPEC.md`
+  summary: After a server-accepted submission, the Responsable task list (and the employee task list contract) still reports `state: draft`, because the OpenAPI `state` is the constant `draft` and 7.3 does not change task projections.
+  evidence: Accepted state lives in the new `audits` table. Extending the `state` enum touches three contracts, the web list and the mobile list. Story 9.1 (review of accepted evidence) should extend it.
+
+## Deferred from: code review of spec-7-3-accept-submissions-transactionally-and-idempotently (2026-10-05)
+
+- source_spec: `_bmad-output/specs/spec-7-3-accept-submissions-transactionally-and-idempotently/server-command.md`
+  summary: Assignment is checked on the pool before the transaction (check order step 3), and not again under the task lock. A task reassigned between that check and the commit can still receive one revision or submission from the previous assignee.
+  evidence: The window is a single request. No reassignment flow exists yet. Story 8.4 (deactivation or reassignment recovery) should re-check the assignment inside the transaction, or lock the assignment row.
+- source_spec: `_bmad-output/specs/spec-7-3-accept-submissions-transactionally-and-idempotently/server-command.md`
+  summary: A field value with an unpaired UTF-16 surrogate passes `validateGraphiePayload`, but PostgreSQL `jsonb` cannot store it. The acceptance then fails with 500, and the device retries the item until it pauses. The device does the same on every later run.
+  evidence: The NUL rule exists for the same storage reason, but the spec lists the validation rules exactly, so adding one needs a spec update. A device keyboard is not expected to produce a lone surrogate. Issue paths built from client keys are already sanitized (review patch). Add the rule with the next validation change (DEP-01/02 or Story 8.2).
+- source_spec: `_bmad-output/specs/spec-7-3-accept-submissions-transactionally-and-idempotently/mobile-transport.md`
+  summary: No engine test covers an explicit `run()` (retryBlocked) that joins an active automatic run while a blocked item exists. In that case the follow-up run should send the blocked item (`followUpRetryBlocked`).
+  evidence: The UI hides the retry button while a run is active, so the path is narrow. Add the engine test when Story 8.x changes retry handling.
