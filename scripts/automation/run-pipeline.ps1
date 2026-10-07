@@ -29,6 +29,7 @@ param(
   [int]$MaxTurns = 300,
   [int]$RateLimitWaitMinutes = 30, # used only when the limit message has no reset time
   [int]$RateLimitMaxWaits = 400    # keeps waiting through session and weekly limits (Ctrl+C to stop)
+  [switch]$SkipRegression
 )
 
 $ErrorActionPreference = 'Continue'
@@ -559,6 +560,7 @@ function Invoke-Story([hashtable]$Item) {
   Write-Utf8 $CurrentFile $k
   Log "===== STORY $k =====" 'Magenta'
 
+  if ($SkipRegression -and -not (Test-StepDone "$k|regression")) { Set-StepDone "$k|regression" }
   if (-not (Test-StepDone "$k|spec")) {
     Invoke-AgentStep "$k|spec" $Item 'spec' '/bmad-spec' $TplSpec | Out-Null
     $st = Get-StoryStatus $k
