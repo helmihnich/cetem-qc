@@ -766,7 +766,7 @@ So that review highlights only observations CETEM BH has explicitly defined.
 **And** AI does not author deterministic or authoritative insights; no threshold or proposal rule is inferred from workbook formulas alone
 **And** until DEP-01R defines the applicable proposal rule, the feature is marked blocked/unavailable and no fabricated proposal appears.
 
-**Traceability:** FR-028, DR-002, DR-007, DR-008, AD-7. **Dependency:** DEP-01R.
+**Traceability:** spec `_bmad-output/specs/spec-9-2-generate-deterministic-insight-proposals-from-approved-rules/SPEC.md`; FR-028, DR-002, DR-007, DR-008, AD-7. **Dependency:** DEP-01R (no approved rule yet: the registry ships empty and the feature reports « indisponible »).
 
 ### Story 9.3: Retain or discard proposed insights with provenance
 

@@ -323,3 +323,101 @@ test("R11 the Employé surface is unchanged: no evidence, lineage or access fiel
     }
   });
 });
+
+// Story 9.2: deterministic insight proposals delivered with the logged evidence open.
+
+const syntheticInsightRule = (ruleId: string, evaluate: (input: { values: Readonly<Record<string, string>> }) => ReadonlyArray<{ sourceKeys: ReadonlyArray<{ kind: "field" | "result"; key: string }>; params: Record<string, string | number> }>) => ({
+  ruleId, ruleVersion: 1, approvalReference: "Document de test synthétique", sources: [{ kind: "field" as const, key: "header.reportNumber" }], evaluate,
+});
+
+test("R12 with the production registry an own-team open returns unavailable insights and exactly one access row", async () => {
+  await withSyncFixture(async (fixture) => {
+    const { taskId } = await acceptedTask(fixture);
+    const reply = await evidence(fixture, taskId);
+    assert.equal(reply.status, 200);
+    assert.deepEqual(acceptedEvidenceResponseSchema.parse(reply.body).insights, { status: "unavailable", reason: "no-approved-rules", registryVersion: "insight-registry-1", proposals: [] });
+    assert.equal((await accessRows(fixture.pool)).length, 1);
+  });
+});
+
+test("R13 a synthetic approved registry gives the expected proposals, one access row per open and identical repeats", async () => {
+  await withSyncFixture(async (fixture) => {
+    const { taskId, reply: accepted } = await acceptedTask(fixture, { "header.reportNumber": "R-091" });
+    reviewCommandTestSeams.insightRegistry = {
+      rules: [syntheticInsightRule("regle-synthetique", (input) => [{ sourceKeys: [{ kind: "field", key: "header.reportNumber" }], params: { numero: input.values["header.reportNumber"] ?? "" } }])],
+      templates: { "regle-synthetique": "Rapport {numero} noté." },
+    };
+    try {
+      const first = await evidence(fixture, taskId);
+      assert.equal(first.status, 200);
+      assert.equal((await accessRows(fixture.pool)).length, 1);
+      const insights = acceptedEvidenceResponseSchema.parse(first.body).insights;
+      assert.equal(insights.status, "available");
+      assert.equal(insights.proposals.length, 1);
+      assert.deepEqual(insights.proposals[0], {
+        proposalId: `regle-synthetique:v1:${String(accepted.body.submissionId)}:field=header.reportNumber`, ruleId: "regle-synthetique", ruleVersion: 1,
+        approvalReference: "Document de test synthétique", registryVersion: "insight-registry-1", submissionId: accepted.body.submissionId,
+        sourceKeys: [{ kind: "field", key: "header.reportNumber" }], statement: "Rapport R-091 noté.", origin: "deterministic",
+      });
+      const second = await evidence(fixture, taskId);
+      assert.deepEqual(second.body.insights, first.body.insights);
+      assert.equal((await accessRows(fixture.pool)).length, 2);
+    } finally {
+      reviewCommandTestSeams.insightRegistry = undefined;
+    }
+  });
+});
+
+test("R14 a throwing rule returns 500 INTERNAL_ERROR with no access row and no evidence", async () => {
+  await withSyncFixture(async (fixture) => {
+    const { taskId } = await acceptedTask(fixture, { "header.reportNumber": "R-SECRET-VALUE" });
+    reviewCommandTestSeams.insightRegistry = {
+      rules: [syntheticInsightRule("regle-defaillante", () => { throw new Error("rule failure R-SECRET-VALUE"); })],
+      templates: { "regle-defaillante": "Sans objet." },
+    };
+    try {
+      const { result } = await captureInfo(() => evidence(fixture, taskId));
+      assert.equal(result.status, 500);
+      assert.deepEqual(result.body, LOAD_FAILED);
+      assert.ok(!result.text.includes("SECRET") && !("task" in result.body) && !("insights" in result.body));
+      assert.equal((await accessRows(fixture.pool)).length, 0);
+    } finally {
+      reviewCommandTestSeams.insightRegistry = undefined;
+    }
+  });
+});
+
+test("R15 every refusal stays byte-identical to 9.1 and carries no insights field", async () => {
+  await withSyncFixture(async (fixture) => {
+    const { taskId } = await acceptedTask(fixture);
+    const draftTask = await fixture.newTask(fixture.employee);
+    await fixture.send("draft-syncs", draftTask, envelope(0, formPayload({ "header.reportNumber": "R-BROUILLON" })));
+    const refusals = [
+      await evidence(fixture, taskId, fixture.tokens.employee), await evidence(fixture, "not-a-uuid"), await evidence(fixture, "00000000-0000-4000-8000-0000000000aa"),
+      await evidence(fixture, taskId, fixture.tokens.otherOwner), await evidence(fixture, draftTask), await evidence(fixture, await fixture.newTask(fixture.employee)),
+    ];
+    assert.deepEqual(refusals.map((reply) => reply.body), [FORBIDDEN, NOT_FOUND, NOT_FOUND, NOT_FOUND, NOT_FOUND, NOT_FOUND]);
+    for (const reply of refusals) assert.ok(!reply.text.includes("insights"));
+    assert.equal((await accessRows(fixture.pool)).length, 0);
+  });
+});
+
+test("R16 opens with proposals leave the evidence tables untouched and add no table", async () => {
+  await withSyncFixture(async (fixture) => {
+    const { taskId } = await acceptedTask(fixture);
+    const tableCount = async () => (await fixture.pool.query<{ count: string }>("SELECT count(*) FROM information_schema.tables WHERE table_schema = current_schema()")).rows[0]!.count;
+    const tablesBefore = await tableCount();
+    const before = await evidenceFingerprint(fixture.pool);
+    reviewCommandTestSeams.insightRegistry = {
+      rules: [syntheticInsightRule("regle-synthetique", () => [{ sourceKeys: [{ kind: "field", key: "header.reportNumber" }], params: {} }])],
+      templates: { "regle-synthetique": "Observation." },
+    };
+    try {
+      for (let open = 0; open < 2; open++) assert.equal((await evidence(fixture, taskId)).status, 200);
+    } finally {
+      reviewCommandTestSeams.insightRegistry = undefined;
+    }
+    assert.equal(await evidenceFingerprint(fixture.pool), before);
+    assert.equal(await tableCount(), tablesBefore);
+  });
+});

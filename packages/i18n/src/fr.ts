@@ -116,6 +116,17 @@ export const fr = {
     unavailable: "Ces preuves ne sont pas disponibles. Actualisez la liste.",
     loadFailed: "Les preuves n’ont pas pu être chargées.",
   },
+  // Story 9.2 — deterministic insight proposals (read-only).
+  insights: {
+    heading: "Propositions d’insights",
+    unavailable: "Propositions d’insights indisponibles : aucune règle CETEM approuvée.",
+    none: "Aucune observation proposée par les règles approuvées.",
+    rule: "Règle {ruleId} v{ruleVersion}",
+    approval: "Approbation CETEM : {approvalReference}",
+    sources: "Données concernées : {sources}",
+    // French statement templates by rule ID; empty until CETEM approves a rule.
+    rules: {} as Record<string, string>,
+  },
   employeeTasks: {
     title: "Mes tâches",
     description: "Consultez les tâches qui vous sont attribuées.",

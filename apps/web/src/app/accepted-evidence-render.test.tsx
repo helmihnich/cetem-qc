@@ -5,6 +5,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { GRAPHIE_CALCULATION_IDENTITY, calculateGraphieResults } from "@cetem-qc/domain";
 import type { CalculationContext } from "@cetem-qc/domain";
 import type { AcceptedEvidenceResponse } from "@cetem-qc/api-client/v1";
+import { fr } from "@cetem-qc/i18n";
 import { AcceptedEvidenceView, loadAcceptedEvidence } from "./accepted-evidence";
 import type { EvidenceLoad } from "./accepted-evidence";
 import { TaskListView } from "./task-list";
@@ -34,6 +35,7 @@ const evidenceFor = (identity: CalculationContext = GRAPHIE_CALCULATION_IDENTITY
   submission: { submissionId: OTHER, auditId: OTHER, revision: 2, submittedBy: { id: OTHER, displayName: "Employé Test" }, acceptedAt: "2026-10-07T08:30:00.000Z" },
   identity, values: stored, results: calculateGraphieResults(identity, stored) as unknown as AcceptedEvidenceResponse["results"],
   lineage: { replacementOf: DRAFT, replacedBy: null, recoverySource: null, recoverySuccessorTaskId: null },
+  insights: { status: "unavailable", reason: "no-approved-rules", registryVersion: "insight-registry-1", proposals: [] },
   ...overrides,
 });
 
@@ -188,4 +190,50 @@ test("W7 a stored value containing HTML renders as text, and line breaks and spa
   assert.ok(!html.includes("<b>x</b>") && !html.includes("<script>"));
   assert.match(html, /&lt;b&gt;x&lt;\/b&gt;\n {2}&lt;script&gt;/);
   assert.match(html, /class="evidence-value"/);
+});
+
+// Story 9.2 (W8–W12): read-only insight proposals section.
+const UNAVAILABLE_TEXT = "Propositions d’insights indisponibles : aucune règle CETEM approuvée.";
+const insightSection = (markup: string) => /<section class="evidence-insights"[\s\S]*?<\/section>/.exec(markup)?.[0] ?? "";
+const proposal = (ruleId: string, statement: string, sourceKeys: Array<{ kind: "field" | "result"; key: string }>) => ({
+  proposalId: `${ruleId}:v1:${OTHER}:x`, ruleId, ruleVersion: 1, approvalReference: "Document synthétique 2026", registryVersion: "insight-registry-1",
+  submissionId: OTHER, sourceKeys, statement, origin: "deterministic" as const,
+});
+const availableWith = (proposals: ReturnType<typeof proposal>[]) => ready(evidenceFor(GRAPHIE_CALCULATION_IDENTITY, { insights: { status: "available", registryVersion: "insight-registry-1", proposals } }));
+
+test("W8 unavailable insights show the message once and no insight or decision control", () => {
+  const markup = view(ready());
+  assert.equal(decode(markup).split(UNAVAILABLE_TEXT).length - 1, 1);
+  const section = insightSection(markup);
+  assert.ok(!section.includes("<li") && !section.includes("<button"));
+  assert.ok(!/approuver|rejeter|conserver|écarter|retenir/i.test(decode(section).replace(UNAVAILABLE_TEXT, "")));
+});
+
+test("W9 available with zero proposals shows « aucune observation »", () => {
+  const markup = view(availableWith([]));
+  assert.match(decode(insightSection(markup)), /Aucune observation proposée par les règles approuvées\./);
+  assert.ok(!markup.includes(UNAVAILABLE_TEXT.replace("’", "&#x27;")) && !decode(markup).includes(UNAVAILABLE_TEXT));
+});
+
+test("W10 available proposals are shown read-only with rule, approval and source labels; the conformity note appears once", () => {
+  const markup = view(availableWith([
+    proposal("regle-a", "Observation A.", [{ kind: "field", key: "header.reportNumber" }]),
+    proposal("regle-b", "Observation B.", [{ kind: "result", key: "voltageAccuracy" }]),
+  ]));
+  const section = decode(insightSection(markup));
+  for (const expected of ["Observation A.", "Règle regle-a v1", "Règle regle-b v1", "Document synthétique 2026", "Exactitude de la tension"]) assert.ok(section.includes(expected), expected);
+  assert.ok(!insightSection(markup).includes("<button") && !insightSection(markup).includes("<input"));
+  assert.equal(decode(markup).split("la conformité finale de l'appareil est décidée par le Responsable").length - 1, 1);
+});
+
+test("W11 the component renders a statement as received and never evaluates", () => {
+  const markup = view(availableWith([proposal("regle-inconnue", "Texte libre non issu d’un modèle.", [{ kind: "field", key: "header.reportNumber" }])]));
+  assert.ok(decode(insightSection(markup)).includes("Texte libre non issu d’un modèle."));
+});
+
+test("W12 the insight strings are French and the section has no English text", () => {
+  const strings = [fr.insights.heading, fr.insights.unavailable, fr.insights.none, fr.insights.rule, fr.insights.approval, fr.insights.sources];
+  for (const text of strings) assert.ok(text.trim() !== "");
+  const text = decode(insightSection(view(ready())));
+  assert.ok(!/\b(insights? unavailable|no approved|retain|discard|approve|reject)\b/i.test(text));
 });

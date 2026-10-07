@@ -125,7 +125,19 @@ export const deactivatedAssigneeRecoveryResponseSchema: z.ZodType<DeactivatedAss
 }).strict();
 // The calculation snapshot is stored and returned as is; its shape belongs to packages/domain, so each test result stays open here.
 const storedTestResultSchema = z.object({}).passthrough();
+const nonEmpty = z.string().min(1);
+const insightSourceKeySchema = z.object({ kind: z.enum(["field", "result"]), key: nonEmpty }).strict();
+const insightProposalSchema = z.object({
+  proposalId: nonEmpty, ruleId: nonEmpty, ruleVersion: z.number().int().positive(), approvalReference: nonEmpty,
+  registryVersion: nonEmpty, submissionId: z.string().uuid(), sourceKeys: z.array(insightSourceKeySchema).min(1),
+  statement: nonEmpty, origin: z.literal("deterministic"),
+}).strict();
+export const insightProposalSetSchema = z.discriminatedUnion("status", [
+  z.object({ status: z.literal("unavailable"), reason: z.literal("no-approved-rules"), registryVersion: nonEmpty, proposals: z.tuple([]) }).strict(),
+  z.object({ status: z.literal("available"), registryVersion: nonEmpty, proposals: z.array(insightProposalSchema) }).strict(),
+]);
 export const acceptedEvidenceResponseSchema: z.ZodType<AcceptedEvidenceResponseContract> = z.object({
+  insights: insightProposalSetSchema,
   task: z.object({ id: z.string().uuid(), establishment: z.string(), service: z.string(), assignee: z.string() }).strict(),
   submission: z.object({
     submissionId: z.string().uuid(), auditId: z.string().uuid(), revision: z.number().int().positive(),

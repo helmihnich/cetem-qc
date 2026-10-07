@@ -212,6 +212,9 @@ importers:
       '@cetem-qc/domain':
         specifier: workspace:*
         version: link:../../packages/domain
+      '@cetem-qc/i18n':
+        specifier: workspace:*
+        version: link:../../packages/i18n
       '@cetem-qc/schemas':
         specifier: workspace:*
         version: link:../../packages/schemas

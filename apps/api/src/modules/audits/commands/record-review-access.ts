@@ -1,5 +1,6 @@
-import { GRAPHIE_CALCULATION_IDENTITY } from "@cetem-qc/domain";
-import type { CalculationContext, GraphieCalculationResults } from "@cetem-qc/domain";
+import { GRAPHIE_CALCULATION_IDENTITY, INSIGHT_RULE_REGISTRY, evaluateInsightProposals } from "@cetem-qc/domain";
+import type { CalculationContext, GraphieCalculationIdentity, GraphieCalculationResults, InsightProposalSet, InsightRule } from "@cetem-qc/domain";
+import { fr } from "@cetem-qc/i18n";
 import type { Pool } from "pg";
 import { withTransaction } from "../../../db/transaction.js";
 import { getOwnTeamTaskSummary } from "../../tasks/queries/own-team-task.js";
@@ -8,14 +9,15 @@ import { getAcceptedSubmissionForReview } from "../queries/accepted-submission.j
 import type { AcceptedSubmissionSnapshot } from "../queries/accepted-submission.js";
 
 export type OpenAcceptedEvidenceOutcome =
-  | { type: "opened"; evidence: AcceptedSubmissionSnapshot; task: OwnTeamTaskSummary }
+  | { type: "opened"; evidence: AcceptedSubmissionSnapshot; task: OwnTeamTaskSummary; insights: InsightProposalSet }
   | { type: "not-found" }
   | { type: "inconsistent" };
 
-/** Test-only seams: reshape the read snapshot, or fail the access insert. Never set in production. */
+/** Test-only seams: reshape the read snapshot, fail the access insert, or supply a synthetic insight registry. Never set in production. */
 export const reviewCommandTestSeams: {
   snapshot?: (snapshot: AcceptedSubmissionSnapshot) => AcceptedSubmissionSnapshot;
   beforeAccessInsert?: () => Promise<void> | void;
+  insightRegistry?: { rules: readonly InsightRule[]; templates: Readonly<Record<string, string>> };
 } = {};
 
 const testNames = ["voltageAccuracy", "voltageRepeatability", "outputRepeatability", "outputLinearity", "lightFieldCorrespondence"] as const;
@@ -48,11 +50,18 @@ export async function openAcceptedEvidenceForReview(pool: Pool, responsableId: s
     if (!isConsistentSnapshot(evidence.identity, evidence.results)) return { type: "inconsistent" };
     const task = await getOwnTeamTaskSummary(transaction, responsableId, evidence.taskId);
     if (!task) return { type: "not-found" };
+    // Stateless and read only: a throw here fails the request before the access row is inserted.
+    const seam = reviewCommandTestSeams.insightRegistry;
+    const insights = evaluateInsightProposals(
+      { submissionId: evidence.submissionId, identity: evidence.identity as GraphieCalculationIdentity, values: evidence.payload.values, results: evidence.results },
+      seam ? seam.rules : INSIGHT_RULE_REGISTRY,
+      seam ? seam.templates : fr.insights.rules,
+    );
     await reviewCommandTestSeams.beforeAccessInsert?.();
     await transaction.query(
       "INSERT INTO audit_review_accesses (actor_id, task_id, audit_id, submission_id) VALUES ($1, $2, $3, $4)",
       [responsableId, evidence.taskId, evidence.auditId, evidence.submissionId],
     );
-    return { type: "opened", evidence, task };
+    return { type: "opened", evidence, task, insights };
   });
 }

@@ -569,6 +569,7 @@ export interface components {
             replacedBy: string | null;
         };
         AcceptedEvidenceResponse: {
+            insights: components["schemas"]["InsightProposalSet"];
             task: {
                 /** Format: uuid */
                 id: string;
@@ -634,6 +635,38 @@ export interface components {
                 /** Format: uuid */
                 recoverySuccessorTaskId: string | null;
             };
+        };
+        InsightSourceKey: {
+            /** @enum {string} */
+            kind: "field" | "result";
+            key: string;
+        };
+        InsightProposal: {
+            proposalId: string;
+            ruleId: string;
+            ruleVersion: number;
+            approvalReference: string;
+            registryVersion: string;
+            /** Format: uuid */
+            submissionId: string;
+            sourceKeys: components["schemas"]["InsightSourceKey"][];
+            statement: string;
+            /** @enum {string} */
+            origin: "deterministic";
+        };
+        /** @description Factual proposals from CETEM-approved insight rules. unavailable means no approved rule exists; available with an empty list means rules exist and none fired. */
+        InsightProposalSet: {
+            /** @enum {string} */
+            status: "unavailable";
+            /** @enum {string} */
+            reason: "no-approved-rules";
+            registryVersion: string;
+            proposals: components["schemas"]["InsightProposal"][];
+        } | {
+            /** @enum {string} */
+            status: "available";
+            registryVersion: string;
+            proposals: components["schemas"]["InsightProposal"][];
         };
         EmployeeTaskListResponse: {
             tasks: components["schemas"]["EmployeeTaskListItem"][];

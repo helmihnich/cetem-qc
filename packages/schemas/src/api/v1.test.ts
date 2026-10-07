@@ -316,6 +316,7 @@ test("K7 accepted evidence response schema parses a full body and refuses extras
     values: { "header.reportNumber": " R-001\n" },
     results: { voltageAccuracy: result, voltageRepeatability: result, outputRepeatability: result, outputLinearity: result, lightFieldCorrespondence: result },
     lineage: { replacementOf: null, replacedBy: null, recoverySource: null, recoverySuccessorTaskId: null },
+    insights: { status: "unavailable", reason: "no-approved-rules", registryVersion: "insight-registry-1", proposals: [] },
   };
   assert.deepEqual(acceptedEvidenceResponseSchema.parse(body), body);
   assert.equal(acceptedEvidenceResponseSchema.safeParse({ ...body, extra: true }).success, false);
@@ -324,4 +325,36 @@ test("K7 accepted evidence response schema parses a full body and refuses extras
   assert.equal(acceptedEvidenceResponseSchema.safeParse(withoutLineage).success, false);
   assert.equal(acceptedEvidenceResponseSchema.safeParse({ ...body, submission: { ...body.submission, acceptedAt: "07/10/2026" } }).success, false);
   assert.equal(acceptedEvidenceResponseSchema.safeParse({ ...body, results: { voltageAccuracy: result } }).success, false);
+});
+
+test("K9 accepted evidence insights are required, parse both statuses and refuse extras, missing provenance and inconsistent unavailable sets", () => {
+  const id = "00000000-0000-4000-8000-000000000040";
+  const result = { test: "voltage-accuracy", status: "x" };
+  const proposal = {
+    proposalId: `rule-a:v1:${id}:field=header.reportNumber`, ruleId: "rule-a", ruleVersion: 1, approvalReference: "Document synthétique 2026",
+    registryVersion: "insight-registry-1", submissionId: id, sourceKeys: [{ kind: "field", key: "header.reportNumber" }],
+    statement: "Observation synthétique.", origin: "deterministic",
+  } as const;
+  const body = {
+    task: { id, establishment: "Établissement A", service: "Radiologie", assignee: "Employé Test" },
+    submission: { submissionId: id, auditId: id, revision: 2, submittedBy: { id, displayName: "Employé Test" }, acceptedAt: "2026-10-07T08:00:00.000Z" },
+    identity: { catalogueId: "graphie-mobile-pov", catalogueVersion: "2.0.0", schemaVersion: 3, ruleId: "cetem-paper-form", ruleVersion: "2.0.0" },
+    values: {},
+    results: { voltageAccuracy: result, voltageRepeatability: result, outputRepeatability: result, outputLinearity: result, lightFieldCorrespondence: result },
+    lineage: { replacementOf: null, replacedBy: null, recoverySource: null, recoverySuccessorTaskId: null },
+    insights: { status: "available", registryVersion: "insight-registry-1", proposals: [proposal] },
+  };
+  assert.deepEqual(acceptedEvidenceResponseSchema.parse(body), body);
+  assert.equal(acceptedEvidenceResponseSchema.safeParse({ ...body, insights: { ...body.insights, proposals: [] } }).success, true);
+  const { insights: _insights, ...withoutInsights } = body;
+  const { approvalReference: _approval, ...withoutApproval } = proposal;
+  for (const insights of [
+    undefined,
+    { ...body.insights, extra: 1 },
+    { ...body.insights, proposals: [{ ...proposal, extra: 1 }] },
+    { ...body.insights, proposals: [withoutApproval] },
+    { ...body.insights, proposals: [{ ...proposal, origin: "ai" }] },
+    { status: "unavailable", reason: "no-approved-rules", registryVersion: "insight-registry-1", proposals: [proposal] },
+    { status: "unavailable", reason: "other", registryVersion: "insight-registry-1", proposals: [] },
+  ]) assert.equal(acceptedEvidenceResponseSchema.safeParse(insights === undefined ? withoutInsights : { ...body, insights }).success, false, JSON.stringify(insights));
 });

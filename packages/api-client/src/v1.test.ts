@@ -303,6 +303,7 @@ test("K8 getAcceptedEvidence returns typed outcomes for 200, 403, 404 and 500 an
     values: {},
     results: { voltageAccuracy: result, voltageRepeatability: result, outputRepeatability: result, outputLinearity: result, lightFieldCorrespondence: result },
     lineage: { replacementOf: null, replacedBy: null, recoverySource: null, recoverySuccessorTaskId: null },
+    insights: { status: "unavailable", reason: "no-approved-rules", registryVersion: "insight-registry-1", proposals: [] },
   };
   const ok = clientFor(body);
   assert.deepEqual(await ok.client.getAcceptedEvidence(id), { status: 200, body });

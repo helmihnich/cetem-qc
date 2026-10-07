@@ -87,6 +87,34 @@ export function EvidenceInputSections({ values }: { values: Readonly<Record<stri
   </section>;
 }
 
+const fieldLabels = new Map(GRAPHIE_MOBILE_POV_CATALOGUE.sections.flatMap((section) => section.fields).map((field) => [field.id, field.labelFr]));
+const resultLabels: Record<string, string> = {
+  voltageAccuracy: fr.graphieResults.tests.voltageAccuracy,
+  voltageRepeatability: fr.graphieResults.tests.voltageRepeatability,
+  outputRepeatability: fr.graphieResults.tests.outputRepeatability,
+  outputLinearity: fr.graphieResults.tests.outputLinearity,
+  lightFieldCorrespondence: fr.graphieResults.tests.lightFieldCorrespondence,
+};
+const sourceLabelOf = (source: { kind: "field" | "result"; key: string }) =>
+  (source.kind === "field" ? fieldLabels.get(source.key) : resultLabels[source.key]) ?? source.key;
+
+/** Read-only W5 slot: renders the proposal set exactly as received. It never evaluates and offers no decision control (9.3). */
+export function InsightProposalsSection({ insights }: { insights: AcceptedEvidenceResponse["insights"] }) {
+  let content: React.ReactNode;
+  if (insights.status === "unavailable") content = <p className="state-message">{fr.insights.unavailable}</p>;
+  else if (insights.proposals.length === 0) content = <p className="state-message">{fr.insights.none}</p>;
+  else content = <ul className="insight-list">{insights.proposals.map((proposal) => <li className="insight-item" key={proposal.proposalId}>
+    <p>{proposal.statement}</p>
+    <p>{fr.insights.rule.replace("{ruleId}", proposal.ruleId).replace("{ruleVersion}", String(proposal.ruleVersion))}</p>
+    <p>{fr.insights.approval.replace("{approvalReference}", proposal.approvalReference)}</p>
+    <p>{fr.insights.sources.replace("{sources}", proposal.sourceKeys.map(sourceLabelOf).join(", "))}</p>
+  </li>)}</ul>;
+  return <section className="evidence-insights" aria-labelledby="evidence-insights-heading">
+    <h3 id="evidence-insights-heading">{fr.insights.heading}</h3>
+    {content}
+  </section>;
+}
+
 function EvidenceLineage({ lineage }: { lineage: AcceptedEvidenceResponse["lineage"] }) {
   const lines = [
     lineage.replacementOf !== null ? fr.tasks.replacementOf.replace("{taskId}", lineage.replacementOf) : null,
@@ -127,6 +155,7 @@ export function AcceptedEvidenceView({ taskId, load, onBack, onRetry, headingRef
       <EvidenceLineage lineage={evidence.lineage} />
       <EvidenceInputSections values={evidence.values} />
       <GraphieCalculationReview evidence={{ identity: evidence.identity, values: evidence.values, results: evidence.results as unknown as GraphieCalculationResults }} />
+      <InsightProposalsSection insights={evidence.insights} />
     </>;
   } else if (load.kind === "not-found") {
     content = <div className="state-message error-state" role="alert">{fr.evidence.unavailable}</div>;

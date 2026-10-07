@@ -471,7 +471,7 @@ export function createApp(pool?: Pool) {
         failed();
         return;
       }
-      const { evidence, task } = outcome;
+      const { evidence, task, insights } = outcome;
       const lineage = (await readTaskAcceptanceAndLineage(getPool(), [evidence.taskId])).get(evidence.taskId)!;
       response.status(200).json(acceptedEvidenceResponseSchema.parse({
         task,
@@ -479,6 +479,7 @@ export function createApp(pool?: Pool) {
         identity: evidence.identity,
         values: evidence.payload.values,
         results: evidence.results,
+        insights,
         lineage: { replacementOf: lineage.replacementOf, replacedBy: lineage.replacedBy, recoverySource: lineage.recoverySource, recoverySuccessorTaskId: lineage.recoverySuccessorTaskId },
       }));
     } catch {
