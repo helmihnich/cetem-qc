@@ -6,7 +6,7 @@ import { GRAPHIE_CALCULATION_IDENTITY, calculateGraphieResults } from "@cetem-qc
 import type { CalculationContext } from "@cetem-qc/domain";
 import type { AcceptedEvidenceResponse } from "@cetem-qc/api-client/v1";
 import { fr } from "@cetem-qc/i18n";
-import { AcceptedEvidenceView, InsightProposalsSection, loadAcceptedEvidence, submitInsightDecision } from "./accepted-evidence";
+import { AcceptedEvidenceView, InsightProposalsSection, ManualInsightsSection, loadAcceptedEvidence, submitInsightDecision, submitManualInsight } from "./accepted-evidence";
 import type { EvidenceLoad } from "./accepted-evidence";
 import { TaskListView } from "./task-list";
 import type { TaskListViewProps } from "./task-list";
@@ -37,6 +37,7 @@ const evidenceFor = (identity: CalculationContext = GRAPHIE_CALCULATION_IDENTITY
   lineage: { replacementOf: DRAFT, replacedBy: null, recoverySource: null, recoverySuccessorTaskId: null },
   insights: { status: "unavailable", reason: "no-approved-rules", registryVersion: "insight-registry-1", proposals: [] },
   insightDecisions: [],
+  manualInsights: [],
   ...overrides,
 });
 
@@ -114,7 +115,9 @@ test("W3 the back control calls the close handler", () => {
 });
 
 test("W4 the panel holds no input, textarea, select, form, or button besides « Retour à la liste », and no approval wording", () => {
-  const html = view(ready(evidenceFor(GRAPHIE_CALCULATION_IDENTITY, { lineage: { replacementOf: null, replacedBy: DRAFT, recoverySource: null, recoverySuccessorTaskId: null } })));
+  // Story 9.4 adds the manual-insight form to the insights area; everything outside that section stays control-free.
+  const html = view(ready(evidenceFor(GRAPHIE_CALCULATION_IDENTITY, { lineage: { replacementOf: null, replacedBy: DRAFT, recoverySource: null, recoverySuccessorTaskId: null } })))
+    .replace(/<section class="evidence-manual-insights"[\s\S]*?<\/form><\/section>/, "");
   for (const tag of ["input", "textarea", "select", "form"]) assert.ok(!new RegExp(`<${tag}\\b`).test(html), tag);
   const buttons = [...html.matchAll(/<button[^>]*>([\s\S]*?)<\/button>/g)].map((match) => decode(match[1]!).trim());
   assert.deepEqual(buttons, ["Retour à la liste"]);
@@ -304,5 +307,83 @@ test("W16 no approve, reject or conformity wording is added; the conformity note
   const markup = view(withDecisions([decisionOf(a.proposalId, "retained")]));
   const text = decode(insightSection(markup));
   assert.ok(!/approuv|rejet|rejeter|conforme|non conforme|\b(retain|discard|approve|reject|undecided)\b/i.test(text));
+  assert.equal(decode(markup).split("la conformité finale de l'appareil est décidée par le Responsable").length - 1, 1);
+});
+
+// Story 9.4 (W18–W22): manual insights in the W5 panel.
+const manualSection = (markup: string) => /<section class="evidence-manual-insights"[\s\S]*?<\/form><\/section>/.exec(markup)?.[0] ?? "";
+const manualInsightOf = (id: string, text: string, justification: string | null = null) => ({
+  id, text, justification, sourceType: "manual" as const, createdAt: "2026-10-08T09:00:00.000Z", author: { id: OTHER, displayName: "Responsable Test" },
+});
+
+test("W18 the add form renders whether proposals are available, unavailable or empty; labels are associated; no file input", () => {
+  const states = [
+    { status: "unavailable" as const, reason: "no-approved-rules" as const, registryVersion: "insight-registry-1", proposals: [] },
+    { status: "available" as const, registryVersion: "insight-registry-1", proposals: [] },
+    { status: "available" as const, registryVersion: "insight-registry-1", proposals: [proposalA()] },
+  ];
+  for (const insights of states) {
+    const section = manualSection(view(ready(evidenceFor(GRAPHIE_CALCULATION_IDENTITY, { insights }))));
+    assert.ok(section.includes(fr.insights.manualFormHeading));
+    assert.match(section, /<label for="manual-insight-text">/);
+    assert.match(section, /<textarea id="manual-insight-text"[^>]*required=""[^>]*maxLength="1000"|<textarea id="manual-insight-text"[^>]*maxLength="1000"[^>]*required=""/);
+    assert.match(section, /<label for="manual-insight-justification">/);
+    assert.ok(decode(section).includes("Justification"));
+    assert.ok(decode(section).includes(fr.insights.manualSubmit));
+    assert.ok(!section.includes("type=\"file\""));
+  }
+});
+
+test("W19 manual insights render text, justification, label, author and date; no edit or delete; markup is shown as text", () => {
+  const evidence = evidenceFor(GRAPHIE_CALCULATION_IDENTITY, { manualInsights: [manualInsightOf(DRAFT, "<script>alert(1)</script> Fuite", "Vu sur place"), manualInsightOf(OTHER, "Deuxième")] });
+  const section = manualSection(view(ready(evidence)));
+  assert.ok(!section.includes("<script>"));
+  const text = decode(section);
+  assert.ok(text.includes("<script>alert(1)</script> Fuite"));
+  assert.ok(text.includes("Justification : Vu sur place"));
+  assert.equal(text.split(fr.insights.manualLabel).length - 1, 2);
+  assert.ok(text.includes("Ajouté par Responsable Test le "));
+  assert.ok(!/modifier|supprimer|éditer/i.test(text));
+  assert.equal(section.split("<button").length - 1, 1, "only the submit button");
+});
+
+test("W20 « Aucun insight retenu » shows only when no proposal is retained and no manual insight exists, and is not a warning", () => {
+  const insights = { status: "available" as const, registryVersion: "insight-registry-1", proposals: [proposalA()] };
+  const without = renderToStaticMarkup(<InsightProposalsSection insights={insights} decisions={[]} />);
+  assert.ok(decode(without).includes(fr.insights.noneRetained));
+  assert.ok(!/role="alert"/.test(without.slice(without.indexOf(fr.insights.noneRetained) - 120, without.indexOf(fr.insights.noneRetained))));
+  const withManual = renderToStaticMarkup(<InsightProposalsSection insights={insights} decisions={[]} manualInsightCount={1} />);
+  assert.ok(!decode(withManual).includes(fr.insights.noneRetained));
+});
+
+test("W21 submitManualInsight calls the handler once, parses the 201 response and reports failures without throwing", async () => {
+  const calls: Array<{ url: string; body: unknown }> = [];
+  const created = manualInsightOf(DRAFT, "Observation", "Preuve");
+  const okFetch = (async (url: string | URL | Request, init?: RequestInit) => { calls.push({ url: String(url), body: init?.body }); return new Response(JSON.stringify(created), { status: 201 }); }) as typeof fetch;
+  const result = await submitManualInsight(TASK, "Observation", "Preuve", okFetch);
+  assert.deepEqual(result, { kind: "added", insight: created });
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0]!.url, `/api/tasks/${TASK}/manual-insights`);
+  assert.deepEqual(JSON.parse(String(calls[0]!.body)), { text: "Observation", justification: "Preuve" });
+  await submitManualInsight(TASK, "Observation", "   ", okFetch);
+  assert.deepEqual(JSON.parse(String(calls[1]!.body)), { text: "Observation" });
+  for (const status of [200, 403, 404, 422, 500, 503]) assert.deepEqual(await submitManualInsight(TASK, "x", "", stubFetch(status, {})), { kind: "failed" });
+  assert.deepEqual(await submitManualInsight(TASK, "x", "", (async () => { throw new Error("offline"); }) as typeof fetch), { kind: "failed" });
+  assert.deepEqual(await submitManualInsight(TASK, "x", "", stubFetch(201, { unexpected: true })), { kind: "failed" });
+});
+
+test("W21 the section disables submit while pending and shows the French error with the list unchanged", () => {
+  const items = [manualInsightOf(DRAFT, "Existant")];
+  const pending = renderToStaticMarkup(<ManualInsightsSection insights={items} pending onAdd={() => true} />);
+  assert.match(pending, /<button[^>]*disabled=""[^>]*type="submit"|<button[^>]*type="submit"[^>]*disabled=""/);
+  const failed = renderToStaticMarkup(<ManualInsightsSection insights={items} failed onAdd={() => false} />);
+  assert.ok(decode(failed).includes(fr.insights.manualFailed));
+  assert.ok(decode(failed).includes("Existant"));
+});
+
+test("W22 no approve, reject or conformity wording in the manual section; the conformity note appears once; no English text", () => {
+  const markup = view(ready(evidenceFor(GRAPHIE_CALCULATION_IDENTITY, { manualInsights: [manualInsightOf(DRAFT, "Observation")] })));
+  const text = decode(manualSection(markup));
+  assert.ok(!/approuv|rejet|rejeter|conforme|non conforme|\b(approve|reject|submit|delete|edit|added|author)\b/i.test(text.replace(fr.insights.manualHint, "")));
   assert.equal(decode(markup).split("la conformité finale de l'appareil est décidée par le Responsable").length - 1, 1);
 });

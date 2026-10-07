@@ -4,7 +4,7 @@ import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import type { apiV1Components, apiV1Operations } from "@cetem-qc/types";
-import { acceptedEvidenceResponseSchema, insightDecisionRequestSchema, insightDecisionResponseSchema, apiErrorSchema, createEmployeeRequestSchema, createTaskRequestSchema, employeeCredentialResponseSchema, employeeListResponseSchema, employeeTaskListQuerySchema, employeeTaskListResponseSchema, employeeTaskAuditVersionSchema, employeeTaskResponseSchema, graphieDraftPayloadSchema, healthQuerySchema, healthResponseSchema, replacementTaskResponseSchema, syncOperationAcceptedSchema, syncOperationConflictSchema, syncOperationRejectedSchema, syncOperationRequestSchema, taskListQuerySchema, taskListResponseSchema, updateEmployeeStatusRequestSchema, updateEmployeeStatusResponseSchema } from "./v1.js";
+import { acceptedEvidenceResponseSchema, insightDecisionRequestSchema, insightDecisionResponseSchema, manualInsightRequestSchema, manualInsightResponseSchema, apiErrorSchema, createEmployeeRequestSchema, createTaskRequestSchema, employeeCredentialResponseSchema, employeeListResponseSchema, employeeTaskListQuerySchema, employeeTaskListResponseSchema, employeeTaskAuditVersionSchema, employeeTaskResponseSchema, graphieDraftPayloadSchema, healthQuerySchema, healthResponseSchema, replacementTaskResponseSchema, syncOperationAcceptedSchema, syncOperationConflictSchema, syncOperationRejectedSchema, syncOperationRequestSchema, taskListQuerySchema, taskListResponseSchema, updateEmployeeStatusRequestSchema, updateEmployeeStatusResponseSchema } from "./v1.js";
 
 const contractPath = fileURLToPath(new URL("../../../types/openapi/cetem-qc-v1.yaml", import.meta.url));
 
@@ -318,6 +318,7 @@ test("K7 accepted evidence response schema parses a full body and refuses extras
     lineage: { replacementOf: null, replacedBy: null, recoverySource: null, recoverySuccessorTaskId: null },
     insights: { status: "unavailable", reason: "no-approved-rules", registryVersion: "insight-registry-1", proposals: [] },
     insightDecisions: [],
+    manualInsights: [],
   };
   assert.deepEqual(acceptedEvidenceResponseSchema.parse(body), body);
   assert.equal(acceptedEvidenceResponseSchema.safeParse({ ...body, extra: true }).success, false);
@@ -345,6 +346,7 @@ test("K9 accepted evidence insights are required, parse both statuses and refuse
     lineage: { replacementOf: null, replacedBy: null, recoverySource: null, recoverySuccessorTaskId: null },
     insights: { status: "available", registryVersion: "insight-registry-1", proposals: [proposal] },
     insightDecisions: [],
+    manualInsights: [],
   };
   assert.deepEqual(acceptedEvidenceResponseSchema.parse(body), body);
   assert.equal(acceptedEvidenceResponseSchema.safeParse({ ...body, insights: { ...body.insights, proposals: [] } }).success, true);
@@ -377,6 +379,7 @@ test("K11 insightDecisions is required, parses empty and populated, and refuses 
     lineage: { replacementOf: null, replacedBy: null, recoverySource: null, recoverySuccessorTaskId: null },
     insights: { status: "unavailable", reason: "no-approved-rules", registryVersion: "insight-registry-1", proposals: [] },
     insightDecisions: [decision],
+    manualInsights: [],
   };
   assert.deepEqual(acceptedEvidenceResponseSchema.parse(body), body);
   assert.equal(acceptedEvidenceResponseSchema.safeParse({ ...body, insightDecisions: [] }).success, true);
@@ -391,4 +394,36 @@ test("K11 insightDecisions is required, parses empty and populated, and refuses 
   const { registryVersion: _r, ruleId: _i, ruleVersion: _v, ...response } = decision;
   assert.deepEqual(insightDecisionResponseSchema.parse(response), response);
   assert.equal(insightDecisionResponseSchema.safeParse(decision).success, false);
+});
+
+test("K13 manualInsights is required, parses empty and populated, and refuses extras and another source type; the request schema is strict and trims", () => {
+  const id = "00000000-0000-4000-8000-000000000040";
+  const result = { test: "voltage-accuracy" };
+  const insight = { id, text: "Observation", justification: null, sourceType: "manual", createdAt: "2026-10-08T09:00:00.000Z", author: { id, displayName: "Responsable Test" } } as const;
+  const body = {
+    task: { id, establishment: "Établissement A", service: "Radiologie", assignee: "Employé Test" },
+    submission: { submissionId: id, auditId: id, revision: 2, submittedBy: { id, displayName: "Employé Test" }, acceptedAt: "2026-10-07T08:00:00.000Z" },
+    identity: { catalogueId: "graphie-mobile-pov", catalogueVersion: "2.0.0", schemaVersion: 3, ruleId: "cetem-paper-form", ruleVersion: "2.0.0" },
+    values: {},
+    results: { voltageAccuracy: result, voltageRepeatability: result, outputRepeatability: result, outputLinearity: result, lightFieldCorrespondence: result },
+    lineage: { replacementOf: null, replacedBy: null, recoverySource: null, recoverySuccessorTaskId: null },
+    insights: { status: "unavailable", reason: "no-approved-rules", registryVersion: "insight-registry-1", proposals: [] },
+    insightDecisions: [],
+    manualInsights: [insight],
+  };
+  assert.deepEqual(acceptedEvidenceResponseSchema.parse(body), body);
+  assert.equal(acceptedEvidenceResponseSchema.safeParse({ ...body, manualInsights: [] }).success, true);
+  const { manualInsights: _manual, ...without } = body;
+  assert.equal(acceptedEvidenceResponseSchema.safeParse(without).success, false);
+  assert.equal(acceptedEvidenceResponseSchema.safeParse({ ...body, manualInsights: [{ ...insight, sourceType: "rule" }] }).success, false);
+  assert.equal(acceptedEvidenceResponseSchema.safeParse({ ...body, manualInsights: [{ ...insight, extra: 1 }] }).success, false);
+  assert.deepEqual(manualInsightRequestSchema.parse({ text: "  Texte  ", justification: "  Motif " }), { text: "Texte", justification: "Motif" });
+  assert.deepEqual(manualInsightRequestSchema.parse({ text: "Texte", justification: "   " }), { text: "Texte" });
+  assert.deepEqual(manualInsightRequestSchema.parse({ text: "Texte", justification: null }), { text: "Texte" });
+  for (const invalid of [{}, { text: "" }, { text: "   " }, { text: "x".repeat(1001) }, { text: "ok", justification: "y".repeat(1001) }, { text: "ok", authorId: "a" }, { text: "ok", createdAt: "x" }, { text: "ok", sourceType: "manual" }]) {
+    assert.equal(manualInsightRequestSchema.safeParse(invalid).success, false, JSON.stringify(invalid).slice(0, 40));
+  }
+  assert.equal(manualInsightRequestSchema.safeParse({ text: "x".repeat(1000), justification: "y".repeat(1000) }).success, true);
+  assert.deepEqual(manualInsightResponseSchema.parse(insight), insight);
+  assert.equal(manualInsightResponseSchema.safeParse({ ...insight, sourceType: "rule" }).success, false);
 });

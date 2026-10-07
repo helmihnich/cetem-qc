@@ -798,7 +798,7 @@ So that relevant observations not represented by deterministic rules can be reta
 **And** insight management does not modify accepted measurements/comments or create a general evidence attachment feature
 **And** zero retained insights remains a valid review result.
 
-**Traceability:** FR-030, FR-031, DR-007, DR-008, UX-DR2 (insight-item), UX-DR7.
+**Traceability:** spec `_bmad-output/specs/spec-9-4-add-a-manual-insight/SPEC.md`; FR-030, FR-031, DR-007, DR-008, UX-DR2 (insight-item), UX-DR7. **Dependency:** Stories 9.1, 9.2, 9.3 (done); works with the empty production registry.
 
 ## Epic 10: Confirmed Summary and Human Conformity Decision
 

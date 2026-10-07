@@ -305,6 +305,7 @@ test("K8 getAcceptedEvidence returns typed outcomes for 200, 403, 404 and 500 an
     lineage: { replacementOf: null, replacedBy: null, recoverySource: null, recoverySuccessorTaskId: null },
     insights: { status: "unavailable", reason: "no-approved-rules", registryVersion: "insight-registry-1", proposals: [] },
     insightDecisions: [],
+    manualInsights: [],
   };
   const ok = clientFor(body);
   assert.deepEqual(await ok.client.getAcceptedEvidence(id), { status: 200, body });
@@ -341,4 +342,25 @@ test("K12 recordInsightDecision returns typed outcomes for 200, 403, 404, 422 an
   }
   await assert.rejects(clientFor({ error: { code: "AUTHENTICATION_FAILED", message: "x" } }, 401).client.recordInsightDecision(id, { proposalId: "p", decision: "retained" }), ApiRequestError);
   await assert.rejects(clientFor({ ...response, decision: "approved" }).client.recordInsightDecision(id, { proposalId: "p", decision: "retained" }), ApiRequestError);
+});
+
+test("K14 addManualInsight returns typed outcomes for 201, 403, 404, 422 and 500 and throws on anything else", async () => {
+  const id = "00000000-0000-4000-8000-000000000041";
+  const response = { id, text: "Observation", justification: null, sourceType: "manual", createdAt: "2026-10-08T09:00:00.000Z", author: { id, displayName: "Responsable Test" } };
+  const ok = clientFor(response, 201);
+  assert.deepEqual(await ok.client.addManualInsight(id, { text: "Observation" }), { status: 201, body: response });
+  assert.equal(ok.calls[0]!.url, `https://cetem-qc.example.test/api/v1/tasks/${id}/manual-insights`);
+  assert.equal(ok.calls[0]!.init?.method, "POST");
+  assert.deepEqual(JSON.parse(String(ok.calls[0]!.init?.body)), { text: "Observation" });
+  const outcomes: Array<[number, string, string]> = [
+    [403, "FORBIDDEN", "Accès réservé au Responsable de l’équipe."],
+    [404, "TASK_NOT_FOUND", "Tâche introuvable."],
+    [422, "VALIDATION_FAILED", "Cet insight manuel est invalide."],
+    [500, "INTERNAL_ERROR", "L’insight manuel n’a pas pu être enregistré."],
+  ];
+  for (const [status, code, message] of outcomes) {
+    assert.deepEqual(await clientFor({ error: { code, message } }, status).client.addManualInsight(id, { text: "x" }), { status, code, message });
+  }
+  await assert.rejects(clientFor({ error: { code: "AUTHENTICATION_FAILED", message: "x" } }, 401).client.addManualInsight(id, { text: "x" }), ApiRequestError);
+  await assert.rejects(clientFor({ ...response, sourceType: "rule" }, 201).client.addManualInsight(id, { text: "x" }), ApiRequestError);
 });

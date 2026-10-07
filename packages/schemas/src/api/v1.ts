@@ -29,6 +29,8 @@ type DeactivatedAssigneeRecoveryResponseContract = apiV1Operations["createDeacti
 type AcceptedEvidenceResponseContract = apiV1Operations["getAcceptedEvidence"]["responses"][200]["content"]["application/json"];
 type InsightDecisionRequestContract = apiV1Operations["recordInsightDecision"]["requestBody"]["content"]["application/json"];
 type InsightDecisionResponseContract = apiV1Operations["recordInsightDecision"]["responses"][200]["content"]["application/json"];
+type ManualInsightRequestContract = apiV1Operations["addManualInsight"]["requestBody"]["content"]["application/json"];
+type ManualInsightContract = apiV1Operations["addManualInsight"]["responses"][201]["content"]["application/json"];
 type EmployeeTaskListResponseContract = apiV1Operations["listAssignedEmployeeTasks"]["responses"][200]["content"]["application/json"];
 type EmployeeTaskResponseContract = apiV1Operations["getAssignedEmployeeTask"]["responses"][200]["content"]["application/json"];
 
@@ -148,7 +150,25 @@ export const insightDecisionResponseSchema: z.ZodType<InsightDecisionResponseCon
 const evidenceInsightDecisionSchema = z.object({
   ...insightDecisionFields, registryVersion: nonEmpty, ruleId: nonEmpty, ruleVersion: z.number().int().positive(),
 }).strict();
+// Same bounds as MANUAL_INSIGHT_*_MAX in packages/domain (a test keeps them equal) and the migration checks.
+const manualInsightTextMax = 1000;
+const manualInsightJustificationMax = 1000;
+export const manualInsightRequestSchema: z.ZodType<ManualInsightRequestContract> = z.object({
+  // A NUL character cannot be stored by PostgreSQL: refuse it as invalid input instead of failing at insert.
+  text: z.string().trim().min(1).max(manualInsightTextMax).refine((value) => !value.includes("\u0000")),
+  justification: z.string().trim().max(manualInsightJustificationMax).refine((value) => !value.includes("\u0000")).nullish(),
+}).strict().transform((body) => (body.justification ? { text: body.text, justification: body.justification } : { text: body.text }));
+export const manualInsightSchema: z.ZodType<ManualInsightContract> = z.object({
+  id: z.string().uuid(),
+  text: z.string().min(1).max(manualInsightTextMax),
+  justification: z.string().min(1).max(manualInsightJustificationMax).nullable(),
+  sourceType: z.literal("manual"),
+  createdAt: z.string().datetime(),
+  author: z.object({ id: z.string(), displayName: z.string() }).strict(),
+}).strict();
+export const manualInsightResponseSchema = manualInsightSchema;
 export const acceptedEvidenceResponseSchema: z.ZodType<AcceptedEvidenceResponseContract> = z.object({
+  manualInsights: z.array(manualInsightSchema),
   insights: insightProposalSetSchema,
   insightDecisions: z.array(evidenceInsightDecisionSchema),
   task: z.object({ id: z.string().uuid(), establishment: z.string(), service: z.string(), assignee: z.string() }).strict(),
@@ -268,6 +288,8 @@ export type DeactivatedAssigneeRecoveryResponse = z.infer<typeof deactivatedAssi
 export type AcceptedEvidenceResponse = z.infer<typeof acceptedEvidenceResponseSchema>;
 export type InsightDecisionRequest = z.infer<typeof insightDecisionRequestSchema>;
 export type InsightDecisionResponse = z.infer<typeof insightDecisionResponseSchema>;
+export type ManualInsightRequest = z.infer<typeof manualInsightRequestSchema>;
+export type ManualInsightResponse = z.infer<typeof manualInsightResponseSchema>;
 export type EmployeeTaskListResponse = z.infer<typeof employeeTaskListResponseSchema>;
 export type EmployeeTaskResponse = z.infer<typeof employeeTaskResponseSchema>;
 export type SessionTokenResponse = z.infer<typeof sessionTokenResponseSchema>;

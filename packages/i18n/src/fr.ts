@@ -133,6 +133,17 @@ export const fr = {
     decidedBy: "Décidé par {name} le {date}",
     noneRetained: "Aucun insight retenu",
     decisionFailed: "La décision n’a pas pu être enregistrée. L’état précédent est conservé.",
+    // Story 9.4 — manual insights.
+    manualHeading: "Insights manuels",
+    manualFormHeading: "Ajouter un insight manuel",
+    manualTextLabel: "Insight",
+    manualJustificationLabel: "Justification",
+    manualHint: "Saisissez une observation factuelle. Un insight manuel n’est pas une décision de conformité de l’appareil.",
+    manualSubmit: "Ajouter l’insight",
+    manualSubmitting: "Ajout en cours…",
+    manualFailed: "L’insight n’a pas pu être ajouté. Votre texte est conservé.",
+    manualLabel: "Ajout manuel",
+    addedBy: "Ajouté par {name} le {date}",
     // French statement templates by rule ID; empty until CETEM approves a rule.
     rules: {} as Record<string, string>,
   },

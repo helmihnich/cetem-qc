@@ -1,7 +1,7 @@
 import express from "express";
 import type { Server } from "node:http";
 import type { Pool } from "pg";
-import { acceptedEvidenceResponseSchema, apiErrorSchema, insightDecisionRequestSchema, insightDecisionResponseSchema, authenticationRequestSchema, authenticationResponseSchema, createDeactivatedAssigneeRecoveryRequestSchema, createEmployeeRequestSchema, createTaskRequestSchema, deactivatedAssigneeRecoveryResponseSchema, employeeCredentialResponseSchema, employeeListResponseSchema, employeeTaskAuditVersionSchema, employeeTaskRecoverySeedResponseSchema, employeeTaskListQuerySchema, employeeTaskListResponseSchema, employeeTaskResponseSchema, healthQuerySchema, passwordReplacementRequestSchema, reassignUnstartedTaskRequestSchema, reassignUnstartedTaskResponseSchema, replacementTaskResponseSchema, sessionResponseSchema, syncOperationRequestSchema, taskAssigneeListResponseSchema, taskListQuerySchema, taskListResponseSchema, taskResponseSchema, updateEmployeeStatusRequestSchema, updateEmployeeStatusResponseSchema } from "@cetem-qc/schemas/api/v1";
+import { acceptedEvidenceResponseSchema, apiErrorSchema, insightDecisionRequestSchema, insightDecisionResponseSchema, manualInsightRequestSchema, manualInsightResponseSchema, authenticationRequestSchema, authenticationResponseSchema, createDeactivatedAssigneeRecoveryRequestSchema, createEmployeeRequestSchema, createTaskRequestSchema, deactivatedAssigneeRecoveryResponseSchema, employeeCredentialResponseSchema, employeeListResponseSchema, employeeTaskAuditVersionSchema, employeeTaskRecoverySeedResponseSchema, employeeTaskListQuerySchema, employeeTaskListResponseSchema, employeeTaskResponseSchema, healthQuerySchema, passwordReplacementRequestSchema, reassignUnstartedTaskRequestSchema, reassignUnstartedTaskResponseSchema, replacementTaskResponseSchema, sessionResponseSchema, syncOperationRequestSchema, taskAssigneeListResponseSchema, taskListQuerySchema, taskListResponseSchema, taskResponseSchema, updateEmployeeStatusRequestSchema, updateEmployeeStatusResponseSchema } from "@cetem-qc/schemas/api/v1";
 import { getHealth } from "./modules/health/health-query.js";
 import {
   authenticateWithPassword,
@@ -18,6 +18,7 @@ import { getDeactivatedAssigneeRecoverySeed } from "./modules/audits/queries/dea
 import { readTaskAcceptanceAndLineage } from "./modules/audits/queries/task-audit-lineage.js";
 import { openAcceptedEvidenceForReview } from "./modules/audits/commands/record-review-access.js";
 import { recordInsightDecision } from "./modules/audits/commands/record-insight-decision.js";
+import { addManualInsight } from "./modules/audits/commands/add-manual-insight.js";
 import { getAcceptedSubmissionForReview } from "./modules/audits/queries/accepted-submission.js";
 import { createReplacementControl } from "./modules/audits/commands/create-replacement-control.js";
 import { createDeactivatedAssigneeRecovery } from "./modules/audits/commands/create-deactivated-assignee-recovery.js";
@@ -483,6 +484,7 @@ export function createApp(pool?: Pool) {
         results: evidence.results,
         insights,
         insightDecisions: outcome.insightDecisions,
+        manualInsights: outcome.manualInsights,
         lineage: { replacementOf: lineage.replacementOf, replacedBy: lineage.replacedBy, recoverySource: lineage.recoverySource, recoverySuccessorTaskId: lineage.recoverySuccessorTaskId },
       }));
     } catch {
@@ -542,6 +544,57 @@ export function createApp(pool?: Pool) {
     } catch {
       // Never log the error: it may carry stored values.
       response.status(500).json(apiErrorSchema.parse({ error: { code: "INTERNAL_ERROR", message: "La décision n’a pas pu être enregistrée." } }));
+    }
+  });
+
+  v1.post("/tasks/:taskId/manual-insights", async (request, response) => {
+    response.set("Cache-Control", "no-store");
+    const session = response.locals.session as NonNullable<Awaited<ReturnType<typeof findActiveSession>>>;
+    // Refusal lines carry the actor and a fixed class only: never the task ID, text or justification.
+    const refuse = (refusalClass: "forbidden-role" | "not-found" | "validation") => console.info(JSON.stringify({ event: "audit.manual_insight_refused", class: refusalClass, actorId: session.id }));
+    if (session.role !== "responsable") {
+      refuse("forbidden-role");
+      response.status(403).json(apiErrorSchema.parse({ error: { code: "FORBIDDEN", message: "Accès réservé au Responsable de l’équipe." } }));
+      return;
+    }
+    const notFound = () => {
+      refuse("not-found");
+      response.status(404).json(apiErrorSchema.parse({ error: { code: "TASK_NOT_FOUND", message: "Tâche introuvable." } }));
+    };
+    const invalid = () => {
+      refuse("validation");
+      response.status(422).json(apiErrorSchema.parse({ error: { code: "VALIDATION_FAILED", message: "Cet insight manuel est invalide." } }));
+    };
+    const taskId = String(request.params.taskId ?? "");
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(taskId)) {
+      notFound();
+      return;
+    }
+    const parsed = manualInsightRequestSchema.safeParse(request.body);
+    try {
+      if (!parsed.success) {
+        // A syntactically valid but unknown or other team's task must stay indistinguishable: check the task first.
+        const probe = await getAcceptedSubmissionForReview(getPool(), session.id, taskId.toLowerCase());
+        if (!probe) notFound();
+        else invalid();
+        return;
+      }
+      const outcome = await addManualInsight(getPool(), session.id, taskId.toLowerCase(), parsed.data);
+      switch (outcome.type) {
+        case "added":
+          response.status(201).json(manualInsightResponseSchema.parse(outcome.insight));
+          return;
+        case "not-found":
+          notFound();
+          return;
+        case "inconsistent":
+          console.info(JSON.stringify({ event: "audit.manual_insight_inconsistent", actorId: session.id }));
+          response.status(500).json(apiErrorSchema.parse({ error: { code: "INTERNAL_ERROR", message: "L’insight manuel n’a pas pu être enregistré." } }));
+          return;
+      }
+    } catch {
+      // Never log the error: it may carry request values.
+      response.status(500).json(apiErrorSchema.parse({ error: { code: "INTERNAL_ERROR", message: "L’insight manuel n’a pas pu être enregistré." } }));
     }
   });
 

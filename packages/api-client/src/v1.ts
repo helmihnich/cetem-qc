@@ -1,8 +1,8 @@
-import { acceptedEvidenceResponseSchema, apiErrorSchema, authenticationRequestSchema, authenticationResponseSchema, createDeactivatedAssigneeRecoveryRequestSchema, createEmployeeRequestSchema, createTaskRequestSchema, deactivatedAssigneeRecoveryResponseSchema, employeeCredentialResponseSchema, employeeListResponseSchema, employeeTaskAuditVersionSchema, employeeTaskRecoverySeedResponseSchema, employeeTaskListQuerySchema, employeeTaskListResponseSchema, employeeTaskResponseSchema, healthResponseSchema, insightDecisionRequestSchema, insightDecisionResponseSchema, passwordReplacementRequestSchema, reassignUnstartedTaskRequestSchema, reassignUnstartedTaskResponseSchema, replacementTaskResponseSchema, sessionResponseSchema, syncOperationAcceptedSchema, syncOperationConflictSchema, syncOperationRejectedSchema, syncOperationRequestSchema, taskAssigneeListResponseSchema, taskListResponseSchema, taskResponseSchema } from "@cetem-qc/schemas/api/v1";
-import type { AcceptedEvidenceResponse, AuthenticationRequest, AuthenticationResponse, CreateDeactivatedAssigneeRecoveryRequest, CreateEmployeeRequest, CreateTaskRequest, DeactivatedAssigneeRecoveryResponse, EmployeeCredentialResponse, EmployeeListResponse, EmployeeTaskAuditVersion, EmployeeTaskRecoverySeedResponse, EmployeeTaskListResponse, EmployeeTaskResponse, HealthResponse, InsightDecisionRequest, InsightDecisionResponse, PasswordReplacementRequest, ReassignUnstartedTaskRequest, ReassignUnstartedTaskResponse, ReplacementTaskResponse, SyncOperationAccepted, SyncOperationConflict, SyncOperationRejected, SyncOperationRequest, TaskListResponse, TaskResponse } from "@cetem-qc/schemas/api/v1";
+import { acceptedEvidenceResponseSchema, apiErrorSchema, authenticationRequestSchema, authenticationResponseSchema, createDeactivatedAssigneeRecoveryRequestSchema, createEmployeeRequestSchema, createTaskRequestSchema, deactivatedAssigneeRecoveryResponseSchema, employeeCredentialResponseSchema, employeeListResponseSchema, employeeTaskAuditVersionSchema, employeeTaskRecoverySeedResponseSchema, employeeTaskListQuerySchema, employeeTaskListResponseSchema, employeeTaskResponseSchema, healthResponseSchema, insightDecisionRequestSchema, insightDecisionResponseSchema, manualInsightRequestSchema, manualInsightResponseSchema, passwordReplacementRequestSchema, reassignUnstartedTaskRequestSchema, reassignUnstartedTaskResponseSchema, replacementTaskResponseSchema, sessionResponseSchema, syncOperationAcceptedSchema, syncOperationConflictSchema, syncOperationRejectedSchema, syncOperationRequestSchema, taskAssigneeListResponseSchema, taskListResponseSchema, taskResponseSchema } from "@cetem-qc/schemas/api/v1";
+import type { AcceptedEvidenceResponse, AuthenticationRequest, AuthenticationResponse, CreateDeactivatedAssigneeRecoveryRequest, CreateEmployeeRequest, CreateTaskRequest, DeactivatedAssigneeRecoveryResponse, EmployeeCredentialResponse, EmployeeListResponse, EmployeeTaskAuditVersion, EmployeeTaskRecoverySeedResponse, EmployeeTaskListResponse, EmployeeTaskResponse, HealthResponse, InsightDecisionRequest, InsightDecisionResponse, ManualInsightRequest, ManualInsightResponse, PasswordReplacementRequest, ReassignUnstartedTaskRequest, ReassignUnstartedTaskResponse, ReplacementTaskResponse, SyncOperationAccepted, SyncOperationConflict, SyncOperationRejected, SyncOperationRequest, TaskListResponse, TaskResponse } from "@cetem-qc/schemas/api/v1";
 
-export { acceptedEvidenceResponseSchema, insightDecisionResponseSchema, replacementTaskResponseSchema, taskListResponseSchema };
-export type { AcceptedEvidenceResponse, InsightDecisionRequest, InsightDecisionResponse, CreateDeactivatedAssigneeRecoveryRequest, CreateTaskRequest, DeactivatedAssigneeRecoveryResponse, EmployeeTaskAuditVersion, EmployeeTaskRecoverySeedResponse, EmployeeTaskListResponse, EmployeeTaskResponse, ReassignUnstartedTaskRequest, ReassignUnstartedTaskResponse, ReplacementTaskResponse, SyncOperationAccepted, SyncOperationConflict, SyncOperationRejected, SyncOperationRequest, TaskListResponse };
+export { acceptedEvidenceResponseSchema, insightDecisionResponseSchema, manualInsightResponseSchema, replacementTaskResponseSchema, taskListResponseSchema };
+export type { AcceptedEvidenceResponse, InsightDecisionRequest, InsightDecisionResponse, ManualInsightRequest, ManualInsightResponse, CreateDeactivatedAssigneeRecoveryRequest, CreateTaskRequest, DeactivatedAssigneeRecoveryResponse, EmployeeTaskAuditVersion, EmployeeTaskRecoverySeedResponse, EmployeeTaskListResponse, EmployeeTaskResponse, ReassignUnstartedTaskRequest, ReassignUnstartedTaskResponse, ReplacementTaskResponse, SyncOperationAccepted, SyncOperationConflict, SyncOperationRejected, SyncOperationRequest, TaskListResponse };
 
 export type SyncOperationResponse =
   | { status: 200; body: SyncOperationAccepted }
@@ -26,6 +26,14 @@ export type AcceptedEvidenceOutcome =
 /** The documented outcomes of an insight decision; any other status or body throws `ApiRequestError`. */
 export type InsightDecisionOutcome =
   | { status: 200; body: InsightDecisionResponse }
+  | { status: 403; code: "FORBIDDEN"; message: string }
+  | { status: 404; code: "TASK_NOT_FOUND"; message: string }
+  | { status: 422; code: "VALIDATION_FAILED"; message: string }
+  | { status: 500; code: "INTERNAL_ERROR"; message: string };
+
+/** The documented outcomes of adding a manual insight; any other status or body throws `ApiRequestError`. */
+export type AddManualInsightOutcome =
+  | { status: 201; body: ManualInsightResponse }
   | { status: 403; code: "FORBIDDEN"; message: string }
   | { status: 404; code: "TASK_NOT_FOUND"; message: string }
   | { status: 422; code: "VALIDATION_FAILED"; message: string }
@@ -160,6 +168,28 @@ export function createApiClient({ baseUrl, fetch: fetcher = fetch, sessionToken:
       const status = payload.response.status;
       if (status === 200) {
         const parsed = insightDecisionResponseSchema.safeParse(payload.data);
+        if (parsed.success) return { status, body: parsed.data };
+        throw toRequestError(status, payload.data);
+      }
+      const error = apiErrorSchema.safeParse(payload.data);
+      if (error.success) {
+        const { code, message } = error.data.error;
+        if (status === 403 && code === "FORBIDDEN") return { status, code, message };
+        if (status === 404 && code === "TASK_NOT_FOUND") return { status, code, message };
+        if (status === 422 && code === "VALIDATION_FAILED") return { status, code, message };
+        if (status === 500 && code === "INTERNAL_ERROR") return { status, code, message };
+      }
+      throw toRequestError(status, payload.data);
+    },
+    /** Adds one manual insight to an own-team accepted audit (Responsable only). */
+    async addManualInsight(taskId: string, input: ManualInsightRequest): Promise<AddManualInsightOutcome> {
+      const payload = await request(`/tasks/${encodeURIComponent(taskId)}/manual-insights`, {
+        method: "POST", headers: { accept: "application/json", "content-type": "application/json", ...sessionHeaders() },
+        body: JSON.stringify(manualInsightRequestSchema.parse(input)), cache: "no-store",
+      });
+      const status = payload.response.status;
+      if (status === 201) {
+        const parsed = manualInsightResponseSchema.safeParse(payload.data);
         if (parsed.success) return { status, body: parsed.data };
         throw toRequestError(status, payload.data);
       }

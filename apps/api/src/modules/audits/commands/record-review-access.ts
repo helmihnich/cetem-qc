@@ -1,5 +1,5 @@
 import { GRAPHIE_CALCULATION_IDENTITY, INSIGHT_RULE_REGISTRY, evaluateInsightProposals } from "@cetem-qc/domain";
-import type { CalculationContext, GraphieCalculationIdentity, GraphieCalculationResults, InsightProposalSet, InsightRule } from "@cetem-qc/domain";
+import type { CalculationContext, GraphieCalculationIdentity, GraphieCalculationResults, InsightProposalSet, InsightRule, ManualInsight } from "@cetem-qc/domain";
 import { fr } from "@cetem-qc/i18n";
 import type { Pool } from "pg";
 import { withTransaction } from "../../../db/transaction.js";
@@ -9,9 +9,10 @@ import { getAcceptedSubmissionForReview } from "../queries/accepted-submission.j
 import type { AcceptedSubmissionSnapshot } from "../queries/accepted-submission.js";
 import { getCurrentInsightDecisions } from "../queries/insight-decisions.js";
 import type { EvidenceInsightDecision } from "../queries/insight-decisions.js";
+import { getManualInsights } from "../queries/manual-insights.js";
 
 export type OpenAcceptedEvidenceOutcome =
-  | { type: "opened"; evidence: AcceptedSubmissionSnapshot; task: OwnTeamTaskSummary; insights: InsightProposalSet; insightDecisions: EvidenceInsightDecision[] }
+  | { type: "opened"; evidence: AcceptedSubmissionSnapshot; task: OwnTeamTaskSummary; insights: InsightProposalSet; insightDecisions: EvidenceInsightDecision[]; manualInsights: ManualInsight[] }
   | { type: "not-found" }
   | { type: "inconsistent" };
 
@@ -60,7 +61,8 @@ export async function openAcceptedEvidenceForReview(pool: Pool, responsableId: s
       [responsableId, evidence.taskId, evidence.auditId, evidence.submissionId],
     );
     const insightDecisions = await getCurrentInsightDecisions(transaction, evidence.submissionId);
-    return { type: "opened", evidence, task, insights, insightDecisions };
+    const manualInsights = await getManualInsights(transaction, evidence.submissionId);
+    return { type: "opened", evidence, task, insights, insightDecisions, manualInsights };
   });
 }
 

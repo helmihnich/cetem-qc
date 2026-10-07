@@ -400,6 +400,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/tasks/{taskId}/manual-insights": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Add a manual insight to an own-team accepted audit
+         * @description Responsable only. Inserts one insert-only manual insight row (text, optional justification, author, server date, source type manual, task, audit, submission, revision and revision rule identity). The body carries no author, date or source type. A malformed, unknown or another team's task, and an own-team task without accepted submission, all get the same 404.
+         */
+        post: operations["addManualInsight"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -589,6 +609,7 @@ export interface components {
             replacedBy: string | null;
         };
         AcceptedEvidenceResponse: {
+            manualInsights: components["schemas"]["ManualInsight"][];
             insights: components["schemas"]["InsightProposalSet"];
             insightDecisions: components["schemas"]["EvidenceInsightDecision"][];
             task: {
@@ -655,6 +676,24 @@ export interface components {
                 } | null;
                 /** Format: uuid */
                 recoverySuccessorTaskId: string | null;
+            };
+        };
+        ManualInsightRequest: {
+            text: string;
+            justification?: string | null;
+        };
+        ManualInsight: {
+            /** Format: uuid */
+            id: string;
+            text: string;
+            justification: string | null;
+            /** @enum {string} */
+            sourceType: "manual";
+            /** Format: date-time */
+            createdAt: string;
+            author: {
+                id: string;
+                displayName: string;
             };
         };
         InsightDecisionRequest: {
@@ -2401,6 +2440,77 @@ export interface operations {
                 };
             };
             /** @description Evidence inconsistent or decision not recorded (INTERNAL_ERROR) */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    addManualInsight: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                taskId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ManualInsightRequest"];
+            };
+        };
+        responses: {
+            /** @description Stored manual insight (Cache-Control no-store) */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ManualInsight"];
+                };
+            };
+            /** @description Session rejected */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Responsable role required (FORBIDDEN) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Malformed */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Invalid body (VALIDATION_FAILED) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Evidence inconsistent or insight not recorded (INTERNAL_ERROR) */
             500: {
                 headers: {
                     [name: string]: unknown;

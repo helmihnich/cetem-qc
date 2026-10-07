@@ -1020,6 +1020,40 @@ paths:
         '404': { description: Malformed, unknown or another team's task, or no accepted submission (TASK_NOT_FOUND), content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
         '422': { description: Invalid decision or unknown proposal (VALIDATION_FAILED), content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
         '500': { description: Evidence inconsistent or decision not recorded (INTERNAL_ERROR), content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+  /tasks/{taskId}/manual-insights:
+    post:
+      operationId: addManualInsight
+      summary: Add a manual insight to an own-team accepted audit
+      description: >-
+        Responsable only. Inserts one insert-only manual insight row (text, optional justification, author, server date,
+        source type manual, task, audit, submission, revision and revision rule identity). The body carries no author,
+        date or source type. A malformed, unknown or another team's task, and an own-team task without accepted
+        submission, all get the same 404.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: taskId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ManualInsightRequest'
+      responses:
+        '201':
+          description: Stored manual insight (Cache-Control no-store)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ManualInsight'
+        '401': { description: Session rejected, content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+        '403': { description: Responsable role required (FORBIDDEN), content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+        '404': { description: Malformed, unknown or another team's task, or no accepted submission (TASK_NOT_FOUND), content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+        '422': { description: Invalid body (VALIDATION_FAILED), content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+        '500': { description: Evidence inconsistent or insight not recorded (INTERNAL_ERROR), content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
 components:
   securitySchemes:
     bearerAuth:
@@ -1291,8 +1325,12 @@ components:
     AcceptedEvidenceResponse:
       type: object
       additionalProperties: false
-      required: [task, submission, identity, values, results, lineage, insights, insightDecisions]
+      required: [task, submission, identity, values, results, lineage, insights, insightDecisions, manualInsights]
       properties:
+        manualInsights:
+          type: array
+          items:
+            $ref: '#/components/schemas/ManualInsight'
         insights:
           $ref: '#/components/schemas/InsightProposalSet'
         insightDecisions:
@@ -1369,6 +1407,30 @@ components:
                     revision: { type: integer, minimum: 1 }
                 - type: 'null'
             recoverySuccessorTaskId: { type: [string, 'null'], format: uuid }
+    ManualInsightRequest:
+      type: object
+      additionalProperties: false
+      required: [text]
+      properties:
+        text: { type: string, minLength: 1, maxLength: 1000 }
+        justification: { type: [string, 'null'], maxLength: 1000 }
+    ManualInsight:
+      type: object
+      additionalProperties: false
+      required: [id, text, justification, sourceType, createdAt, author]
+      properties:
+        id: { type: string, format: uuid }
+        text: { type: string, minLength: 1, maxLength: 1000 }
+        justification: { type: [string, 'null'], minLength: 1, maxLength: 1000 }
+        sourceType: { type: string, enum: [manual] }
+        createdAt: { type: string, format: date-time }
+        author:
+          type: object
+          additionalProperties: false
+          required: [id, displayName]
+          properties:
+            id: { type: string }
+            displayName: { type: string }
     InsightDecisionRequest:
       type: object
       additionalProperties: false
