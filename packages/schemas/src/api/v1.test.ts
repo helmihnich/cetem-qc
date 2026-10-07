@@ -4,7 +4,7 @@ import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import type { apiV1Components, apiV1Operations } from "@cetem-qc/types";
-import { apiErrorSchema, createEmployeeRequestSchema, createTaskRequestSchema, employeeCredentialResponseSchema, employeeListResponseSchema, employeeTaskListQuerySchema, employeeTaskListResponseSchema, employeeTaskAuditVersionSchema, employeeTaskResponseSchema, graphieDraftPayloadSchema, healthQuerySchema, healthResponseSchema, replacementTaskResponseSchema, syncOperationAcceptedSchema, syncOperationConflictSchema, syncOperationRejectedSchema, syncOperationRequestSchema, taskListQuerySchema, taskListResponseSchema, updateEmployeeStatusRequestSchema, updateEmployeeStatusResponseSchema } from "./v1.js";
+import { acceptedEvidenceResponseSchema, apiErrorSchema, createEmployeeRequestSchema, createTaskRequestSchema, employeeCredentialResponseSchema, employeeListResponseSchema, employeeTaskListQuerySchema, employeeTaskListResponseSchema, employeeTaskAuditVersionSchema, employeeTaskResponseSchema, graphieDraftPayloadSchema, healthQuerySchema, healthResponseSchema, replacementTaskResponseSchema, syncOperationAcceptedSchema, syncOperationConflictSchema, syncOperationRejectedSchema, syncOperationRequestSchema, taskListQuerySchema, taskListResponseSchema, updateEmployeeStatusRequestSchema, updateEmployeeStatusResponseSchema } from "./v1.js";
 
 const contractPath = fileURLToPath(new URL("../../../types/openapi/cetem-qc-v1.yaml", import.meta.url));
 
@@ -304,4 +304,24 @@ test("K1 the envelope accepts an optional UUID conflict reference and the audit 
     { ...full, revision: -1 },
     { revision: 0, state: "draft", lastChangedAt: null, lastChangedBy: null },
   ]) assert.equal(employeeTaskAuditVersionSchema.safeParse(invalid).success, false, JSON.stringify(invalid));
+});
+
+test("K7 accepted evidence response schema parses a full body and refuses extras, a missing lineage and a non-ISO date", () => {
+  const id = "00000000-0000-4000-8000-000000000040";
+  const result = { test: "voltage-accuracy", status: "x" };
+  const body = {
+    task: { id, establishment: "Établissement A", service: "Radiologie", assignee: "Employé Test" },
+    submission: { submissionId: id, auditId: id, revision: 2, submittedBy: { id, displayName: "Employé Test" }, acceptedAt: "2026-10-07T08:00:00.000Z" },
+    identity: { catalogueId: "graphie-mobile-pov", catalogueVersion: "2.0.0", schemaVersion: 3, ruleId: "cetem-paper-form", ruleVersion: "2.0.0" },
+    values: { "header.reportNumber": " R-001\n" },
+    results: { voltageAccuracy: result, voltageRepeatability: result, outputRepeatability: result, outputLinearity: result, lightFieldCorrespondence: result },
+    lineage: { replacementOf: null, replacedBy: null, recoverySource: null, recoverySuccessorTaskId: null },
+  };
+  assert.deepEqual(acceptedEvidenceResponseSchema.parse(body), body);
+  assert.equal(acceptedEvidenceResponseSchema.safeParse({ ...body, extra: true }).success, false);
+  assert.equal(acceptedEvidenceResponseSchema.safeParse({ ...body, task: { ...body.task, extra: 1 } }).success, false);
+  const { lineage: _lineage, ...withoutLineage } = body;
+  assert.equal(acceptedEvidenceResponseSchema.safeParse(withoutLineage).success, false);
+  assert.equal(acceptedEvidenceResponseSchema.safeParse({ ...body, submission: { ...body.submission, acceptedAt: "07/10/2026" } }).success, false);
+  assert.equal(acceptedEvidenceResponseSchema.safeParse({ ...body, results: { voltageAccuracy: result } }).success, false);
 });

@@ -1,8 +1,8 @@
-import { apiErrorSchema, authenticationRequestSchema, authenticationResponseSchema, createDeactivatedAssigneeRecoveryRequestSchema, createEmployeeRequestSchema, createTaskRequestSchema, deactivatedAssigneeRecoveryResponseSchema, employeeCredentialResponseSchema, employeeListResponseSchema, employeeTaskAuditVersionSchema, employeeTaskRecoverySeedResponseSchema, employeeTaskListQuerySchema, employeeTaskListResponseSchema, employeeTaskResponseSchema, healthResponseSchema, passwordReplacementRequestSchema, reassignUnstartedTaskRequestSchema, reassignUnstartedTaskResponseSchema, replacementTaskResponseSchema, sessionResponseSchema, syncOperationAcceptedSchema, syncOperationConflictSchema, syncOperationRejectedSchema, syncOperationRequestSchema, taskAssigneeListResponseSchema, taskListResponseSchema, taskResponseSchema } from "@cetem-qc/schemas/api/v1";
-import type { AuthenticationRequest, AuthenticationResponse, CreateDeactivatedAssigneeRecoveryRequest, CreateEmployeeRequest, CreateTaskRequest, DeactivatedAssigneeRecoveryResponse, EmployeeCredentialResponse, EmployeeListResponse, EmployeeTaskAuditVersion, EmployeeTaskRecoverySeedResponse, EmployeeTaskListResponse, EmployeeTaskResponse, HealthResponse, PasswordReplacementRequest, ReassignUnstartedTaskRequest, ReassignUnstartedTaskResponse, ReplacementTaskResponse, SyncOperationAccepted, SyncOperationConflict, SyncOperationRejected, SyncOperationRequest, TaskListResponse, TaskResponse } from "@cetem-qc/schemas/api/v1";
+import { acceptedEvidenceResponseSchema, apiErrorSchema, authenticationRequestSchema, authenticationResponseSchema, createDeactivatedAssigneeRecoveryRequestSchema, createEmployeeRequestSchema, createTaskRequestSchema, deactivatedAssigneeRecoveryResponseSchema, employeeCredentialResponseSchema, employeeListResponseSchema, employeeTaskAuditVersionSchema, employeeTaskRecoverySeedResponseSchema, employeeTaskListQuerySchema, employeeTaskListResponseSchema, employeeTaskResponseSchema, healthResponseSchema, passwordReplacementRequestSchema, reassignUnstartedTaskRequestSchema, reassignUnstartedTaskResponseSchema, replacementTaskResponseSchema, sessionResponseSchema, syncOperationAcceptedSchema, syncOperationConflictSchema, syncOperationRejectedSchema, syncOperationRequestSchema, taskAssigneeListResponseSchema, taskListResponseSchema, taskResponseSchema } from "@cetem-qc/schemas/api/v1";
+import type { AcceptedEvidenceResponse, AuthenticationRequest, AuthenticationResponse, CreateDeactivatedAssigneeRecoveryRequest, CreateEmployeeRequest, CreateTaskRequest, DeactivatedAssigneeRecoveryResponse, EmployeeCredentialResponse, EmployeeListResponse, EmployeeTaskAuditVersion, EmployeeTaskRecoverySeedResponse, EmployeeTaskListResponse, EmployeeTaskResponse, HealthResponse, PasswordReplacementRequest, ReassignUnstartedTaskRequest, ReassignUnstartedTaskResponse, ReplacementTaskResponse, SyncOperationAccepted, SyncOperationConflict, SyncOperationRejected, SyncOperationRequest, TaskListResponse, TaskResponse } from "@cetem-qc/schemas/api/v1";
 
-export { replacementTaskResponseSchema, taskListResponseSchema };
-export type { CreateDeactivatedAssigneeRecoveryRequest, CreateTaskRequest, DeactivatedAssigneeRecoveryResponse, EmployeeTaskAuditVersion, EmployeeTaskRecoverySeedResponse, EmployeeTaskListResponse, EmployeeTaskResponse, ReassignUnstartedTaskRequest, ReassignUnstartedTaskResponse, ReplacementTaskResponse, SyncOperationAccepted, SyncOperationConflict, SyncOperationRejected, SyncOperationRequest, TaskListResponse };
+export { acceptedEvidenceResponseSchema, replacementTaskResponseSchema, taskListResponseSchema };
+export type { AcceptedEvidenceResponse, CreateDeactivatedAssigneeRecoveryRequest, CreateTaskRequest, DeactivatedAssigneeRecoveryResponse, EmployeeTaskAuditVersion, EmployeeTaskRecoverySeedResponse, EmployeeTaskListResponse, EmployeeTaskResponse, ReassignUnstartedTaskRequest, ReassignUnstartedTaskResponse, ReplacementTaskResponse, SyncOperationAccepted, SyncOperationConflict, SyncOperationRejected, SyncOperationRequest, TaskListResponse };
 
 export type SyncOperationResponse =
   | { status: 200; body: SyncOperationAccepted }
@@ -15,6 +15,13 @@ export type ReplacementControlResponse =
   | { status: 404; code: "TASK_NOT_FOUND"; message: string }
   | { status: 409; code: "AUDIT_NOT_ACCEPTED" | "REPLACEMENT_ALREADY_EXISTS"; message: string }
   | { status: 422; code: "TASK_ASSIGNEE_UNAVAILABLE"; message: string };
+
+/** The documented outcomes of an accepted-evidence read; any other status or body throws `ApiRequestError`. */
+export type AcceptedEvidenceOutcome =
+  | { status: 200; body: AcceptedEvidenceResponse }
+  | { status: 403; code: "FORBIDDEN"; message: string }
+  | { status: 404; code: "TASK_NOT_FOUND"; message: string }
+  | { status: 500; code: "INTERNAL_ERROR"; message: string };
 
 export class ApiRequestError extends Error {
   constructor(
@@ -115,6 +122,24 @@ export function createApiClient({ baseUrl, fetch: fetcher = fetch, sessionToken:
         if (status === 404 && code === "TASK_NOT_FOUND") return { status, code, message };
         if (status === 409 && (code === "AUDIT_NOT_ACCEPTED" || code === "REPLACEMENT_ALREADY_EXISTS")) return { status, code, message };
         if (status === 422 && code === "TASK_ASSIGNEE_UNAVAILABLE") return { status, code, message };
+      }
+      throw toRequestError(status, payload.data);
+    },
+    /** Reads the accepted evidence of an own-team task and records the access (Responsable only). */
+    async getAcceptedEvidence(taskId: string): Promise<AcceptedEvidenceOutcome> {
+      const payload = await request(`/tasks/${encodeURIComponent(taskId)}/accepted-evidence`, { method: "GET", headers: { accept: "application/json", ...sessionHeaders() }, cache: "no-store" });
+      const status = payload.response.status;
+      if (status === 200) {
+        const parsed = acceptedEvidenceResponseSchema.safeParse(payload.data);
+        if (parsed.success) return { status, body: parsed.data };
+        throw toRequestError(status, payload.data);
+      }
+      const error = apiErrorSchema.safeParse(payload.data);
+      if (error.success) {
+        const { code, message } = error.data.error;
+        if (status === 403 && code === "FORBIDDEN") return { status, code, message };
+        if (status === 404 && code === "TASK_NOT_FOUND") return { status, code, message };
+        if (status === 500 && code === "INTERNAL_ERROR") return { status, code, message };
       }
       throw toRequestError(status, payload.data);
     },

@@ -78,6 +78,7 @@
   summary: `GraphieCalculationReview` does not check that `evidence.identity` matches the identity the `evidence.results` snapshot was calculated under. A supported identity paired with old-rule results would show « Version de règle non prise en charge » next to a supported identity, and an old identity paired with current-rule results would show verdicts with no warning.
   evidence: Not reachable today. No producer exists yet, and `calculateGraphieResults` builds the results from that same identity. Stories 7.3/7.4 (server snapshot) and 9.1 (W4 wiring) should keep identity and results consistent, either with a server invariant or with a view-level check.
   resolved: Story 7.3 (2026-10-05), server side — `acceptSubmission` stores `calculateGraphieResults(identity, values)` and refuses (500, nothing written) any result whose identity differs from the revision columns; API test A14. The view-level check stays with 9.1.
+  resolved: Story 9.1 (2026-10-07), response guard — `openAcceptedEvidenceForReview` refuses (500, no access row) a stored snapshot whose result rule identity differs from the revision identity, so the evidence response never carries a mixed pair; API test R6. The view still shows the 6.4 « Version de règle non prise en charge » alert for an unsupported identity (web test W6).
 
 ## Deferred from: code review of SPEC-6-5-separate-regression-and-acceptance-fixtures (2026-10-04)
 
@@ -121,6 +122,7 @@
 - source_spec: `_bmad-output/specs/spec-7-3-accept-submissions-transactionally-and-idempotently/SPEC.md`
   summary: After a server-accepted submission, the Responsable task list (and the employee task list contract) still reports `state: draft`, because the OpenAPI `state` is the constant `draft` and 7.3 does not change task projections.
   evidence: Accepted state lives in the new `audits` table. Extending the `state` enum touches three contracts, the web list and the mobile list. Story 9.1 (review of accepted evidence) should extend it.
+  resolved: Story 8.3 (list `state` is `draft | submitted`, derived by `audits`) and Story 9.1 (the « Consulter les preuves » row action on submitted rows) (2026-10-07).
 
 ## Deferred from: code review of spec-7-3-accept-submissions-transactionally-and-idempotently (2026-10-05)
 

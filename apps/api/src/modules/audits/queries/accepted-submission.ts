@@ -1,5 +1,5 @@
 import type { CalculationContext, GraphieCalculationResults, ValidatedGraphiePayload } from "@cetem-qc/domain";
-import type { Pool, QueryResultRow } from "pg";
+import type { Pool, PoolClient, QueryResultRow } from "pg";
 import { getOwnTeamTaskId } from "../../tasks/queries/own-team-task.js";
 
 /** The accepted submission of a task, exactly as the server stored it. */
@@ -44,7 +44,7 @@ interface AcceptedSubmissionRow extends QueryResultRow {
  * Read only: the review route and its access log belong to Story 9.1.
  */
 export async function getAcceptedSubmissionForReview(
-  pool: Pool,
+  pool: Pool | PoolClient,
   responsableId: string,
   taskId: string,
 ): Promise<AcceptedSubmissionSnapshot | undefined> {

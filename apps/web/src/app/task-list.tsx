@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { taskListResponseSchema } from "@cetem-qc/api-client/v1";
 import type { TaskListResponse } from "@cetem-qc/api-client/v1";
 import { fr } from "@cetem-qc/i18n";
+import { AcceptedEvidencePanel } from "./accepted-evidence";
 import { TaskCreation } from "./task-creation";
 import { DeactivatedTaskRecovery } from "./task-recovery";
 
@@ -24,6 +25,11 @@ export type TaskListViewProps = {
   onCancelReplacement: () => void;
   onReplacementCreated: (taskId: string) => void;
   onStale: () => void;
+  /** The accepted task whose evidence panel is open (Story 9.1). The row action is offered only when `onViewEvidence` is given. */
+  evidenceTaskId?: string;
+  onViewEvidence?: (taskId: string) => void;
+  /** The evidence panel for `evidenceTaskId`, rendered under the list. */
+  evidencePanel?: React.ReactNode;
 };
 
 /** A replacement is offered only for an accepted task that has none yet. */
@@ -52,7 +58,8 @@ export function TaskListView(props: TaskListViewProps) {
                 {!task.assigneeActive && task.state !== "submitted" && task.recoveryState !== "resolution-required" && task.recoveryState !== "recovered" && <span className="status-pill task-state-draft">{fr.tasks.actionRequired}</span>}
               </td>
               <td>{dateFormatter.format(new Date(task.lastUpdatedAt))}</td>
-              <td className="task-actions-cell">{canReplace(task) && <button className="secondary-button" type="button" aria-expanded={replacingTaskId === task.id} onClick={() => props.onReplace(task.id)}>{fr.tasks.replacementAction}</button>}
+              <td className="task-actions-cell">{task.state === "submitted" && props.onViewEvidence && <button id={`evidence-button-${task.id}`} className="secondary-button" type="button" aria-expanded={props.evidenceTaskId === task.id} onClick={() => props.onViewEvidence?.(task.id)}>{fr.tasks.evidenceAction}</button>}
+                {canReplace(task) && <button className="secondary-button" type="button" aria-expanded={replacingTaskId === task.id} onClick={() => props.onReplace(task.id)}>{fr.tasks.replacementAction}</button>}
                 <DeactivatedTaskRecovery task={task} onChanged={props.onStale} />
               </td>
             </tr>)}</tbody>
@@ -63,6 +70,7 @@ export function TaskListView(props: TaskListViewProps) {
       onCreated: (task) => props.onReplacementCreated(task.id),
       onStale: props.onStale,
     }} />}
+    {props.evidenceTaskId && props.evidencePanel}
   </section>;
 }
 
@@ -72,6 +80,7 @@ export function TaskList() {
   const [error, setError] = useState(false);
   const [replacingTaskId, setReplacingTaskId] = useState<string>();
   const [createdReplacementId, setCreatedReplacementId] = useState<string>();
+  const [evidenceTaskId, setEvidenceTaskId] = useState<string>();
 
   const loadTasks = useCallback(async () => {
     setLoading(true);
@@ -94,7 +103,14 @@ export function TaskList() {
   return <TaskListView
     tasks={tasks} loading={loading} error={error} replacingTaskId={replacingTaskId} createdReplacementId={createdReplacementId}
     onRetry={() => void loadTasks()}
-    onReplace={(taskId) => { setCreatedReplacementId(undefined); setReplacingTaskId(taskId); }}
+    onReplace={(taskId) => { setCreatedReplacementId(undefined); setEvidenceTaskId(undefined); setReplacingTaskId(taskId); }}
+    evidenceTaskId={evidenceTaskId}
+    onViewEvidence={(taskId) => { setReplacingTaskId(undefined); setEvidenceTaskId(taskId === evidenceTaskId ? undefined : taskId); }}
+    evidencePanel={evidenceTaskId ? <AcceptedEvidencePanel key={evidenceTaskId} taskId={evidenceTaskId} onStale={() => void loadTasks()} onBack={() => {
+      setEvidenceTaskId(undefined);
+      // The opening button stays rendered in the list, so focus can return to it at once.
+      document.getElementById(`evidence-button-${evidenceTaskId}`)?.focus();
+    }} /> : undefined}
     onCancelReplacement={() => setReplacingTaskId(undefined)}
     onReplacementCreated={(taskId) => { setReplacingTaskId(undefined); setCreatedReplacementId(taskId); void loadTasks(); }}
     onStale={() => void loadTasks()}

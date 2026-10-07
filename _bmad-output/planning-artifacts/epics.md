@@ -750,7 +750,7 @@ So that I can review the control without changing the employee's submission.
 **And** the interface does not show an employee-work approve/reject action or introduce an approval state
 **And** unauthorized team access is denied server-side without disclosing the audit.
 
-**Traceability:** FR-012, FR-013, SEC-002, SEC-003, SEC-011 (security events), DR-005, UX-DR6.
+**Traceability:** spec `_bmad-output/specs/spec-9-1-review-accepted-audit-evidence-read-only/SPEC.md`; FR-012, FR-013, SEC-002, SEC-003, SEC-011 (security events), DR-005, UX-DR6. **Dependency:** Stories 6.4, 7.3, 7.4 and 8.3 (done).
 
 ### Story 9.2: Generate deterministic insight proposals from approved rules
 

@@ -958,6 +958,34 @@ paths:
         '404': { description: Task not found in own team, content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
         '409': { description: Source changed, is not recoverable, or has already been recovered, content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
         '422': { description: Successor is not an active same-team Employe, content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+  /tasks/{taskId}/accepted-evidence:
+    get:
+      operationId: getAcceptedEvidence
+      summary: Read the accepted evidence of an own-team task (read only)
+      description: >-
+        Responsable only. Returns the server-accepted submission of the own-team task `taskId` exactly as stored:
+        values, calculation results and identity. Each successful open records one insert-only access row
+        (actor, server date, task, audit, submission) in the same transaction; if the record cannot be written
+        nothing is returned. Nothing else is written. A malformed, unknown or another team's task, and an own-team
+        task without accepted submission, all get the same 404.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: taskId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Accepted evidence (Cache-Control no-store)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AcceptedEvidenceResponse'
+        '401': { description: Session rejected, content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+        '403': { description: Responsable role required (FORBIDDEN), content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+        '404': { description: Malformed, unknown or another team's task, or no accepted submission (TASK_NOT_FOUND); the cases are not told apart, content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+        '500': { description: Evidence inconsistent or not loadable (INTERNAL_ERROR), content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
 components:
   securitySchemes:
     bearerAuth:
@@ -1226,6 +1254,81 @@ components:
           type: [string, 'null']
           format: uuid
           description: The replacement task ID when this task's accepted audit was replaced.
+    AcceptedEvidenceResponse:
+      type: object
+      additionalProperties: false
+      required: [task, submission, identity, values, results, lineage]
+      properties:
+        task:
+          type: object
+          additionalProperties: false
+          required: [id, establishment, service, assignee]
+          properties:
+            id: { type: string, format: uuid }
+            establishment: { type: string }
+            service: { type: string }
+            assignee: { type: string }
+        submission:
+          type: object
+          additionalProperties: false
+          required: [submissionId, auditId, revision, submittedBy, acceptedAt]
+          properties:
+            submissionId: { type: string, format: uuid }
+            auditId: { type: string, format: uuid }
+            revision: { type: integer, minimum: 1 }
+            submittedBy:
+              type: object
+              additionalProperties: false
+              required: [id, displayName]
+              properties:
+                id: { type: string, format: uuid }
+                displayName: { type: string }
+            acceptedAt: { type: string, format: date-time }
+        identity:
+          type: object
+          additionalProperties: false
+          required: [catalogueId, catalogueVersion, schemaVersion, ruleId, ruleVersion]
+          properties:
+            catalogueId: { type: string }
+            catalogueVersion: { type: string }
+            schemaVersion: { type: integer }
+            ruleId: { type: string }
+            ruleVersion: { type: string }
+        values:
+          type: object
+          description: The stored payload values, strings unchanged.
+          additionalProperties: { type: string }
+        results:
+          type: object
+          description: >-
+            The server calculation snapshot as stored, one entry per paper test (voltageAccuracy, voltageRepeatability,
+            outputRepeatability, outputLinearity, lightFieldCorrespondence). The shape is owned by packages/domain.
+          required: [voltageAccuracy, voltageRepeatability, outputRepeatability, outputLinearity, lightFieldCorrespondence]
+          additionalProperties: false
+          properties:
+            voltageAccuracy: { type: object, additionalProperties: true }
+            voltageRepeatability: { type: object, additionalProperties: true }
+            outputRepeatability: { type: object, additionalProperties: true }
+            outputLinearity: { type: object, additionalProperties: true }
+            lightFieldCorrespondence: { type: object, additionalProperties: true }
+        lineage:
+          type: object
+          additionalProperties: false
+          required: [replacementOf, replacedBy, recoverySource, recoverySuccessorTaskId]
+          properties:
+            replacementOf: { type: [string, 'null'], format: uuid }
+            replacedBy: { type: [string, 'null'], format: uuid }
+            recoverySource:
+              oneOf:
+                - type: object
+                  additionalProperties: false
+                  required: [taskId, auditId, revision]
+                  properties:
+                    taskId: { type: string, format: uuid }
+                    auditId: { type: string, format: uuid }
+                    revision: { type: integer, minimum: 1 }
+                - type: 'null'
+            recoverySuccessorTaskId: { type: [string, 'null'], format: uuid }
     EmployeeTaskListResponse:
       type: object
       additionalProperties: false

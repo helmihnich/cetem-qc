@@ -93,8 +93,8 @@ development_status:
   8-4-handle-unfinished-tasks-after-employee-deactivation: done
   epic-8-retrospective: done
 
-  epic-9: backlog
-  9-1-review-accepted-audit-evidence-read-only: backlog
+  epic-9: in-progress
+  9-1-review-accepted-audit-evidence-read-only: done
   9-2-generate-deterministic-insight-proposals-from-approved-rules: backlog
   9-3-retain-or-discard-proposed-insights-with-provenance: backlog
   9-4-add-a-manual-insight: backlog
@@ -373,7 +373,7 @@ action_items:
     action: "Add a cross-lineage test (conflict, correction, replacement, deactivation
       recovery) before Story 9.1 reads lineage."
     owner: "Story 9.1 author"
-    status: open
+    status: done
     ref: "_bmad-output/implementation-artifacts/epic-8-retro-2026-10-07.md"
   - id: "epic-8-retro-item-29-reject-pipeline-commit-subjects-that-lac"
     epic: 8

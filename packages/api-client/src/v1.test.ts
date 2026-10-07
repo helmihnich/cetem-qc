@@ -292,3 +292,30 @@ test("employee password reset posts to the versioned endpoint and maps the inact
     return true;
   });
 });
+
+test("K8 getAcceptedEvidence returns typed outcomes for 200, 403, 404 and 500 and throws on anything else", async () => {
+  const id = "00000000-0000-4000-8000-000000000041";
+  const result = { test: "voltage-accuracy" };
+  const body = {
+    task: { id, establishment: "Établissement A", service: "Radiologie", assignee: "Employé Test" },
+    submission: { submissionId: id, auditId: id, revision: 1, submittedBy: { id, displayName: "Employé Test" }, acceptedAt: "2026-10-07T08:00:00.000Z" },
+    identity: { catalogueId: "graphie-mobile-pov", catalogueVersion: "2.0.0", schemaVersion: 3, ruleId: "cetem-paper-form", ruleVersion: "2.0.0" },
+    values: {},
+    results: { voltageAccuracy: result, voltageRepeatability: result, outputRepeatability: result, outputLinearity: result, lightFieldCorrespondence: result },
+    lineage: { replacementOf: null, replacedBy: null, recoverySource: null, recoverySuccessorTaskId: null },
+  };
+  const ok = clientFor(body);
+  assert.deepEqual(await ok.client.getAcceptedEvidence(id), { status: 200, body });
+  assert.equal(ok.calls[0]!.url, `https://cetem-qc.example.test/api/v1/tasks/${id}/accepted-evidence`);
+  assert.equal(ok.calls[0]!.init?.method, "GET");
+  const outcomes: Array<[number, string, string]> = [
+    [403, "FORBIDDEN", "Accès réservé au Responsable de l’équipe."],
+    [404, "TASK_NOT_FOUND", "Tâche introuvable."],
+    [500, "INTERNAL_ERROR", "Les preuves n’ont pas pu être chargées."],
+  ];
+  for (const [status, code, message] of outcomes) {
+    assert.deepEqual(await clientFor({ error: { code, message } }, status).client.getAcceptedEvidence(id), { status, code, message });
+  }
+  await assert.rejects(clientFor({ error: { code: "AUTHENTICATION_FAILED", message: "x" } }, 401).client.getAcceptedEvidence(id), ApiRequestError);
+  await assert.rejects(clientFor({ ...body, lineage: undefined }).client.getAcceptedEvidence(id), ApiRequestError);
+});

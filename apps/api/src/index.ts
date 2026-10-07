@@ -1,7 +1,7 @@
 import express from "express";
 import type { Server } from "node:http";
 import type { Pool } from "pg";
-import { apiErrorSchema, authenticationRequestSchema, authenticationResponseSchema, createDeactivatedAssigneeRecoveryRequestSchema, createEmployeeRequestSchema, createTaskRequestSchema, deactivatedAssigneeRecoveryResponseSchema, employeeCredentialResponseSchema, employeeListResponseSchema, employeeTaskAuditVersionSchema, employeeTaskRecoverySeedResponseSchema, employeeTaskListQuerySchema, employeeTaskListResponseSchema, employeeTaskResponseSchema, healthQuerySchema, passwordReplacementRequestSchema, reassignUnstartedTaskRequestSchema, reassignUnstartedTaskResponseSchema, replacementTaskResponseSchema, sessionResponseSchema, syncOperationRequestSchema, taskAssigneeListResponseSchema, taskListQuerySchema, taskListResponseSchema, taskResponseSchema, updateEmployeeStatusRequestSchema, updateEmployeeStatusResponseSchema } from "@cetem-qc/schemas/api/v1";
+import { acceptedEvidenceResponseSchema, apiErrorSchema, authenticationRequestSchema, authenticationResponseSchema, createDeactivatedAssigneeRecoveryRequestSchema, createEmployeeRequestSchema, createTaskRequestSchema, deactivatedAssigneeRecoveryResponseSchema, employeeCredentialResponseSchema, employeeListResponseSchema, employeeTaskAuditVersionSchema, employeeTaskRecoverySeedResponseSchema, employeeTaskListQuerySchema, employeeTaskListResponseSchema, employeeTaskResponseSchema, healthQuerySchema, passwordReplacementRequestSchema, reassignUnstartedTaskRequestSchema, reassignUnstartedTaskResponseSchema, replacementTaskResponseSchema, sessionResponseSchema, syncOperationRequestSchema, taskAssigneeListResponseSchema, taskListQuerySchema, taskListResponseSchema, taskResponseSchema, updateEmployeeStatusRequestSchema, updateEmployeeStatusResponseSchema } from "@cetem-qc/schemas/api/v1";
 import { getHealth } from "./modules/health/health-query.js";
 import {
   authenticateWithPassword,
@@ -16,6 +16,7 @@ import { getAssignedEmployeeTask } from "./modules/tasks/queries/assigned-employ
 import { getCurrentAuditVersion } from "./modules/audits/queries/current-audit-version.js";
 import { getDeactivatedAssigneeRecoverySeed } from "./modules/audits/queries/deactivated-assignee-recovery-seed.js";
 import { readTaskAcceptanceAndLineage } from "./modules/audits/queries/task-audit-lineage.js";
+import { openAcceptedEvidenceForReview } from "./modules/audits/commands/record-review-access.js";
 import { createReplacementControl } from "./modules/audits/commands/create-replacement-control.js";
 import { createDeactivatedAssigneeRecovery } from "./modules/audits/commands/create-deactivated-assignee-recovery.js";
 import { processSyncOperation } from "./modules/sync/commands/process-sync-operation.js";
@@ -436,6 +437,53 @@ export function createApp(pool?: Pool) {
     } catch {
       // Never log the error: it may carry request values.
       response.status(500).json(apiErrorSchema.parse({ error: { code: "INTERNAL_ERROR", message: "Le contrôle de remplacement n’a pas pu être créé." } }));
+    }
+  });
+
+  v1.get("/tasks/:taskId/accepted-evidence", async (request, response) => {
+    response.set("Cache-Control", "no-store");
+    const session = response.locals.session as NonNullable<Awaited<ReturnType<typeof findActiveSession>>>;
+    // Refusals are structured server lines with the actor and a fixed class only: never the requested ID or any evidence.
+    const refuse = (refusalClass: "forbidden-role" | "not-found") => console.info(JSON.stringify({ event: "audit.review_refused", class: refusalClass, actorId: session.id }));
+    if (session.role !== "responsable") {
+      refuse("forbidden-role");
+      response.status(403).json(apiErrorSchema.parse({ error: { code: "FORBIDDEN", message: "Accès réservé au Responsable de l’équipe." } }));
+      return;
+    }
+    const notFound = () => {
+      refuse("not-found");
+      response.status(404).json(apiErrorSchema.parse({ error: { code: "TASK_NOT_FOUND", message: "Tâche introuvable." } }));
+    };
+    const failed = () => response.status(500).json(apiErrorSchema.parse({ error: { code: "INTERNAL_ERROR", message: "Les preuves n’ont pas pu être chargées." } }));
+    const taskId = String(request.params.taskId ?? "");
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(taskId)) {
+      notFound();
+      return;
+    }
+    try {
+      const outcome = await openAcceptedEvidenceForReview(getPool(), session.id, taskId.toLowerCase());
+      if (outcome.type === "not-found") {
+        notFound();
+        return;
+      }
+      if (outcome.type === "inconsistent") {
+        console.info(JSON.stringify({ event: "audit.review_inconsistent", actorId: session.id }));
+        failed();
+        return;
+      }
+      const { evidence, task } = outcome;
+      const lineage = (await readTaskAcceptanceAndLineage(getPool(), [evidence.taskId])).get(evidence.taskId)!;
+      response.status(200).json(acceptedEvidenceResponseSchema.parse({
+        task,
+        submission: { submissionId: evidence.submissionId, auditId: evidence.auditId, revision: evidence.revision, submittedBy: evidence.submittedBy, acceptedAt: evidence.acceptedAt },
+        identity: evidence.identity,
+        values: evidence.payload.values,
+        results: evidence.results,
+        lineage: { replacementOf: lineage.replacementOf, replacedBy: lineage.replacedBy, recoverySource: lineage.recoverySource, recoverySuccessorTaskId: lineage.recoverySuccessorTaskId },
+      }));
+    } catch {
+      // Never log the error: it may carry stored values.
+      failed();
     }
   });
 

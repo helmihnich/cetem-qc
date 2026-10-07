@@ -360,6 +360,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/tasks/{taskId}/accepted-evidence": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read the accepted evidence of an own-team task (read only)
+         * @description Responsable only. Returns the server-accepted submission of the own-team task `taskId` exactly as stored: values, calculation results and identity. Each successful open records one insert-only access row (actor, server date, task, audit, submission) in the same transaction; if the record cannot be written nothing is returned. Nothing else is written. A malformed, unknown or another team's task, and an own-team task without accepted submission, all get the same 404.
+         */
+        get: operations["getAcceptedEvidence"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -547,6 +567,73 @@ export interface components {
              * @description The replacement task ID when this task's accepted audit was replaced.
              */
             replacedBy: string | null;
+        };
+        AcceptedEvidenceResponse: {
+            task: {
+                /** Format: uuid */
+                id: string;
+                establishment: string;
+                service: string;
+                assignee: string;
+            };
+            submission: {
+                /** Format: uuid */
+                submissionId: string;
+                /** Format: uuid */
+                auditId: string;
+                revision: number;
+                submittedBy: {
+                    /** Format: uuid */
+                    id: string;
+                    displayName: string;
+                };
+                /** Format: date-time */
+                acceptedAt: string;
+            };
+            identity: {
+                catalogueId: string;
+                catalogueVersion: string;
+                schemaVersion: number;
+                ruleId: string;
+                ruleVersion: string;
+            };
+            /** @description The stored payload values, strings unchanged. */
+            values: {
+                [key: string]: string;
+            };
+            /** @description The server calculation snapshot as stored, one entry per paper test (voltageAccuracy, voltageRepeatability, outputRepeatability, outputLinearity, lightFieldCorrespondence). The shape is owned by packages/domain. */
+            results: {
+                voltageAccuracy: {
+                    [key: string]: unknown;
+                };
+                voltageRepeatability: {
+                    [key: string]: unknown;
+                };
+                outputRepeatability: {
+                    [key: string]: unknown;
+                };
+                outputLinearity: {
+                    [key: string]: unknown;
+                };
+                lightFieldCorrespondence: {
+                    [key: string]: unknown;
+                };
+            };
+            lineage: {
+                /** Format: uuid */
+                replacementOf: string | null;
+                /** Format: uuid */
+                replacedBy: string | null;
+                recoverySource: {
+                    /** Format: uuid */
+                    taskId: string;
+                    /** Format: uuid */
+                    auditId: string;
+                    revision: number;
+                } | null;
+                /** Format: uuid */
+                recoverySuccessorTaskId: string | null;
+            };
         };
         EmployeeTaskListResponse: {
             tasks: components["schemas"]["EmployeeTaskListItem"][];
@@ -2102,6 +2189,64 @@ export interface operations {
             };
             /** @description Successor is not an active same-team Employe */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    getAcceptedEvidence: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                taskId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Accepted evidence (Cache-Control no-store) */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AcceptedEvidenceResponse"];
+                };
+            };
+            /** @description Session rejected */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Responsable role required (FORBIDDEN) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Malformed */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Evidence inconsistent or not loadable (INTERNAL_ERROR) */
+            500: {
                 headers: {
                     [name: string]: unknown;
                 };

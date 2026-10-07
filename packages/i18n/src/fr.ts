@@ -103,6 +103,18 @@ export const fr = {
     assignmentPrevious: " après {previousEmployee}",
     recoverySource: "Travail récupéré depuis la tâche {taskId}, révision {revision}",
     recoverySuccessor: "Nouveau travail créé : tâche {taskId}",
+    // Story 9.1 — read-only review of accepted evidence.
+    evidenceAction: "Consulter les preuves",
+  },
+  evidence: {
+    heading: "Preuves de l’audit",
+    submittedBy: "Soumis par {displayName}",
+    acceptedAt: "Accepté le {date}",
+    revision: "Révision {revision}",
+    inputHeading: "Données saisies",
+    back: "Retour à la liste",
+    unavailable: "Ces preuves ne sont pas disponibles. Actualisez la liste.",
+    loadFailed: "Les preuves n’ont pas pu être chargées.",
   },
   employeeTasks: {
     title: "Mes tâches",

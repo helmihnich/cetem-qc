@@ -26,6 +26,7 @@ type ReassignUnstartedTaskRequestContract = apiV1Operations["reassignUnstartedDe
 type ReassignUnstartedTaskResponseContract = apiV1Operations["reassignUnstartedDeactivatedTask"]["responses"][200]["content"]["application/json"];
 type CreateDeactivatedAssigneeRecoveryRequestContract = apiV1Operations["createDeactivatedAssigneeRecovery"]["requestBody"]["content"]["application/json"];
 type DeactivatedAssigneeRecoveryResponseContract = apiV1Operations["createDeactivatedAssigneeRecovery"]["responses"][201]["content"]["application/json"];
+type AcceptedEvidenceResponseContract = apiV1Operations["getAcceptedEvidence"]["responses"][200]["content"]["application/json"];
 type EmployeeTaskListResponseContract = apiV1Operations["listAssignedEmployeeTasks"]["responses"][200]["content"]["application/json"];
 type EmployeeTaskResponseContract = apiV1Operations["getAssignedEmployeeTask"]["responses"][200]["content"]["application/json"];
 
@@ -122,6 +123,29 @@ export const deactivatedAssigneeRecoveryResponseSchema: z.ZodType<DeactivatedAss
   recoveryId: z.string().uuid(), recoveryKind: z.enum(["synchronized-draft", "correction-draft"]),
   source: z.object({ taskId: z.string().uuid(), auditId: z.string().uuid(), revision: z.number().int().positive() }).strict(),
 }).strict();
+// The calculation snapshot is stored and returned as is; its shape belongs to packages/domain, so each test result stays open here.
+const storedTestResultSchema = z.object({}).passthrough();
+export const acceptedEvidenceResponseSchema: z.ZodType<AcceptedEvidenceResponseContract> = z.object({
+  task: z.object({ id: z.string().uuid(), establishment: z.string(), service: z.string(), assignee: z.string() }).strict(),
+  submission: z.object({
+    submissionId: z.string().uuid(), auditId: z.string().uuid(), revision: z.number().int().positive(),
+    submittedBy: z.object({ id: z.string().uuid(), displayName: z.string() }).strict(),
+    acceptedAt: z.string().datetime(),
+  }).strict(),
+  identity: z.object({
+    catalogueId: z.string(), catalogueVersion: z.string(), schemaVersion: z.number().int(), ruleId: z.string(), ruleVersion: z.string(),
+  }).strict(),
+  values: z.record(z.string(), z.string()),
+  results: z.object({
+    voltageAccuracy: storedTestResultSchema, voltageRepeatability: storedTestResultSchema, outputRepeatability: storedTestResultSchema,
+    outputLinearity: storedTestResultSchema, lightFieldCorrespondence: storedTestResultSchema,
+  }).strict(),
+  lineage: z.object({
+    replacementOf: z.string().uuid().nullable(), replacedBy: z.string().uuid().nullable(),
+    recoverySource: z.object({ taskId: z.string().uuid(), auditId: z.string().uuid(), revision: z.number().int().positive() }).strict().nullable(),
+    recoverySuccessorTaskId: z.string().uuid().nullable(),
+  }).strict(),
+}).strict();
 const employeeTaskSchema = z.object({
   id: z.string().uuid(), type: z.literal("graphie_mobile"), establishment: z.string(), service: z.string(),
   state: z.literal("draft"), createdAt: z.string().datetime(),
@@ -216,6 +240,7 @@ export type ReassignUnstartedTaskRequest = z.infer<typeof reassignUnstartedTaskR
 export type ReassignUnstartedTaskResponse = z.infer<typeof reassignUnstartedTaskResponseSchema>;
 export type CreateDeactivatedAssigneeRecoveryRequest = z.infer<typeof createDeactivatedAssigneeRecoveryRequestSchema>;
 export type DeactivatedAssigneeRecoveryResponse = z.infer<typeof deactivatedAssigneeRecoveryResponseSchema>;
+export type AcceptedEvidenceResponse = z.infer<typeof acceptedEvidenceResponseSchema>;
 export type EmployeeTaskListResponse = z.infer<typeof employeeTaskListResponseSchema>;
 export type EmployeeTaskResponse = z.infer<typeof employeeTaskResponseSchema>;
 export type SessionTokenResponse = z.infer<typeof sessionTokenResponseSchema>;
