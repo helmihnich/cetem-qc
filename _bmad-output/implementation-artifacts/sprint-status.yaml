@@ -90,7 +90,7 @@ development_status:
   8-1-resolve-a-synchronization-conflict-explicitly: done
   8-2-create-a-correction-draft-after-validation-rejection: done
   8-3-create-a-responsable-only-replacement-after-acceptance: done
-  8-4-handle-unfinished-tasks-after-employee-deactivation: in-progress
+  8-4-handle-unfinished-tasks-after-employee-deactivation: ready-for-dev
   epic-8-retrospective: optional
 
   epic-9: backlog

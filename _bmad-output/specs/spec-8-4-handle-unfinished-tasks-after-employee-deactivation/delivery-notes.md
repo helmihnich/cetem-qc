@@ -23,4 +23,4 @@
 4. Mobile identity/offline protections only where current code gaps are proven; do not duplicate already passing behavior.
 5. PostgreSQL, web, mobile regression suite and standard repository gates.
 
-Product decisions listed in the original proposal are resolved by the Product Owner. No product decisions remain open. This story remains backlog until explicitly started. This document does not update sprint tracking.
+Product decisions listed in the original proposal are resolved by the Product Owner. No product decisions remain open. Spec approved 2026-10-07; story is ready-for-dev. A checkpoint implementation exists (migration 0014, reassign/recovery commands, API/web routes, `task-recovery.tsx`); dev must verify it against SPEC.md and run all gates. Deferred-work items "TASK_NOT_ASSIGNED stops whole sync run" and "assignment checked outside task lock" are owned by this story (lock/revalidate assignment in the transaction; per-task skip of unassigned tasks in sync).

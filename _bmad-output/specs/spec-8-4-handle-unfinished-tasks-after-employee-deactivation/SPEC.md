@@ -1,8 +1,8 @@
 ---
 id: SPEC-8-4-handle-unfinished-tasks-after-employee-deactivation
 story: 8.4
-status: proposed
-approved: null
+status: approved
+approved: 2026-10-07
 companions:
   - recovery-model.md
   - web-behavior.md
@@ -19,7 +19,7 @@ sources:
   - current implementation (identity, team-access, tasks, audits, sync, mobile local drafts)
 ---
 
-> Proposed implementation contract for review. This specification does not change the Story 8.4 sprint status.
+> Approved implementation contract (refreshed 2026-10-07 against current code and Product Owner decisions). A checkpoint implementation (migration `0014_deactivation_recovery.sql`, reassignment/recovery commands, routes, web `task-recovery.tsx`) already exists in the tree; the dev pass must verify it against this contract and the gates rather than rebuild it.
 
 # Story 8.4 — Handle unfinished tasks after employee deactivation
 
