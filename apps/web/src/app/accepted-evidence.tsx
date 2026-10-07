@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { acceptedEvidenceResponseSchema } from "@cetem-qc/api-client/v1";
-import type { AcceptedEvidenceResponse } from "@cetem-qc/api-client/v1";
+import { acceptedEvidenceResponseSchema, insightDecisionResponseSchema } from "@cetem-qc/api-client/v1";
+import type { AcceptedEvidenceResponse, InsightDecisionResponse } from "@cetem-qc/api-client/v1";
 import { GRAPHIE_CALCULATION_FIELD_ID_LIST, GRAPHIE_MOBILE_POV_CATALOGUE } from "@cetem-qc/domain";
 import type { CatalogueField, CatalogueSection, GraphieCalculationResults } from "@cetem-qc/domain";
 import { fr } from "@cetem-qc/i18n";
@@ -98,21 +98,84 @@ const resultLabels: Record<string, string> = {
 const sourceLabelOf = (source: { kind: "field" | "result"; key: string }) =>
   (source.kind === "field" ? fieldLabels.get(source.key) : resultLabels[source.key]) ?? source.key;
 
-/** Read-only W5 slot: renders the proposal set exactly as received. It never evaluates and offers no decision control (9.3). */
-export function InsightProposalsSection({ insights }: { insights: AcceptedEvidenceResponse["insights"] }) {
+type InsightDecisions = InsightDecisionResponse[];
+type InsightDecisionValue = InsightDecisionResponse["decision"];
+
+export type InsightDecisionResult = { kind: "recorded"; decision: InsightDecisionResponse } | { kind: "failed" };
+
+/** Sends one decision through the web route handler. The panel only shows what the response returns. */
+export async function submitInsightDecision(taskId: string, proposalId: string, decision: InsightDecisionValue, fetcher: typeof fetch = fetch): Promise<InsightDecisionResult> {
+  try {
+    const response = await fetcher(`/api/tasks/${encodeURIComponent(taskId)}/insight-decisions`, {
+      method: "POST", headers: { "content-type": "application/json", accept: "application/json" }, body: JSON.stringify({ proposalId, decision }), cache: "no-store",
+    });
+    if (response.status !== 200) return { kind: "failed" };
+    const parsed = insightDecisionResponseSchema.safeParse(await response.json());
+    return parsed.success && parsed.data.proposalId === proposalId ? { kind: "recorded", decision: parsed.data } : { kind: "failed" };
+  } catch {
+    return { kind: "failed" };
+  }
+}
+
+export type InsightProposalsSectionProps = {
+  insights: AcceptedEvidenceResponse["insights"];
+  decisions?: InsightDecisions;
+  /** The proposal whose decision is in flight; both its controls are disabled. */
+  pendingProposalId?: string | null;
+  failed?: boolean;
+  /** Decision controls render only for `available` proposals and only when this is given. */
+  onDecide?: (proposalId: string, decision: InsightDecisionValue) => void;
+};
+
+/** W5 slot: renders the proposal set exactly as received, with retain/discard controls. It never evaluates. */
+export function InsightProposalsSection({ insights, decisions = [], pendingProposalId = null, failed = false, onDecide }: InsightProposalsSectionProps) {
+  const currentOf = (proposalId: string) => decisions.find((decision) => decision.proposalId === proposalId);
   let content: React.ReactNode;
   if (insights.status === "unavailable") content = <p className="state-message">{fr.insights.unavailable}</p>;
   else if (insights.proposals.length === 0) content = <p className="state-message">{fr.insights.none}</p>;
-  else content = <ul className="insight-list">{insights.proposals.map((proposal) => <li className="insight-item" key={proposal.proposalId}>
-    <p>{proposal.statement}</p>
-    <p>{fr.insights.rule.replace("{ruleId}", proposal.ruleId).replace("{ruleVersion}", String(proposal.ruleVersion))}</p>
-    <p>{fr.insights.approval.replace("{approvalReference}", proposal.approvalReference)}</p>
-    <p>{fr.insights.sources.replace("{sources}", proposal.sourceKeys.map(sourceLabelOf).join(", "))}</p>
-  </li>)}</ul>;
+  else content = <>
+    <ul className="insight-list">{insights.proposals.map((proposal) => {
+      const current = currentOf(proposal.proposalId);
+      const pending = pendingProposalId === proposal.proposalId;
+      const state = current ? (current.decision === "retained" ? fr.insights.retained : fr.insights.discarded) : fr.insights.undecided;
+      return <li className="insight-item" key={proposal.proposalId}>
+        <p>{proposal.statement}</p>
+        <p>{fr.insights.rule.replace("{ruleId}", proposal.ruleId).replace("{ruleVersion}", String(proposal.ruleVersion))}</p>
+        <p>{fr.insights.approval.replace("{approvalReference}", proposal.approvalReference)}</p>
+        <p>{fr.insights.sources.replace("{sources}", proposal.sourceKeys.map(sourceLabelOf).join(", "))}</p>
+        <p className="insight-state">{state}</p>
+        {current && <p className="insight-decided">{fr.insights.decidedBy.replace("{name}", current.decidedBy.displayName).replace("{date}", dateTimeFormatter.format(new Date(current.decidedAt)))}</p>}
+        {onDecide && <div className="insight-actions">
+          <button className="secondary-button" type="button" aria-pressed={current?.decision === "retained"} disabled={pending} onClick={() => onDecide(proposal.proposalId, "retained")}>{fr.insights.retain}</button>
+          <button className="secondary-button" type="button" aria-pressed={current?.decision === "discarded"} disabled={pending} onClick={() => onDecide(proposal.proposalId, "discarded")}>{fr.insights.discard}</button>
+        </div>}
+      </li>;
+    })}</ul>
+    {failed && <p className="field-error" role="alert">{fr.insights.decisionFailed}</p>}
+    {!insights.proposals.some((proposal) => currentOf(proposal.proposalId)?.decision === "retained") && <p className="state-message">{fr.insights.noneRetained}</p>}
+  </>;
   return <section className="evidence-insights" aria-labelledby="evidence-insights-heading">
     <h3 id="evidence-insights-heading">{fr.insights.heading}</h3>
     {content}
   </section>;
+}
+
+/** Holds the local decision state: it changes only from a server response, never from a client calculation. */
+export function InsightProposalsPanel({ taskId, insights, initialDecisions }: { taskId: string; insights: AcceptedEvidenceResponse["insights"]; initialDecisions: InsightDecisions }) {
+  const [decisions, setDecisions] = useState<InsightDecisions>(initialDecisions);
+  const [pendingProposalId, setPendingProposalId] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+  const onDecide = (proposalId: string, decision: InsightDecisionValue) => {
+    if (pendingProposalId !== null) return;
+    setPendingProposalId(proposalId);
+    setFailed(false);
+    void submitInsightDecision(taskId, proposalId, decision).then((result) => {
+      if (result.kind === "recorded") setDecisions((previous) => [...previous.filter((item) => item.proposalId !== proposalId), result.decision]);
+      else setFailed(true);
+      setPendingProposalId(null);
+    });
+  };
+  return <InsightProposalsSection insights={insights} decisions={decisions} pendingProposalId={pendingProposalId} failed={failed} onDecide={onDecide} />;
 }
 
 function EvidenceLineage({ lineage }: { lineage: AcceptedEvidenceResponse["lineage"] }) {
@@ -155,7 +218,7 @@ export function AcceptedEvidenceView({ taskId, load, onBack, onRetry, headingRef
       <EvidenceLineage lineage={evidence.lineage} />
       <EvidenceInputSections values={evidence.values} />
       <GraphieCalculationReview evidence={{ identity: evidence.identity, values: evidence.values, results: evidence.results as unknown as GraphieCalculationResults }} />
-      <InsightProposalsSection insights={evidence.insights} />
+      <InsightProposalsPanel taskId={evidence.task.id} insights={evidence.insights} initialDecisions={evidence.insightDecisions} />
     </>;
   } else if (load.kind === "not-found") {
     content = <div className="state-message error-state" role="alert">{fr.evidence.unavailable}</div>;

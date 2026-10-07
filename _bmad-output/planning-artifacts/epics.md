@@ -782,7 +782,7 @@ So that the retained set accurately reflects my review.
 **And** an all-normal audit may retain zero insights without blocking summary completion
 **And** discarded proposal content is not passed as retained insight content into summary generation.
 
-**Traceability:** FR-029, FR-031, DR-007, DR-008, UX-DR2 (insight-item), UX-DR7. **Dependency:** proposal availability is gated by DEP-01.
+**Traceability:** spec `_bmad-output/specs/spec-9-3-retain-or-discard-proposed-insights-with-provenance/SPEC.md`; FR-029, FR-031, DR-007, DR-008, UX-DR2 (insight-item), UX-DR7. **Dependency:** proposal availability is gated by DEP-01 (registry empty: production shows no proposal or control; mechanism proven with synthetic registries). Stories 9.1, 9.2 (done).
 
 ### Story 9.4: Add a manual insight
 

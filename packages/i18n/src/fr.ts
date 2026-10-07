@@ -124,6 +124,15 @@ export const fr = {
     rule: "Règle {ruleId} v{ruleVersion}",
     approval: "Approbation CETEM : {approvalReference}",
     sources: "Données concernées : {sources}",
+    // Story 9.3 — retain or discard each proposal.
+    retain: "Retenir",
+    discard: "Écarter",
+    retained: "Retenu",
+    discarded: "Écarté",
+    undecided: "Non décidé",
+    decidedBy: "Décidé par {name} le {date}",
+    noneRetained: "Aucun insight retenu",
+    decisionFailed: "La décision n’a pas pu être enregistrée. L’état précédent est conservé.",
     // French statement templates by rule ID; empty until CETEM approves a rule.
     rules: {} as Record<string, string>,
   },

@@ -88,6 +88,7 @@ const OTHER_MUTATING_ROUTES = [
   "POST /tasks/:taskId/deactivated-assignee-reassignment",
   "POST /tasks/:taskId/deactivated-assignee-recovery",
   "POST /tasks/:taskId/replacements",
+  "POST /tasks/:taskId/insight-decisions",
   "POST /employees",
   "POST /employees/:employeeId/credential",
   "POST /employees/:employeeId/password-reset",
@@ -180,6 +181,8 @@ test("F5 every other mutating route, called by both roles, leaves the accepted e
       ["POST", () => "/tasks", { establishment: "Établissement B", service: "Radiologie", type: "graphie_mobile", assigneeId: employee }],
       // Story 8.3: a replacement control of the accepted task creates a new task and leaves the original's evidence unchanged.
       ["POST", () => `/tasks/${taskId}/replacements`, { establishment: "Établissement B", service: "Radiologie", type: "graphie_mobile", assigneeId: employee }],
+      // Story 9.3: with the empty production registry every decision is refused and the accepted evidence stays unchanged.
+      ["POST", () => `/tasks/${taskId}/insight-decisions`, { proposalId: "inconnue", decision: "retained" }],
       ["POST", () => `/tasks/${taskId}/deactivated-assignee-reassignment`, { successorId: employee, expectedAssignmentVersion: 1 }],
       ["POST", () => `/tasks/${taskId}/deactivated-assignee-recovery`, { sourceRevision: 1, successorId: employee, establishment: "Établissement B", service: "Radiologie", type: "graphie_mobile" }],
       ["POST", () => "/employees", { firstName: "Nouveau", surname: "Test", email: `${randomUUID()}@example.test` }],

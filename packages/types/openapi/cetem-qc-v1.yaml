@@ -986,6 +986,40 @@ paths:
         '403': { description: Responsable role required (FORBIDDEN), content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
         '404': { description: Malformed, unknown or another team's task, or no accepted submission (TASK_NOT_FOUND); the cases are not told apart, content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
         '500': { description: Evidence inconsistent or not loadable (INTERNAL_ERROR), content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+  /tasks/{taskId}/insight-decisions:
+    post:
+      operationId: recordInsightDecision
+      summary: Retain or discard a proposed insight of an own-team accepted audit
+      description: >-
+        Responsable only. Inserts one insert-only decision row (actor, server date, task, audit, submission, revision,
+        revision rule identity and the full proposal snapshot). The server re-evaluates the proposals itself; the body
+        carries no proposal content. A proposalId outside the freshly evaluated set is refused. A malformed, unknown or
+        another team's task, and an own-team task without accepted submission, all get the same 404.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: taskId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InsightDecisionRequest'
+      responses:
+        '200':
+          description: Recorded decision (Cache-Control no-store)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InsightDecisionResponse'
+        '401': { description: Session rejected, content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+        '403': { description: Responsable role required (FORBIDDEN), content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+        '404': { description: Malformed, unknown or another team's task, or no accepted submission (TASK_NOT_FOUND), content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+        '422': { description: Invalid decision or unknown proposal (VALIDATION_FAILED), content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+        '500': { description: Evidence inconsistent or decision not recorded (INTERNAL_ERROR), content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
 components:
   securitySchemes:
     bearerAuth:
@@ -1257,10 +1291,14 @@ components:
     AcceptedEvidenceResponse:
       type: object
       additionalProperties: false
-      required: [task, submission, identity, values, results, lineage, insights]
+      required: [task, submission, identity, values, results, lineage, insights, insightDecisions]
       properties:
         insights:
           $ref: '#/components/schemas/InsightProposalSet'
+        insightDecisions:
+          type: array
+          items:
+            $ref: '#/components/schemas/EvidenceInsightDecision'
         task:
           type: object
           additionalProperties: false
@@ -1331,6 +1369,46 @@ components:
                     revision: { type: integer, minimum: 1 }
                 - type: 'null'
             recoverySuccessorTaskId: { type: [string, 'null'], format: uuid }
+    InsightDecisionRequest:
+      type: object
+      additionalProperties: false
+      required: [proposalId, decision]
+      properties:
+        proposalId: { type: string, minLength: 1 }
+        decision: { type: string, enum: [retained, discarded] }
+    InsightDecisionResponse:
+      type: object
+      additionalProperties: false
+      required: [proposalId, decision, decidedAt, decidedBy]
+      properties:
+        proposalId: { type: string, minLength: 1 }
+        decision: { type: string, enum: [retained, discarded] }
+        decidedAt: { type: string, format: date-time }
+        decidedBy:
+          type: object
+          additionalProperties: false
+          required: [id, displayName]
+          properties:
+            id: { type: string }
+            displayName: { type: string }
+    EvidenceInsightDecision:
+      type: object
+      additionalProperties: false
+      required: [proposalId, decision, decidedAt, decidedBy, registryVersion, ruleId, ruleVersion]
+      properties:
+        proposalId: { type: string, minLength: 1 }
+        decision: { type: string, enum: [retained, discarded] }
+        decidedAt: { type: string, format: date-time }
+        decidedBy:
+          type: object
+          additionalProperties: false
+          required: [id, displayName]
+          properties:
+            id: { type: string }
+            displayName: { type: string }
+        registryVersion: { type: string, minLength: 1 }
+        ruleId: { type: string, minLength: 1 }
+        ruleVersion: { type: integer, minimum: 1 }
     InsightSourceKey:
       type: object
       additionalProperties: false

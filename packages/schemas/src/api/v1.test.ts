@@ -4,7 +4,7 @@ import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import type { apiV1Components, apiV1Operations } from "@cetem-qc/types";
-import { acceptedEvidenceResponseSchema, apiErrorSchema, createEmployeeRequestSchema, createTaskRequestSchema, employeeCredentialResponseSchema, employeeListResponseSchema, employeeTaskListQuerySchema, employeeTaskListResponseSchema, employeeTaskAuditVersionSchema, employeeTaskResponseSchema, graphieDraftPayloadSchema, healthQuerySchema, healthResponseSchema, replacementTaskResponseSchema, syncOperationAcceptedSchema, syncOperationConflictSchema, syncOperationRejectedSchema, syncOperationRequestSchema, taskListQuerySchema, taskListResponseSchema, updateEmployeeStatusRequestSchema, updateEmployeeStatusResponseSchema } from "./v1.js";
+import { acceptedEvidenceResponseSchema, insightDecisionRequestSchema, insightDecisionResponseSchema, apiErrorSchema, createEmployeeRequestSchema, createTaskRequestSchema, employeeCredentialResponseSchema, employeeListResponseSchema, employeeTaskListQuerySchema, employeeTaskListResponseSchema, employeeTaskAuditVersionSchema, employeeTaskResponseSchema, graphieDraftPayloadSchema, healthQuerySchema, healthResponseSchema, replacementTaskResponseSchema, syncOperationAcceptedSchema, syncOperationConflictSchema, syncOperationRejectedSchema, syncOperationRequestSchema, taskListQuerySchema, taskListResponseSchema, updateEmployeeStatusRequestSchema, updateEmployeeStatusResponseSchema } from "./v1.js";
 
 const contractPath = fileURLToPath(new URL("../../../types/openapi/cetem-qc-v1.yaml", import.meta.url));
 
@@ -317,6 +317,7 @@ test("K7 accepted evidence response schema parses a full body and refuses extras
     results: { voltageAccuracy: result, voltageRepeatability: result, outputRepeatability: result, outputLinearity: result, lightFieldCorrespondence: result },
     lineage: { replacementOf: null, replacedBy: null, recoverySource: null, recoverySuccessorTaskId: null },
     insights: { status: "unavailable", reason: "no-approved-rules", registryVersion: "insight-registry-1", proposals: [] },
+    insightDecisions: [],
   };
   assert.deepEqual(acceptedEvidenceResponseSchema.parse(body), body);
   assert.equal(acceptedEvidenceResponseSchema.safeParse({ ...body, extra: true }).success, false);
@@ -343,6 +344,7 @@ test("K9 accepted evidence insights are required, parse both statuses and refuse
     results: { voltageAccuracy: result, voltageRepeatability: result, outputRepeatability: result, outputLinearity: result, lightFieldCorrespondence: result },
     lineage: { replacementOf: null, replacedBy: null, recoverySource: null, recoverySuccessorTaskId: null },
     insights: { status: "available", registryVersion: "insight-registry-1", proposals: [proposal] },
+    insightDecisions: [],
   };
   assert.deepEqual(acceptedEvidenceResponseSchema.parse(body), body);
   assert.equal(acceptedEvidenceResponseSchema.safeParse({ ...body, insights: { ...body.insights, proposals: [] } }).success, true);
@@ -357,4 +359,36 @@ test("K9 accepted evidence insights are required, parse both statuses and refuse
     { status: "unavailable", reason: "no-approved-rules", registryVersion: "insight-registry-1", proposals: [proposal] },
     { status: "unavailable", reason: "other", registryVersion: "insight-registry-1", proposals: [] },
   ]) assert.equal(acceptedEvidenceResponseSchema.safeParse(insights === undefined ? withoutInsights : { ...body, insights }).success, false, JSON.stringify(insights));
+});
+
+test("K11 insightDecisions is required, parses empty and populated, and refuses extras and an invalid decision; the request schema is strict", () => {
+  const id = "00000000-0000-4000-8000-000000000040";
+  const result = { test: "voltage-accuracy" };
+  const decision = {
+    proposalId: "rule-a:v1:x", decision: "retained", decidedAt: "2026-10-08T09:00:00.000Z", decidedBy: { id, displayName: "Responsable Test" },
+    registryVersion: "insight-registry-1", ruleId: "rule-a", ruleVersion: 1,
+  } as const;
+  const body = {
+    task: { id, establishment: "Établissement A", service: "Radiologie", assignee: "Employé Test" },
+    submission: { submissionId: id, auditId: id, revision: 2, submittedBy: { id, displayName: "Employé Test" }, acceptedAt: "2026-10-07T08:00:00.000Z" },
+    identity: { catalogueId: "graphie-mobile-pov", catalogueVersion: "2.0.0", schemaVersion: 3, ruleId: "cetem-paper-form", ruleVersion: "2.0.0" },
+    values: {},
+    results: { voltageAccuracy: result, voltageRepeatability: result, outputRepeatability: result, outputLinearity: result, lightFieldCorrespondence: result },
+    lineage: { replacementOf: null, replacedBy: null, recoverySource: null, recoverySuccessorTaskId: null },
+    insights: { status: "unavailable", reason: "no-approved-rules", registryVersion: "insight-registry-1", proposals: [] },
+    insightDecisions: [decision],
+  };
+  assert.deepEqual(acceptedEvidenceResponseSchema.parse(body), body);
+  assert.equal(acceptedEvidenceResponseSchema.safeParse({ ...body, insightDecisions: [] }).success, true);
+  const { insightDecisions: _decisions, ...without } = body;
+  assert.equal(acceptedEvidenceResponseSchema.safeParse(without).success, false);
+  assert.equal(acceptedEvidenceResponseSchema.safeParse({ ...body, insightDecisions: [{ ...decision, decision: "approved" }] }).success, false);
+  assert.equal(acceptedEvidenceResponseSchema.safeParse({ ...body, insightDecisions: [{ ...decision, extra: 1 }] }).success, false);
+  assert.deepEqual(insightDecisionRequestSchema.parse({ proposalId: "p", decision: "discarded" }), { proposalId: "p", decision: "discarded" });
+  for (const invalid of [{ proposalId: "p", decision: "x" }, { proposalId: "", decision: "retained" }, { proposalId: "p", decision: "retained", statement: "fabriqué" }, { decision: "retained" }]) {
+    assert.equal(insightDecisionRequestSchema.safeParse(invalid).success, false, JSON.stringify(invalid));
+  }
+  const { registryVersion: _r, ruleId: _i, ruleVersion: _v, ...response } = decision;
+  assert.deepEqual(insightDecisionResponseSchema.parse(response), response);
+  assert.equal(insightDecisionResponseSchema.safeParse(decision).success, false);
 });

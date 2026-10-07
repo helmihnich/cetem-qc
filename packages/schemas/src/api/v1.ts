@@ -27,6 +27,8 @@ type ReassignUnstartedTaskResponseContract = apiV1Operations["reassignUnstartedD
 type CreateDeactivatedAssigneeRecoveryRequestContract = apiV1Operations["createDeactivatedAssigneeRecovery"]["requestBody"]["content"]["application/json"];
 type DeactivatedAssigneeRecoveryResponseContract = apiV1Operations["createDeactivatedAssigneeRecovery"]["responses"][201]["content"]["application/json"];
 type AcceptedEvidenceResponseContract = apiV1Operations["getAcceptedEvidence"]["responses"][200]["content"]["application/json"];
+type InsightDecisionRequestContract = apiV1Operations["recordInsightDecision"]["requestBody"]["content"]["application/json"];
+type InsightDecisionResponseContract = apiV1Operations["recordInsightDecision"]["responses"][200]["content"]["application/json"];
 type EmployeeTaskListResponseContract = apiV1Operations["listAssignedEmployeeTasks"]["responses"][200]["content"]["application/json"];
 type EmployeeTaskResponseContract = apiV1Operations["getAssignedEmployeeTask"]["responses"][200]["content"]["application/json"];
 
@@ -136,8 +138,19 @@ export const insightProposalSetSchema = z.discriminatedUnion("status", [
   z.object({ status: z.literal("unavailable"), reason: z.literal("no-approved-rules"), registryVersion: nonEmpty, proposals: z.tuple([]) }).strict(),
   z.object({ status: z.literal("available"), registryVersion: nonEmpty, proposals: z.array(insightProposalSchema) }).strict(),
 ]);
+const insightDecisionValueSchema = z.enum(["retained", "discarded"]);
+const insightDecisionFields = {
+  proposalId: nonEmpty, decision: insightDecisionValueSchema, decidedAt: z.string().datetime(),
+  decidedBy: z.object({ id: z.string(), displayName: z.string() }).strict(),
+};
+export const insightDecisionRequestSchema: z.ZodType<InsightDecisionRequestContract> = z.object({ proposalId: nonEmpty, decision: insightDecisionValueSchema }).strict();
+export const insightDecisionResponseSchema: z.ZodType<InsightDecisionResponseContract> = z.object(insightDecisionFields).strict();
+const evidenceInsightDecisionSchema = z.object({
+  ...insightDecisionFields, registryVersion: nonEmpty, ruleId: nonEmpty, ruleVersion: z.number().int().positive(),
+}).strict();
 export const acceptedEvidenceResponseSchema: z.ZodType<AcceptedEvidenceResponseContract> = z.object({
   insights: insightProposalSetSchema,
+  insightDecisions: z.array(evidenceInsightDecisionSchema),
   task: z.object({ id: z.string().uuid(), establishment: z.string(), service: z.string(), assignee: z.string() }).strict(),
   submission: z.object({
     submissionId: z.string().uuid(), auditId: z.string().uuid(), revision: z.number().int().positive(),
@@ -253,6 +266,8 @@ export type ReassignUnstartedTaskResponse = z.infer<typeof reassignUnstartedTask
 export type CreateDeactivatedAssigneeRecoveryRequest = z.infer<typeof createDeactivatedAssigneeRecoveryRequestSchema>;
 export type DeactivatedAssigneeRecoveryResponse = z.infer<typeof deactivatedAssigneeRecoveryResponseSchema>;
 export type AcceptedEvidenceResponse = z.infer<typeof acceptedEvidenceResponseSchema>;
+export type InsightDecisionRequest = z.infer<typeof insightDecisionRequestSchema>;
+export type InsightDecisionResponse = z.infer<typeof insightDecisionResponseSchema>;
 export type EmployeeTaskListResponse = z.infer<typeof employeeTaskListResponseSchema>;
 export type EmployeeTaskResponse = z.infer<typeof employeeTaskResponseSchema>;
 export type SessionTokenResponse = z.infer<typeof sessionTokenResponseSchema>;

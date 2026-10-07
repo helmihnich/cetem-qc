@@ -96,7 +96,7 @@ development_status:
   epic-9: in-progress
   9-1-review-accepted-audit-evidence-read-only: done
   9-2-generate-deterministic-insight-proposals-from-approved-rules: done
-  9-3-retain-or-discard-proposed-insights-with-provenance: backlog
+  9-3-retain-or-discard-proposed-insights-with-provenance: done
   9-4-add-a-manual-insight: backlog
   epic-9-retrospective: optional
 

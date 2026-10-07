@@ -1,7 +1,7 @@
 import express from "express";
 import type { Server } from "node:http";
 import type { Pool } from "pg";
-import { acceptedEvidenceResponseSchema, apiErrorSchema, authenticationRequestSchema, authenticationResponseSchema, createDeactivatedAssigneeRecoveryRequestSchema, createEmployeeRequestSchema, createTaskRequestSchema, deactivatedAssigneeRecoveryResponseSchema, employeeCredentialResponseSchema, employeeListResponseSchema, employeeTaskAuditVersionSchema, employeeTaskRecoverySeedResponseSchema, employeeTaskListQuerySchema, employeeTaskListResponseSchema, employeeTaskResponseSchema, healthQuerySchema, passwordReplacementRequestSchema, reassignUnstartedTaskRequestSchema, reassignUnstartedTaskResponseSchema, replacementTaskResponseSchema, sessionResponseSchema, syncOperationRequestSchema, taskAssigneeListResponseSchema, taskListQuerySchema, taskListResponseSchema, taskResponseSchema, updateEmployeeStatusRequestSchema, updateEmployeeStatusResponseSchema } from "@cetem-qc/schemas/api/v1";
+import { acceptedEvidenceResponseSchema, apiErrorSchema, insightDecisionRequestSchema, insightDecisionResponseSchema, authenticationRequestSchema, authenticationResponseSchema, createDeactivatedAssigneeRecoveryRequestSchema, createEmployeeRequestSchema, createTaskRequestSchema, deactivatedAssigneeRecoveryResponseSchema, employeeCredentialResponseSchema, employeeListResponseSchema, employeeTaskAuditVersionSchema, employeeTaskRecoverySeedResponseSchema, employeeTaskListQuerySchema, employeeTaskListResponseSchema, employeeTaskResponseSchema, healthQuerySchema, passwordReplacementRequestSchema, reassignUnstartedTaskRequestSchema, reassignUnstartedTaskResponseSchema, replacementTaskResponseSchema, sessionResponseSchema, syncOperationRequestSchema, taskAssigneeListResponseSchema, taskListQuerySchema, taskListResponseSchema, taskResponseSchema, updateEmployeeStatusRequestSchema, updateEmployeeStatusResponseSchema } from "@cetem-qc/schemas/api/v1";
 import { getHealth } from "./modules/health/health-query.js";
 import {
   authenticateWithPassword,
@@ -17,6 +17,8 @@ import { getCurrentAuditVersion } from "./modules/audits/queries/current-audit-v
 import { getDeactivatedAssigneeRecoverySeed } from "./modules/audits/queries/deactivated-assignee-recovery-seed.js";
 import { readTaskAcceptanceAndLineage } from "./modules/audits/queries/task-audit-lineage.js";
 import { openAcceptedEvidenceForReview } from "./modules/audits/commands/record-review-access.js";
+import { recordInsightDecision } from "./modules/audits/commands/record-insight-decision.js";
+import { getAcceptedSubmissionForReview } from "./modules/audits/queries/accepted-submission.js";
 import { createReplacementControl } from "./modules/audits/commands/create-replacement-control.js";
 import { createDeactivatedAssigneeRecovery } from "./modules/audits/commands/create-deactivated-assignee-recovery.js";
 import { processSyncOperation } from "./modules/sync/commands/process-sync-operation.js";
@@ -480,11 +482,66 @@ export function createApp(pool?: Pool) {
         values: evidence.payload.values,
         results: evidence.results,
         insights,
+        insightDecisions: outcome.insightDecisions,
         lineage: { replacementOf: lineage.replacementOf, replacedBy: lineage.replacedBy, recoverySource: lineage.recoverySource, recoverySuccessorTaskId: lineage.recoverySuccessorTaskId },
       }));
     } catch {
       // Never log the error: it may carry stored values.
       failed();
+    }
+  });
+
+  v1.post("/tasks/:taskId/insight-decisions", async (request, response) => {
+    response.set("Cache-Control", "no-store");
+    const session = response.locals.session as NonNullable<Awaited<ReturnType<typeof findActiveSession>>>;
+    // Refusal lines carry the actor and a fixed class only: never the task ID, proposal ID or statement.
+    const refuse = (refusalClass: "forbidden-role" | "not-found" | "validation") => console.info(JSON.stringify({ event: "audit.insight_decision_refused", class: refusalClass, actorId: session.id }));
+    if (session.role !== "responsable") {
+      refuse("forbidden-role");
+      response.status(403).json(apiErrorSchema.parse({ error: { code: "FORBIDDEN", message: "Accès réservé au Responsable de l’équipe." } }));
+      return;
+    }
+    const notFound = () => {
+      refuse("not-found");
+      response.status(404).json(apiErrorSchema.parse({ error: { code: "TASK_NOT_FOUND", message: "Tâche introuvable." } }));
+    };
+    const invalid = () => {
+      refuse("validation");
+      response.status(422).json(apiErrorSchema.parse({ error: { code: "VALIDATION_FAILED", message: "Cette décision d’insight est invalide." } }));
+    };
+    const taskId = String(request.params.taskId ?? "");
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(taskId)) {
+      notFound();
+      return;
+    }
+    const parsed = insightDecisionRequestSchema.safeParse(request.body);
+    try {
+      if (!parsed.success) {
+        // A syntactically valid but unknown or other team's task must stay indistinguishable: check the task first.
+        const probe = await getAcceptedSubmissionForReview(getPool(), session.id, taskId.toLowerCase());
+        if (!probe) notFound();
+        else invalid();
+        return;
+      }
+      const outcome = await recordInsightDecision(getPool(), session.id, taskId.toLowerCase(), parsed.data.proposalId, parsed.data.decision);
+      switch (outcome.type) {
+        case "recorded":
+          response.status(200).json(insightDecisionResponseSchema.parse(outcome.current));
+          return;
+        case "not-found":
+          notFound();
+          return;
+        case "unknown-proposal":
+          invalid();
+          return;
+        case "inconsistent":
+          console.info(JSON.stringify({ event: "audit.insight_decision_inconsistent", actorId: session.id }));
+          response.status(500).json(apiErrorSchema.parse({ error: { code: "INTERNAL_ERROR", message: "La décision n’a pas pu être enregistrée." } }));
+          return;
+      }
+    } catch {
+      // Never log the error: it may carry stored values.
+      response.status(500).json(apiErrorSchema.parse({ error: { code: "INTERNAL_ERROR", message: "La décision n’a pas pu être enregistrée." } }));
     }
   });
 

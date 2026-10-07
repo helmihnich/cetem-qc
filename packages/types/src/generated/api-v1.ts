@@ -380,6 +380,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/tasks/{taskId}/insight-decisions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Retain or discard a proposed insight of an own-team accepted audit
+         * @description Responsable only. Inserts one insert-only decision row (actor, server date, task, audit, submission, revision, revision rule identity and the full proposal snapshot). The server re-evaluates the proposals itself; the body carries no proposal content. A proposalId outside the freshly evaluated set is refused. A malformed, unknown or another team's task, and an own-team task without accepted submission, all get the same 404.
+         */
+        post: operations["recordInsightDecision"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -570,6 +590,7 @@ export interface components {
         };
         AcceptedEvidenceResponse: {
             insights: components["schemas"]["InsightProposalSet"];
+            insightDecisions: components["schemas"]["EvidenceInsightDecision"][];
             task: {
                 /** Format: uuid */
                 id: string;
@@ -635,6 +656,36 @@ export interface components {
                 /** Format: uuid */
                 recoverySuccessorTaskId: string | null;
             };
+        };
+        InsightDecisionRequest: {
+            proposalId: string;
+            /** @enum {string} */
+            decision: "retained" | "discarded";
+        };
+        InsightDecisionResponse: {
+            proposalId: string;
+            /** @enum {string} */
+            decision: "retained" | "discarded";
+            /** Format: date-time */
+            decidedAt: string;
+            decidedBy: {
+                id: string;
+                displayName: string;
+            };
+        };
+        EvidenceInsightDecision: {
+            proposalId: string;
+            /** @enum {string} */
+            decision: "retained" | "discarded";
+            /** Format: date-time */
+            decidedAt: string;
+            decidedBy: {
+                id: string;
+                displayName: string;
+            };
+            registryVersion: string;
+            ruleId: string;
+            ruleVersion: number;
         };
         InsightSourceKey: {
             /** @enum {string} */
@@ -2279,6 +2330,77 @@ export interface operations {
                 };
             };
             /** @description Evidence inconsistent or not loadable (INTERNAL_ERROR) */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    recordInsightDecision: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                taskId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InsightDecisionRequest"];
+            };
+        };
+        responses: {
+            /** @description Recorded decision (Cache-Control no-store) */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InsightDecisionResponse"];
+                };
+            };
+            /** @description Session rejected */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Responsable role required (FORBIDDEN) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Malformed */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Invalid decision or unknown proposal (VALIDATION_FAILED) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Evidence inconsistent or decision not recorded (INTERNAL_ERROR) */
             500: {
                 headers: {
                     [name: string]: unknown;

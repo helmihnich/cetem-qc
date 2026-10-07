@@ -7,9 +7,11 @@ import { getOwnTeamTaskSummary } from "../../tasks/queries/own-team-task.js";
 import type { OwnTeamTaskSummary } from "../../tasks/queries/own-team-task.js";
 import { getAcceptedSubmissionForReview } from "../queries/accepted-submission.js";
 import type { AcceptedSubmissionSnapshot } from "../queries/accepted-submission.js";
+import { getCurrentInsightDecisions } from "../queries/insight-decisions.js";
+import type { EvidenceInsightDecision } from "../queries/insight-decisions.js";
 
 export type OpenAcceptedEvidenceOutcome =
-  | { type: "opened"; evidence: AcceptedSubmissionSnapshot; task: OwnTeamTaskSummary; insights: InsightProposalSet }
+  | { type: "opened"; evidence: AcceptedSubmissionSnapshot; task: OwnTeamTaskSummary; insights: InsightProposalSet; insightDecisions: EvidenceInsightDecision[] }
   | { type: "not-found" }
   | { type: "inconsistent" };
 
@@ -51,17 +53,23 @@ export async function openAcceptedEvidenceForReview(pool: Pool, responsableId: s
     const task = await getOwnTeamTaskSummary(transaction, responsableId, evidence.taskId);
     if (!task) return { type: "not-found" };
     // Stateless and read only: a throw here fails the request before the access row is inserted.
-    const seam = reviewCommandTestSeams.insightRegistry;
-    const insights = evaluateInsightProposals(
-      { submissionId: evidence.submissionId, identity: evidence.identity as GraphieCalculationIdentity, values: evidence.payload.values, results: evidence.results },
-      seam ? seam.rules : INSIGHT_RULE_REGISTRY,
-      seam ? seam.templates : fr.insights.rules,
-    );
+    const insights = evaluateProposalsForSnapshot(evidence);
     await reviewCommandTestSeams.beforeAccessInsert?.();
     await transaction.query(
       "INSERT INTO audit_review_accesses (actor_id, task_id, audit_id, submission_id) VALUES ($1, $2, $3, $4)",
       [responsableId, evidence.taskId, evidence.auditId, evidence.submissionId],
     );
-    return { type: "opened", evidence, task, insights };
+    const insightDecisions = await getCurrentInsightDecisions(transaction, evidence.submissionId);
+    return { type: "opened", evidence, task, insights, insightDecisions };
   });
+}
+
+/** The single place proposals are evaluated for a snapshot, so opening and deciding cannot diverge. */
+export function evaluateProposalsForSnapshot(evidence: AcceptedSubmissionSnapshot): InsightProposalSet {
+  const seam = reviewCommandTestSeams.insightRegistry;
+  return evaluateInsightProposals(
+    { submissionId: evidence.submissionId, identity: evidence.identity as GraphieCalculationIdentity, values: evidence.payload.values, results: evidence.results },
+    seam ? seam.rules : INSIGHT_RULE_REGISTRY,
+    seam ? seam.templates : fr.insights.rules,
+  );
 }

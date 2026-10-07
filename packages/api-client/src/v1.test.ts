@@ -304,6 +304,7 @@ test("K8 getAcceptedEvidence returns typed outcomes for 200, 403, 404 and 500 an
     results: { voltageAccuracy: result, voltageRepeatability: result, outputRepeatability: result, outputLinearity: result, lightFieldCorrespondence: result },
     lineage: { replacementOf: null, replacedBy: null, recoverySource: null, recoverySuccessorTaskId: null },
     insights: { status: "unavailable", reason: "no-approved-rules", registryVersion: "insight-registry-1", proposals: [] },
+    insightDecisions: [],
   };
   const ok = clientFor(body);
   assert.deepEqual(await ok.client.getAcceptedEvidence(id), { status: 200, body });
@@ -319,4 +320,25 @@ test("K8 getAcceptedEvidence returns typed outcomes for 200, 403, 404 and 500 an
   }
   await assert.rejects(clientFor({ error: { code: "AUTHENTICATION_FAILED", message: "x" } }, 401).client.getAcceptedEvidence(id), ApiRequestError);
   await assert.rejects(clientFor({ ...body, lineage: undefined }).client.getAcceptedEvidence(id), ApiRequestError);
+});
+
+test("K12 recordInsightDecision returns typed outcomes for 200, 403, 404, 422 and 500 and throws on anything else", async () => {
+  const id = "00000000-0000-4000-8000-000000000041";
+  const response = { proposalId: "rule-a:v1:x", decision: "retained", decidedAt: "2026-10-08T09:00:00.000Z", decidedBy: { id, displayName: "Responsable Test" } };
+  const ok = clientFor(response);
+  assert.deepEqual(await ok.client.recordInsightDecision(id, { proposalId: "rule-a:v1:x", decision: "retained" }), { status: 200, body: response });
+  assert.equal(ok.calls[0]!.url, `https://cetem-qc.example.test/api/v1/tasks/${id}/insight-decisions`);
+  assert.equal(ok.calls[0]!.init?.method, "POST");
+  assert.deepEqual(JSON.parse(String(ok.calls[0]!.init?.body)), { proposalId: "rule-a:v1:x", decision: "retained" });
+  const outcomes: Array<[number, string, string]> = [
+    [403, "FORBIDDEN", "Accès réservé au Responsable de l’équipe."],
+    [404, "TASK_NOT_FOUND", "Tâche introuvable."],
+    [422, "VALIDATION_FAILED", "Cette décision d’insight est invalide."],
+    [500, "INTERNAL_ERROR", "La décision n’a pas pu être enregistrée."],
+  ];
+  for (const [status, code, message] of outcomes) {
+    assert.deepEqual(await clientFor({ error: { code, message } }, status).client.recordInsightDecision(id, { proposalId: "p", decision: "discarded" }), { status, code, message });
+  }
+  await assert.rejects(clientFor({ error: { code: "AUTHENTICATION_FAILED", message: "x" } }, 401).client.recordInsightDecision(id, { proposalId: "p", decision: "retained" }), ApiRequestError);
+  await assert.rejects(clientFor({ ...response, decision: "approved" }).client.recordInsightDecision(id, { proposalId: "p", decision: "retained" }), ApiRequestError);
 });

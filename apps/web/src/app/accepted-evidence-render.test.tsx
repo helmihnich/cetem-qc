@@ -6,7 +6,7 @@ import { GRAPHIE_CALCULATION_IDENTITY, calculateGraphieResults } from "@cetem-qc
 import type { CalculationContext } from "@cetem-qc/domain";
 import type { AcceptedEvidenceResponse } from "@cetem-qc/api-client/v1";
 import { fr } from "@cetem-qc/i18n";
-import { AcceptedEvidenceView, loadAcceptedEvidence } from "./accepted-evidence";
+import { AcceptedEvidenceView, InsightProposalsSection, loadAcceptedEvidence, submitInsightDecision } from "./accepted-evidence";
 import type { EvidenceLoad } from "./accepted-evidence";
 import { TaskListView } from "./task-list";
 import type { TaskListViewProps } from "./task-list";
@@ -36,6 +36,7 @@ const evidenceFor = (identity: CalculationContext = GRAPHIE_CALCULATION_IDENTITY
   identity, values: stored, results: calculateGraphieResults(identity, stored) as unknown as AcceptedEvidenceResponse["results"],
   lineage: { replacementOf: DRAFT, replacedBy: null, recoverySource: null, recoverySuccessorTaskId: null },
   insights: { status: "unavailable", reason: "no-approved-rules", registryVersion: "insight-registry-1", proposals: [] },
+  insightDecisions: [],
   ...overrides,
 });
 
@@ -215,14 +216,15 @@ test("W9 available with zero proposals shows « aucune observation »", () => {
   assert.ok(!markup.includes(UNAVAILABLE_TEXT.replace("’", "&#x27;")) && !decode(markup).includes(UNAVAILABLE_TEXT));
 });
 
-test("W10 available proposals are shown read-only with rule, approval and source labels; the conformity note appears once", () => {
+test("W10 available proposals are shown with rule, approval and source labels; Story 9.3 adds only the two decision buttons; the conformity note appears once", () => {
   const markup = view(availableWith([
     proposal("regle-a", "Observation A.", [{ kind: "field", key: "header.reportNumber" }]),
     proposal("regle-b", "Observation B.", [{ kind: "result", key: "voltageAccuracy" }]),
   ]));
   const section = decode(insightSection(markup));
   for (const expected of ["Observation A.", "Règle regle-a v1", "Règle regle-b v1", "Document synthétique 2026", "Exactitude de la tension"]) assert.ok(section.includes(expected), expected);
-  assert.ok(!insightSection(markup).includes("<button") && !insightSection(markup).includes("<input"));
+  assert.equal(insightSection(markup).split("<button").length - 1, 4, "two buttons per proposal");
+  assert.ok(!insightSection(markup).includes("<input"));
   assert.equal(decode(markup).split("la conformité finale de l'appareil est décidée par le Responsable").length - 1, 1);
 });
 
@@ -236,4 +238,71 @@ test("W12 the insight strings are French and the section has no English text", (
   for (const text of strings) assert.ok(text.trim() !== "");
   const text = decode(insightSection(view(ready())));
   assert.ok(!/\b(insights? unavailable|no approved|retain|discard|approve|reject)\b/i.test(text));
+});
+
+// Story 9.3 (W13–W16): retain/discard controls.
+const decisionOf = (proposalId: string, decision: "retained" | "discarded") => ({
+  proposalId, decision, decidedAt: "2026-10-08T09:00:00.000Z", decidedBy: { id: OTHER, displayName: "Responsable Test" },
+  registryVersion: "insight-registry-1", ruleId: "regle-a", ruleVersion: 1,
+});
+const proposalA = () => proposal("regle-a", "Observation A.", [{ kind: "field", key: "header.reportNumber" }]);
+const proposalB = () => proposal("regle-b", "Observation B.", [{ kind: "result", key: "voltageAccuracy" }]);
+const withDecisions = (decisions: ReturnType<typeof decisionOf>[]) =>
+  ready(evidenceFor(GRAPHIE_CALCULATION_IDENTITY, { insights: { status: "available", registryVersion: "insight-registry-1", proposals: [proposalA(), proposalB()] }, insightDecisions: decisions }));
+
+test("W13 available proposals render the two buttons, the state and the decider; unavailable and zero-proposal states render no control", () => {
+  const a = proposalA();
+  const markup = view(withDecisions([decisionOf(a.proposalId, "retained")]));
+  const section = insightSection(markup);
+  assert.equal(section.split("<button").length - 1, 4);
+  const text = decode(section);
+  for (const expected of ["Retenir", "Écarter", "Retenu", "Non décidé", "Décidé par Responsable Test le"]) assert.ok(text.includes(expected), expected);
+  assert.equal(section.split('aria-pressed="true"').length - 1, 1);
+  assert.ok(!insightSection(view(ready())).includes("<button"));
+  assert.ok(!insightSection(view(availableWith([]))).includes("<button"));
+});
+
+test("W14 « Aucun insight retenu » shows when nothing is retained and is not a warning", () => {
+  const a = proposalA();
+  for (const decisions of [[], [decisionOf(a.proposalId, "discarded")]]) {
+    const section = insightSection(view(withDecisions(decisions)));
+    assert.ok(decode(section).includes("Aucun insight retenu"));
+    assert.ok(!/role="alert"|error-state|field-error/.test(section));
+  }
+  assert.ok(!decode(insightSection(view(withDecisions([decisionOf(a.proposalId, "retained")])))).includes("Aucun insight retenu"));
+});
+
+test("W15 submitInsightDecision calls the handler once, parses the response, and reports a failure without throwing", async () => {
+  const a = proposalA();
+  const calls: Array<{ url: string; body: unknown }> = [];
+  const okFetch = (async (url: string | URL | Request, init?: RequestInit) => {
+    calls.push({ url: String(url), body: init?.body });
+    return new Response(JSON.stringify({ proposalId: a.proposalId, decision: "retained", decidedAt: "2026-10-08T09:00:00.000Z", decidedBy: { id: OTHER, displayName: "Responsable Test" } }), { status: 200 });
+  }) as typeof fetch;
+  const result = await submitInsightDecision(TASK, a.proposalId, "retained", okFetch);
+  assert.equal(result.kind, "recorded");
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0]!.url, `/api/tasks/${TASK}/insight-decisions`);
+  assert.deepEqual(JSON.parse(String(calls[0]!.body)), { proposalId: a.proposalId, decision: "retained" });
+  for (const status of [403, 404, 422, 500, 503]) assert.deepEqual(await submitInsightDecision(TASK, a.proposalId, "retained", stubFetch(status, {})), { kind: "failed" });
+  assert.deepEqual(await submitInsightDecision(TASK, a.proposalId, "retained", (async () => { throw new Error("offline"); }) as typeof fetch), { kind: "failed" });
+  assert.deepEqual(await submitInsightDecision(TASK, a.proposalId, "retained", stubFetch(200, { unexpected: true })), { kind: "failed" });
+});
+
+test("W15 the section disables both buttons of the pending proposal and shows the French error with the state unchanged", () => {
+  const a = proposalA();
+  const insights = { status: "available" as const, registryVersion: "insight-registry-1", proposals: [a, proposalB()] };
+  const pendingMarkup = renderToStaticMarkup(<InsightProposalsSection insights={insights} decisions={[]} pendingProposalId={a.proposalId} onDecide={noop} />);
+  assert.equal(pendingMarkup.split("disabled").length - 1, 2);
+  const failedMarkup = renderToStaticMarkup(<InsightProposalsSection insights={insights} decisions={[decisionOf(a.proposalId, "discarded")]} failed onDecide={noop} />);
+  assert.ok(decode(failedMarkup).includes(fr.insights.decisionFailed));
+  assert.ok(decode(failedMarkup).includes("Écarté"));
+});
+
+test("W16 no approve, reject or conformity wording is added; the conformity note appears once; no English text", () => {
+  const a = proposalA();
+  const markup = view(withDecisions([decisionOf(a.proposalId, "retained")]));
+  const text = decode(insightSection(markup));
+  assert.ok(!/approuv|rejet|rejeter|conforme|non conforme|\b(retain|discard|approve|reject|undecided)\b/i.test(text));
+  assert.equal(decode(markup).split("la conformité finale de l'appareil est décidée par le Responsable").length - 1, 1);
 });
