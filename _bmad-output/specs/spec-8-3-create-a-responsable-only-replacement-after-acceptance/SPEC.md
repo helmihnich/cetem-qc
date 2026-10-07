@@ -1,7 +1,7 @@
 ---
 id: SPEC-8-3-create-a-responsable-only-replacement-after-acceptance
 story: 8.3
-status: in-progress
+status: done
 approved: 2026-10-05
 baseline_commit: b95b1b5
 companions:
