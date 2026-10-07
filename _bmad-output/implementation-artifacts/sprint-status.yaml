@@ -29,7 +29,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 # - Retrospective appends its action items to action_items; the status view surfaces open ones
 generated: 09-26-2026 18:00
-last_updated: 10-07-2026 13:00
+last_updated: 10-08-2026 12:00
 project: cetem-qc
 project_key: NOKEY
 tracking_system: file-system
@@ -93,12 +93,12 @@ development_status:
   8-4-handle-unfinished-tasks-after-employee-deactivation: done
   epic-8-retrospective: done
 
-  epic-9: in-progress
+  epic-9: done
   9-1-review-accepted-audit-evidence-read-only: done
   9-2-generate-deterministic-insight-proposals-from-approved-rules: done
   9-3-retain-or-discard-proposed-insights-with-provenance: done
   9-4-add-a-manual-insight: done
-  epic-9-retrospective: optional
+  epic-9-retrospective: done
 
   epic-10: backlog
   10-1-request-an-ai-assisted-summary-draft: backlog
@@ -382,3 +382,53 @@ action_items:
     owner: "Pipeline operator (Helmi)"
     status: open
     ref: "_bmad-output/implementation-artifacts/epic-8-retro-2026-10-07.md"
+  - id: "epic-9-retro-item-30-ask-cetem-via-the-product-owner-for-the"
+    epic: 9
+    action: "Ask CETEM via the Product Owner for the approved deterministic insight
+      rules (DEP-01R) so the empty registry can be populated and the 9-2/9-3 flow
+      exercised in production."
+    owner: "Product Owner (Helmi)"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-9-retro-2026-10-08.md"
+  - id: "epic-9-retro-item-31-decide-whether-a-responsable-may-edit-or"
+    epic: 9
+    action: "Decide whether a Responsable may edit or withdraw a manual insight before
+      summary confirmation and record it in the Epic 10 spec."
+    owner: "Product Owner (Helmi)"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-9-retro-2026-10-08.md"
+  - id: "epic-9-retro-item-32-in-epic-10-refuse-manual-insight-adds-an"
+    epic: 9
+    action: "In Epic 10 refuse manual-insight adds and insight decisions after summary
+      confirmation, with tests; feed summary only from collectRetainedInsights/selectRetainedInsights."
+    owner: "Epic 10 story authors"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-9-retro-2026-10-08.md"
+  - id: "epic-9-retro-item-33-extract-route-registration-out-of-apps-a"
+    epic: 9
+    action: "Extract route registration out of apps/api/src/index.ts (884 lines) before
+      Epic 10/11 add more routes."
+    owner: "API maintainers"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-9-retro-2026-10-08.md"
+  - id: "epic-9-retro-item-34-reconcile-status-approved-to-done-in-the"
+    epic: 9
+    action: "Reconcile status approved to done in the four Epic 9 SPEC.md files, or
+      declare approved the final spec status by convention."
+    owner: "Story authors"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-9-retro-2026-10-08.md"
+  - id: "epic-9-retro-item-35-run-bmad-review-over-the-epic-9-diff-9-3"
+    epic: 9
+    action: "Run bmad-review over the Epic 9 diff (9-3 server re-evaluation, 9-4 input
+      bounds) and log findings in deferred-work.md."
+    owner: "Reviewer"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-9-retro-2026-10-08.md"
+  - id: "epic-9-retro-item-36-at-the-first-catalogue-or-rule-version-b"
+    epic: 9
+    action: "At the first catalogue or rule version bump, handle unparseable stored
+      revisions, correction snapshots and the 9-1 evidence response in one change."
+    owner: "Calculation and mobile maintainers"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-9-retro-2026-10-08.md"
