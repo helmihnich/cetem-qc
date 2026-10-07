@@ -565,7 +565,7 @@ test("Story 8.4 hydrates a new successor draft with source and per-field provena
   runtime.__recoverySeed = {
     recoveryId: "00000000-0000-4000-8000-000000000061",
     source: { taskId: "00000000-0000-4000-8000-000000000062", auditId: "00000000-0000-4000-8000-000000000063", revision: 2,
-      employee: { id: "previous-employee", displayName: "EmployÃƒÂ© source" } },
+      employee: { id: "previous-employee", displayName: "Employé source" } },
     seed: { revision: 1, payload: { ...GRAPHIE_CALCULATION_IDENTITY, values: { [copiedField]: "R-49" } } },
     provenance: [{ destinationField: `values.${copiedField}`, sourceField: `values.${copiedField}`,
       sourceTaskId: "00000000-0000-4000-8000-000000000062", sourceAuditId: "00000000-0000-4000-8000-000000000063", sourceRevision: 2, origin: "copied-from-recovery-source" }],
@@ -577,8 +577,8 @@ test("Story 8.4 hydrates a new successor draft with source and per-field provena
   assert.equal(api.detailCalls.at(-1), firstTask.id);
   assert.ok(runtime.__draftRows!.has(`employee-1/${firstTask.id}`));
   assert.equal(findInput(tree, GRAPHIE_MOBILE_POV_CATALOGUE.sections[0]!.fields[0]!.labelFr)?.props.value, "R-49");
-  assert.ok(findText(tree, "Brouillon initial crÃ©Ã© Ã  partir du travail synchronisÃ© de EmployÃ© source, tÃ¢che 00000000-0000-4000-8000-000000000062, rÃ©vision 2."));
-  assert.ok(tree.root.findAll((node) => node.type === "Text" && node.children.join("").includes("Valeur initiale copiÃ©e du travail synchronisÃ© antÃ©rieur")).length > 0);
+  assert.ok(findText(tree, "Brouillon initial créé à partir du travail synchronisé de Employé source, tâche 00000000-0000-4000-8000-000000000062, révision 2. Vous créez votre propre brouillon sur cette tâche."));
+  assert.ok(tree.root.findAll((node) => node.type === "Text" && node.children.join("").includes("Valeur initiale copiée du travail synchronisé antérieur")).length > 0);
   const local = JSON.parse(runtime.__draftRows!.get(`employee-1/${firstTask.id}`)!) as { employeeId: string; recoveryProvenance: { sourceEmployeeId: string } };
   assert.equal(local.employeeId, "employee-1");
   assert.equal(local.recoveryProvenance.sourceEmployeeId, "previous-employee");

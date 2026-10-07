@@ -2,7 +2,7 @@
 title: 'Handle unfinished tasks after employee deactivation'
 type: 'feature'
 created: '2026-10-05'
-status: 'in-progress'
+status: 'done'
 route: 'dispatch'
 review_loop_iteration: 0
 baseline_commit: '77b6f870e720b4087ccc857e8964a6b4f790ede0'
@@ -56,11 +56,11 @@ context:
 ## Tasks & Acceptance
 
 **Execution:**
-- [ ] Add additive migration(s) for append-only assignment history, deactivated recovery lineage, copied-field provenance, restrictive FKs, uniqueness/concurrency constraints, and mutation/truncate guards.
-- [ ] Add transaction-safe task reassignment and new-work recovery commands; recheck active Responsable, team, source state, successor eligibility, and sync/deactivation races; expose own-team-only API routes and task state/history reads.
-- [ ] Extend OpenAPI, generated types, schemas, typed client, web proxy routes, and French W2 UI with state-specific actions, confirmation, stale/error handling, provenance, and lineage display.
-- [ ] Add API/PostgreSQL migration, route, authorization, race, rollback, immutability and 8.1–8.3 regression tests; add web render/proxy tests and mobile authorization/outbox regression where uncovered.
-- [ ] Run focused Story 8.4 tests, full API integration suite, web tests, affected mobile tests, workspace typecheck, contracts:check, boundaries:check, and git diff --check.
+- [x] Add additive migration(s) for append-only assignment history, deactivated recovery lineage, copied-field provenance, restrictive FKs, uniqueness/concurrency constraints, and mutation/truncate guards.
+- [x] Add transaction-safe task reassignment and new-work recovery commands; recheck active Responsable, team, source state, successor eligibility, and sync/deactivation races; expose own-team-only API routes and task state/history reads.
+- [x] Extend OpenAPI, generated types, schemas, typed client, web proxy routes, and French W2 UI with state-specific actions, confirmation, stale/error handling, provenance, and lineage display.
+- [x] Add API/PostgreSQL migration, route, authorization, race, rollback, immutability and 8.1–8.3 regression tests; add web render/proxy tests and mobile authorization/outbox regression where uncovered.
+- [x] Run focused Story 8.4 tests, full API integration suite, web tests, affected mobile tests, workspace typecheck, contracts:check, boundaries:check, and git diff --check.
 
 **Acceptance Criteria:**
 - Given employee deactivation, when it completes, then assignments/evidence/outcomes remain unchanged and no task is automatically transferred.

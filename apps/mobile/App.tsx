@@ -463,6 +463,24 @@ export default function App() {
     setDraftSaveState("saving");
   }
 
+  /** Reads the local draft; online with none, a server recovery seed (Story 8.4) becomes this identity's own new draft. */
+  async function readOrSeedDraft(owner: NonNullable<typeof user>, taskId: string) {
+    const existing = await draftsRef.current.read(owner.id, taskId);
+    if (existing || !isOnlineRef.current) return existing;
+    const { recovery } = await runOnlyWhenOnlineAuthorized(
+      () => revalidateServerAuthorization(owner),
+      () => api.getEmployeeTaskRecoverySeed(taskId),
+    );
+    if (!recovery) return existing;
+    return draftsRef.current.createRecoveryDraft(owner.id, taskId, recovery.seed.payload, {
+      recoveryId: recovery.recoveryId, sourceTaskId: recovery.source.taskId, sourceAuditId: recovery.source.auditId,
+      sourceRevision: recovery.source.revision, sourceEmployeeId: recovery.source.employee.id,
+      sourceEmployeeName: recovery.source.employee.displayName,
+      fields: recovery.provenance.map((field) => ({ destinationField: field.destinationField, sourceField: field.sourceField,
+        sourceRevision: field.sourceRevision, origin: field.origin })),
+    });
+  }
+
   async function openLocalDraft(taskId: string) {
     if (!user) return;
     if (!isOnlineRef.current) {
@@ -544,23 +562,7 @@ export default function App() {
       }
       if (openRequestGenerationRef.current !== requestGeneration || activeIdentityRef.current !== employeeId) return;
       await readOutboxBeforeOpen(employeeId);
-      let draft = await draftsRef.current.read(user.id, taskId);
-      if (!draft && isOnline) {
-        const seedResponse = await runOnlyWhenOnlineAuthorized(
-          () => revalidateServerAuthorization(user),
-          () => api.getEmployeeTaskRecoverySeed(taskId),
-        );
-        if (seedResponse.recovery) {
-          const recovery = seedResponse.recovery;
-          draft = await draftsRef.current.createRecoveryDraft(employeeId, taskId, recovery.seed.payload, {
-            recoveryId: recovery.recoveryId, sourceTaskId: recovery.source.taskId, sourceAuditId: recovery.source.auditId,
-            sourceRevision: recovery.source.revision, sourceEmployeeId: recovery.source.employee.id,
-            sourceEmployeeName: recovery.source.employee.displayName,
-            fields: recovery.provenance.map((field) => ({ destinationField: field.destinationField, sourceField: field.sourceField,
-              sourceRevision: field.sourceRevision, origin: field.origin })),
-          });
-        }
-      }
+      const draft = await readOrSeedDraft(user, taskId);
       if (generation !== draftGenerationRef.current || openRequestGenerationRef.current !== requestGeneration || activeIdentityRef.current !== employeeId) return;
       setActiveDraft(draft ?? undefined);
       draftRevisionRef.current = draft?.revision ?? 0;
@@ -967,7 +969,7 @@ export default function App() {
       const generation = draftGenerationRef.current;
       try {
         await readOutboxBeforeOpen(employeeId);
-        const draft = await draftsRef.current.read(employeeId, id);
+        const draft = await readOrSeedDraft(user, id);
         if (generation === draftGenerationRef.current && openRequestGenerationRef.current === requestGeneration && activeIdentityRef.current === employeeId) {
           setActiveDraft(draft ?? undefined);
           draftRevisionRef.current = draft?.revision ?? 0;

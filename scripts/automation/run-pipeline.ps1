@@ -28,7 +28,7 @@ param(
   [string]$Model = '',             # '' = Claude Code default
   [int]$MaxTurns = 300,
   [int]$RateLimitWaitMinutes = 30, # used only when the limit message has no reset time
-  [int]$RateLimitMaxWaits = 400    # keeps waiting through session and weekly limits (Ctrl+C to stop)
+  [int]$RateLimitMaxWaits = 400,    # keeps waiting through session and weekly limits (Ctrl+C to stop)
   [switch]$SkipRegression
 )
 
