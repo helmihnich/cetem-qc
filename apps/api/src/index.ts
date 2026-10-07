@@ -1,7 +1,7 @@
 import express from "express";
 import type { Server } from "node:http";
 import type { Pool } from "pg";
-import { apiErrorSchema, authenticationRequestSchema, authenticationResponseSchema, createEmployeeRequestSchema, createTaskRequestSchema, employeeCredentialResponseSchema, employeeListResponseSchema, employeeTaskAuditVersionSchema, employeeTaskListQuerySchema, employeeTaskListResponseSchema, employeeTaskResponseSchema, healthQuerySchema, passwordReplacementRequestSchema, replacementTaskResponseSchema, sessionResponseSchema, syncOperationRequestSchema, taskAssigneeListResponseSchema, taskListQuerySchema, taskListResponseSchema, taskResponseSchema, updateEmployeeStatusRequestSchema, updateEmployeeStatusResponseSchema } from "@cetem-qc/schemas/api/v1";
+import { apiErrorSchema, authenticationRequestSchema, authenticationResponseSchema, createDeactivatedAssigneeRecoveryRequestSchema, createEmployeeRequestSchema, createTaskRequestSchema, deactivatedAssigneeRecoveryResponseSchema, employeeCredentialResponseSchema, employeeListResponseSchema, employeeTaskAuditVersionSchema, employeeTaskRecoverySeedResponseSchema, employeeTaskListQuerySchema, employeeTaskListResponseSchema, employeeTaskResponseSchema, healthQuerySchema, passwordReplacementRequestSchema, reassignUnstartedTaskRequestSchema, reassignUnstartedTaskResponseSchema, replacementTaskResponseSchema, sessionResponseSchema, syncOperationRequestSchema, taskAssigneeListResponseSchema, taskListQuerySchema, taskListResponseSchema, taskResponseSchema, updateEmployeeStatusRequestSchema, updateEmployeeStatusResponseSchema } from "@cetem-qc/schemas/api/v1";
 import { getHealth } from "./modules/health/health-query.js";
 import {
   authenticateWithPassword,
@@ -11,11 +11,13 @@ import {
 import { createSession, findActiveSession, hasLiveDeactivatedSession, revokeSession } from "./modules/identity-auth/sessions.js";
 import { listOwnTeamEmployees } from "./modules/team-access/queries/list-own-team-employees.js";
 import { createOwnTeamEmployee, DuplicateEmployeeEmailError, regenerateOwnTeamEmployeeCredential, resetOwnTeamEmployeePassword, updateOwnTeamEmployeeStatus } from "./modules/team-access/employee-credentials.js";
-import { createAssignedTask, listAssignedEmployeeTasks, listEligibleTaskAssignees, listOwnTeamTasks, TaskAssigneeUnavailableError } from "./modules/tasks/tasks.js";
+import { createAssignedTask, listAssignedEmployeeTasks, listEligibleTaskAssignees, listOwnTeamTasks, listTaskAssignmentHistory, reassignUnstartedDeactivatedTask, TaskAssigneeUnavailableError } from "./modules/tasks/tasks.js";
 import { getAssignedEmployeeTask } from "./modules/tasks/queries/assigned-employee-task.js";
 import { getCurrentAuditVersion } from "./modules/audits/queries/current-audit-version.js";
+import { getDeactivatedAssigneeRecoverySeed } from "./modules/audits/queries/deactivated-assignee-recovery-seed.js";
 import { readTaskAcceptanceAndLineage } from "./modules/audits/queries/task-audit-lineage.js";
 import { createReplacementControl } from "./modules/audits/commands/create-replacement-control.js";
+import { createDeactivatedAssigneeRecovery } from "./modules/audits/commands/create-deactivated-assignee-recovery.js";
 import { processSyncOperation } from "./modules/sync/commands/process-sync-operation.js";
 import type { SyncOperationKind } from "./modules/sync/commands/process-sync-operation.js";
 
@@ -219,8 +221,13 @@ export function createApp(pool?: Pool) {
       const tasks = await listOwnTeamTasks(getPool(), session.id);
       // The accepted state and the replacement lineage are derived by `audits`, never stored on the task.
       const lineage = await readTaskAcceptanceAndLineage(getPool(), tasks.map((task) => task.id));
+      const assignmentHistory = await listTaskAssignmentHistory(getPool(), session.id, tasks.map((task) => task.id));
       response.status(200).json(taskListResponseSchema.parse({
-        tasks: tasks.map((task) => ({ ...task, ...lineage.get(task.id)! })),
+        tasks: tasks.map((task) => ({
+          ...task, ...lineage.get(task.id)!,
+          recoveryState: lineage.get(task.id)!.recoveryState,
+          assignmentHistory: assignmentHistory.get(task.id) ?? [],
+        })),
       }));
     } catch {
       response.status(500).json(apiErrorSchema.parse({ error: { code: "INTERNAL_ERROR", message: "La liste des tâches n'a pas pu être chargée." } }));
@@ -299,6 +306,31 @@ export function createApp(pool?: Pool) {
     }
   });
 
+  v1.get("/employee/tasks/:taskId/recovery-seed", async (request, response) => {
+    response.set("Cache-Control", "no-store");
+    const session = response.locals.session as NonNullable<Awaited<ReturnType<typeof findActiveSession>>>;
+    if (session.role !== "employe") {
+      response.status(403).json(apiErrorSchema.parse({ error: { code: "FORBIDDEN", message: "AccÃ¨s rÃ©servÃ© Ã  lâ€™EmployÃ©." } }));
+      return;
+    }
+    const taskId = String(request.params.taskId ?? "");
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(taskId)) {
+      response.status(404).json(apiErrorSchema.parse({ error: { code: "TASK_NOT_FOUND", message: "TÃ¢che introuvable." } }));
+      return;
+    }
+    try {
+      if (!await getAssignedEmployeeTask(getPool(), session.id, taskId)) {
+        response.status(404).json(apiErrorSchema.parse({ error: { code: "TASK_NOT_FOUND", message: "TÃ¢che introuvable." } }));
+        return;
+      }
+      const recovery = await getDeactivatedAssigneeRecoverySeed(getPool(), session.id, taskId.toLowerCase());
+      response.status(200).json(employeeTaskRecoverySeedResponseSchema.parse({ recovery }));
+    } catch {
+      // Payloads and source values are sensitive: never log query failures here.
+      response.status(500).json(apiErrorSchema.parse({ error: { code: "INTERNAL_ERROR", message: "Le brouillon de rÃ©cupÃ©ration nâ€™a pas pu Ãªtre chargÃ©." } }));
+    }
+  });
+
   const syncOperationRoute = (kind: SyncOperationKind) => async (request: express.Request, response: express.Response) => {
     const session = response.locals.session as NonNullable<Awaited<ReturnType<typeof findActiveSession>>>;
     if (session.role !== "employe") {
@@ -326,6 +358,8 @@ export function createApp(pool?: Pool) {
       const outcome = await processSyncOperation(getPool(), {
         kind, taskId: taskId.toLowerCase(), actor: { id: session.id, displayName: session.displayName }, request: parsed.data,
       });
+      if (outcome.type === "authorization-failed") { unauthorized(response); return; }
+      if (outcome.type === "task-not-assigned") { taskNotFound(); return; }
       if (outcome.type === "key-reused") {
         response.status(422).json(apiErrorSchema.parse({ error: { code: "IDEMPOTENCY_KEY_REUSED", message: "Cette clé d’opération a déjà été utilisée pour une autre requête." } }));
         return;
@@ -402,6 +436,84 @@ export function createApp(pool?: Pool) {
     } catch {
       // Never log the error: it may carry request values.
       response.status(500).json(apiErrorSchema.parse({ error: { code: "INTERNAL_ERROR", message: "Le contrôle de remplacement n’a pas pu être créé." } }));
+    }
+  });
+
+  v1.post("/tasks/:taskId/deactivated-assignee-reassignment", async (request, response) => {
+    response.set("Cache-Control", "no-store");
+    const session = response.locals.session as NonNullable<Awaited<ReturnType<typeof findActiveSession>>>;
+    if (session.role !== "responsable") {
+      response.status(403).json(apiErrorSchema.parse({ error: { code: "FORBIDDEN", message: "Action rÃ©servÃ©e au Responsable de lâ€™Ã©quipe." } }));
+      return;
+    }
+    const taskId = String(request.params.taskId ?? "");
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(taskId)) {
+      response.status(404).json(apiErrorSchema.parse({ error: { code: "TASK_NOT_FOUND", message: "TÃ¢che introuvable." } }));
+      return;
+    }
+    const parsed = reassignUnstartedTaskRequestSchema.safeParse(request.body);
+    if (!parsed.success) {
+      response.status(400).json(apiErrorSchema.parse({ error: { code: "VALIDATION_ERROR", message: "Les informations de rÃ©affectation sont invalides." } }));
+      return;
+    }
+    try {
+      const outcome = await reassignUnstartedDeactivatedTask(getPool(), {
+        responsableId: session.id, taskId: taskId.toLowerCase(), employeeId: parsed.data.successorId,
+        expectedAssignmentVersion: parsed.data.expectedAssignmentVersion,
+      });
+      if (outcome.type === "reassigned") {
+        response.status(200).json(reassignUnstartedTaskResponseSchema.parse({ taskId: outcome.taskId, assigneeId: outcome.employeeId, assignmentVersion: outcome.assignmentVersion }));
+      } else if (outcome.type === "not-found") {
+        response.status(404).json(apiErrorSchema.parse({ error: { code: "TASK_NOT_FOUND", message: "TÃ¢che introuvable." } }));
+      } else if (outcome.type === "assignee-unavailable") {
+        response.status(422).json(apiErrorSchema.parse({ error: { code: "TASK_ASSIGNEE_UNAVAILABLE", message: "Cet EmployÃ© nâ€™est pas actif ou ne fait pas partie de votre Ã©quipe." } }));
+      } else if (outcome.type === "responsable-inactive") {
+        unauthorized(response);
+      } else {
+        response.status(409).json(apiErrorSchema.parse({ error: { code: "TASK_RECOVERY_STATE_CHANGED", message: "Lâ€™Ã©tat de la tÃ¢che a changÃ©. Actualisez la liste." } }));
+      }
+    } catch {
+      response.status(500).json(apiErrorSchema.parse({ error: { code: "INTERNAL_ERROR", message: "La rÃ©affectation nâ€™a pas pu Ãªtre effectuÃ©e." } }));
+    }
+  });
+
+  v1.post("/tasks/:taskId/deactivated-assignee-recovery", async (request, response) => {
+    response.set("Cache-Control", "no-store");
+    const session = response.locals.session as NonNullable<Awaited<ReturnType<typeof findActiveSession>>>;
+    if (session.role !== "responsable") {
+      response.status(403).json(apiErrorSchema.parse({ error: { code: "FORBIDDEN", message: "Action rÃ©servÃ©e au Responsable de lâ€™Ã©quipe." } }));
+      return;
+    }
+    const taskId = String(request.params.taskId ?? "");
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(taskId)) {
+      response.status(404).json(apiErrorSchema.parse({ error: { code: "TASK_NOT_FOUND", message: "TÃ¢che introuvable." } }));
+      return;
+    }
+    const parsed = createDeactivatedAssigneeRecoveryRequestSchema.safeParse(request.body);
+    if (!parsed.success) {
+      response.status(400).json(apiErrorSchema.parse({ error: { code: "VALIDATION_ERROR", message: "Les informations de rÃ©cupÃ©ration sont invalides." } }));
+      return;
+    }
+    try {
+      const outcome = await createDeactivatedAssigneeRecovery(getPool(), {
+        responsableId: session.id, sourceTaskId: taskId.toLowerCase(), sourceRevision: parsed.data.sourceRevision,
+        expectedAssignmentVersion: parsed.data.expectedAssignmentVersion, successorId: parsed.data.successorId,
+      });
+      if (outcome.type === "created") {
+        response.status(201).json(deactivatedAssigneeRecoveryResponseSchema.parse({
+          task: outcome.task, recoveryId: outcome.recoveryId, recoveryKind: outcome.recoveryKind, source: outcome.source,
+        }));
+      } else if (outcome.type === "not-found") {
+        response.status(404).json(apiErrorSchema.parse({ error: { code: "TASK_NOT_FOUND", message: "TÃ¢che introuvable." } }));
+      } else if (outcome.type === "assignee-unavailable") {
+        response.status(422).json(apiErrorSchema.parse({ error: { code: "TASK_ASSIGNEE_UNAVAILABLE", message: "Cet EmployÃ© nâ€™est pas actif ou ne fait pas partie de votre Ã©quipe." } }));
+      } else if (outcome.type === "responsable-inactive") {
+        unauthorized(response);
+      } else {
+        response.status(409).json(apiErrorSchema.parse({ error: { code: "TASK_RECOVERY_STATE_CHANGED", message: "Le travail source a changÃ© ou ne peut plus Ãªtre rÃ©cupÃ©rÃ©." } }));
+      }
+    } catch {
+      response.status(500).json(apiErrorSchema.parse({ error: { code: "INTERNAL_ERROR", message: "Le nouveau travail de rÃ©cupÃ©ration nâ€™a pas pu Ãªtre crÃ©Ã©." } }));
     }
   });
 

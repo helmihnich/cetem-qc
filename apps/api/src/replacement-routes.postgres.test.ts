@@ -305,7 +305,7 @@ test("L24 migrating 0012 to 0013 keeps every row; the replacement links are inse
     await assert.rejects(pool.query("SELECT 1 FROM audit_replacement_links"), /does not exist/);
     const dump = () => pool.query(
       `SELECT (SELECT jsonb_agg(to_jsonb(row) ORDER BY row.id) FROM tasks row)::text AS tasks,
-              (SELECT jsonb_agg(to_jsonb(row) ORDER BY row.task_id) FROM task_assignments row)::text AS assignments,
+              (SELECT jsonb_agg(jsonb_build_object('task_id', row.task_id, 'team_id', row.team_id, 'employee_id', row.employee_id, 'assigned_at', row.assigned_at) ORDER BY row.task_id) FROM task_assignments row)::text AS assignments,
               (SELECT jsonb_agg(to_jsonb(row) ORDER BY row.id) FROM audits row)::text AS audits,
               (SELECT jsonb_agg(to_jsonb(row) ORDER BY row.audit_id, row.revision) FROM audit_revisions row)::text AS revisions,
               (SELECT jsonb_agg(to_jsonb(row) ORDER BY row.id) FROM audit_submissions row)::text AS submissions,

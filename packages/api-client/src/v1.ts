@@ -1,8 +1,8 @@
-import { apiErrorSchema, authenticationRequestSchema, authenticationResponseSchema, createEmployeeRequestSchema, createTaskRequestSchema, employeeCredentialResponseSchema, employeeListResponseSchema, employeeTaskAuditVersionSchema, employeeTaskListQuerySchema, employeeTaskListResponseSchema, employeeTaskResponseSchema, healthResponseSchema, passwordReplacementRequestSchema, replacementTaskResponseSchema, sessionResponseSchema, syncOperationAcceptedSchema, syncOperationConflictSchema, syncOperationRejectedSchema, syncOperationRequestSchema, taskAssigneeListResponseSchema, taskListResponseSchema, taskResponseSchema } from "@cetem-qc/schemas/api/v1";
-import type { AuthenticationRequest, AuthenticationResponse, CreateEmployeeRequest, CreateTaskRequest, EmployeeCredentialResponse, EmployeeListResponse, EmployeeTaskAuditVersion, EmployeeTaskListResponse, EmployeeTaskResponse, HealthResponse, PasswordReplacementRequest, ReplacementTaskResponse, SyncOperationAccepted, SyncOperationConflict, SyncOperationRejected, SyncOperationRequest, TaskListResponse, TaskResponse } from "@cetem-qc/schemas/api/v1";
+import { apiErrorSchema, authenticationRequestSchema, authenticationResponseSchema, createDeactivatedAssigneeRecoveryRequestSchema, createEmployeeRequestSchema, createTaskRequestSchema, deactivatedAssigneeRecoveryResponseSchema, employeeCredentialResponseSchema, employeeListResponseSchema, employeeTaskAuditVersionSchema, employeeTaskRecoverySeedResponseSchema, employeeTaskListQuerySchema, employeeTaskListResponseSchema, employeeTaskResponseSchema, healthResponseSchema, passwordReplacementRequestSchema, reassignUnstartedTaskRequestSchema, reassignUnstartedTaskResponseSchema, replacementTaskResponseSchema, sessionResponseSchema, syncOperationAcceptedSchema, syncOperationConflictSchema, syncOperationRejectedSchema, syncOperationRequestSchema, taskAssigneeListResponseSchema, taskListResponseSchema, taskResponseSchema } from "@cetem-qc/schemas/api/v1";
+import type { AuthenticationRequest, AuthenticationResponse, CreateDeactivatedAssigneeRecoveryRequest, CreateEmployeeRequest, CreateTaskRequest, DeactivatedAssigneeRecoveryResponse, EmployeeCredentialResponse, EmployeeListResponse, EmployeeTaskAuditVersion, EmployeeTaskRecoverySeedResponse, EmployeeTaskListResponse, EmployeeTaskResponse, HealthResponse, PasswordReplacementRequest, ReassignUnstartedTaskRequest, ReassignUnstartedTaskResponse, ReplacementTaskResponse, SyncOperationAccepted, SyncOperationConflict, SyncOperationRejected, SyncOperationRequest, TaskListResponse, TaskResponse } from "@cetem-qc/schemas/api/v1";
 
 export { replacementTaskResponseSchema, taskListResponseSchema };
-export type { CreateTaskRequest, EmployeeTaskAuditVersion, EmployeeTaskListResponse, EmployeeTaskResponse, ReplacementTaskResponse, SyncOperationAccepted, SyncOperationConflict, SyncOperationRejected, SyncOperationRequest, TaskListResponse };
+export type { CreateDeactivatedAssigneeRecoveryRequest, CreateTaskRequest, DeactivatedAssigneeRecoveryResponse, EmployeeTaskAuditVersion, EmployeeTaskRecoverySeedResponse, EmployeeTaskListResponse, EmployeeTaskResponse, ReassignUnstartedTaskRequest, ReassignUnstartedTaskResponse, ReplacementTaskResponse, SyncOperationAccepted, SyncOperationConflict, SyncOperationRejected, SyncOperationRequest, TaskListResponse };
 
 export type SyncOperationResponse =
   | { status: 200; body: SyncOperationAccepted }
@@ -118,6 +118,22 @@ export function createApiClient({ baseUrl, fetch: fetcher = fetch, sessionToken:
       }
       throw toRequestError(status, payload.data);
     },
+    async reassignUnstartedDeactivatedTask(taskId: string, input: ReassignUnstartedTaskRequest): Promise<ReassignUnstartedTaskResponse> {
+      const payload = await request(`/tasks/${encodeURIComponent(taskId)}/deactivated-assignee-reassignment`, {
+        method: "POST", headers: { accept: "application/json", "content-type": "application/json", ...sessionHeaders() },
+        body: JSON.stringify(reassignUnstartedTaskRequestSchema.parse(input)),
+      });
+      if (!payload.response.ok) throw toRequestError(payload.response.status, payload.data);
+      return reassignUnstartedTaskResponseSchema.parse(payload.data);
+    },
+    async createDeactivatedAssigneeRecovery(taskId: string, input: CreateDeactivatedAssigneeRecoveryRequest): Promise<DeactivatedAssigneeRecoveryResponse> {
+      const payload = await request(`/tasks/${encodeURIComponent(taskId)}/deactivated-assignee-recovery`, {
+        method: "POST", headers: { accept: "application/json", "content-type": "application/json", ...sessionHeaders() },
+        body: JSON.stringify(createDeactivatedAssigneeRecoveryRequestSchema.parse(input)),
+      });
+      if (!payload.response.ok) throw toRequestError(payload.response.status, payload.data);
+      return deactivatedAssigneeRecoveryResponseSchema.parse(payload.data);
+    },
     async regenerateEmployeeCredential(employeeId: string): Promise<EmployeeCredentialResponse> {
       const payload = await request(`/employees/${encodeURIComponent(employeeId)}/credential`, { method: "POST", headers: { accept: "application/json", ...sessionHeaders() } });
       if (!payload.response.ok) throw toRequestError(payload.response.status, payload.data);
@@ -154,6 +170,20 @@ export function createApiClient({ baseUrl, fetch: fetcher = fetch, sessionToken:
       }
       if (response.status === 200) {
         const parsed = employeeTaskAuditVersionSchema.safeParse(data);
+        if (parsed.success) return parsed.data;
+      }
+      throw toRequestError(response.status, data);
+    },
+    async getEmployeeTaskRecoverySeed(taskId: string, options: { signal?: AbortSignal } = {}): Promise<EmployeeTaskRecoverySeedResponse> {
+      const signal = options.signal;
+      const response = await fetcher(`${root}/employee/tasks/${encodeURIComponent(taskId)}/recovery-seed`, {
+        method: "GET", headers: { accept: "application/json", ...sessionHeaders() }, ...(signal ? { signal } : {}), cache: "no-store",
+      });
+      let data: unknown;
+      try { data = await response.json(); }
+      catch (error) { if (signal?.aborted) throw error; throw new ApiRequestError("The API response could not be read.", response.status, "UNEXPECTED_API_RESPONSE"); }
+      if (response.status === 200) {
+        const parsed = employeeTaskRecoverySeedResponseSchema.safeParse(data);
         if (parsed.success) return parsed.data;
       }
       throw toRequestError(response.status, data);

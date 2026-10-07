@@ -34,6 +34,19 @@ function testPool(failInsert = false, failStatusUpdate = false): Pool {
       return session && !session.revoked_at && account?.is_active ? { rows: [{ id: account.id, email: account.email, display_name: account.display_name, role: account.role, must_change_password: account.must_change_password, expires_at: session.expires_at }], rowCount: 1 } : { rows: [], rowCount: 0 };
     }
     if (statement === "BEGIN" || statement === "COMMIT" || statement === "ROLLBACK" || statement.includes("pg_advisory_xact_lock")) return { rows: [], rowCount: 0 };
+    if (statement.includes("FOR UPDATE OF employee") && statement.includes("employee.email")) {
+      const target = employees.find((employee) => employee.id === values?.[0]);
+      return target && target.team_id === "team-1" && target.role === "employe" && values?.[1] === "responsable-1"
+        ? { rows: [{ id: target.id, first_name: target.first_name, surname: target.surname, email: target.email, is_active: target.is_active }], rowCount: 1 }
+        : { rows: [], rowCount: 0 };
+    }
+    if (statement === "UPDATE identity_accounts SET is_active = $2 WHERE id = $1 RETURNING is_active") {
+      if (failStatusUpdate) throw new Error("database failure");
+      const target = employees.find((employee) => employee.id === values?.[0]);
+      if (!target) return { rows: [], rowCount: 0 };
+      target.is_active = Boolean(values?.[1]);
+      return { rows: [{ is_active: target.is_active }], rowCount: 1 };
+    }
     if (statement.startsWith("SELECT employee.id, employee.first_name, employee.surname") && !statement.includes("employee.email") && statement.includes("ORDER BY employee.surname")) {
       return { rows: employees.filter((employee) => employee.team_id === "team-1" && employee.role === "employe" && employee.is_active).map(({ id, first_name, surname }) => ({ id, first_name, surname })), rowCount: employees.filter((employee) => employee.team_id === "team-1" && employee.role === "employe" && employee.is_active).length };
     }

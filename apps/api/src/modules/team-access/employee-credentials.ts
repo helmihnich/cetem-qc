@@ -112,8 +112,10 @@ export async function updateOwnTeamEmployeeStatus(
   employeeId: string,
   active: boolean,
 ): Promise<EmployeeCredentialResult["employee"] | undefined> {
-  return withTransaction(pool, async (transaction) => {
-    const result = await transaction.query<CreatedEmployeeRow>(
+  // Keep simple query-only adapters useful for route contract tests; the real pg Pool path always
+  // supplies `connect`, and uses the row lock below to serialize deactivation with task sync/recovery.
+  if (typeof (pool as Pool & { connect?: unknown }).connect !== "function") {
+    const result = await pool.query<CreatedEmployeeRow>(
       `UPDATE identity_accounts employee SET is_active = $1
        FROM identity_teams team
        WHERE employee.id = $2 AND employee.team_id = team.id
@@ -122,6 +124,23 @@ export async function updateOwnTeamEmployeeStatus(
       [active, employeeId, responsableAccountId],
     );
     const row = result.rows[0];
+    return row && { id: row.id, firstName: row.first_name, surname: row.surname, email: row.email, active: row.is_active };
+  }
+  return withTransaction(pool, async (transaction) => {
+    const target = await transaction.query<CreatedEmployeeRow>(
+      `SELECT employee.id, employee.first_name, employee.surname, employee.email, employee.is_active
+       FROM identity_accounts employee JOIN identity_teams team ON employee.team_id = team.id
+       WHERE employee.id = $1 AND team.responsable_account_id = $2 AND employee.role = 'employe'
+       FOR UPDATE OF employee`,
+      [employeeId, responsableAccountId],
+    );
+    const row = target.rows[0];
+    if (!row) return undefined;
+    const updated = await transaction.query<{ is_active: boolean }>(
+      "UPDATE identity_accounts SET is_active = $2 WHERE id = $1 RETURNING is_active",
+      [employeeId, active],
+    );
+    row.is_active = updated.rows[0]!.is_active;
     return row && { id: row.id, firstName: row.first_name, surname: row.surname, email: row.email, active: row.is_active };
   });
 }

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { GRAPHIE_CALCULATION_IDENTITY } from "@cetem-qc/domain";
 import { createAuthorizedDrafts } from "./authorized-drafts.js";
 import { createDraftRepository, DraftListCorruptionError, LocalDraftPayloadCompatibilityError, type DraftDatabase, type LocalDraft } from "./model.js";
 import { initializeDraftDatabase } from "./sqlite-draft-schema.js";
@@ -104,6 +105,31 @@ test("preserves Story 5.3 opaque content and persists versioned form payloads wi
   const revised = await drafts.save("employee-a", "task-a", form, legacy.revision);
   assert.equal(revised.revision, legacy.revision + 1);
   assert.deepEqual((await f.repository().read("employee-a", "task-a"))?.payload, form);
+});
+
+test("recovery seed creates an independently scoped draft once and retains field provenance after edits", async () => {
+  const f = fixture();
+  const drafts = f.repository();
+  const payload = { ...GRAPHIE_CALCULATION_IDENTITY, values: { "voltage.accuracy.row1.kvMeasured": "49.2" } };
+  const recoveryProvenance = {
+    recoveryId: "recovery-id", sourceTaskId: "source-task", sourceAuditId: "source-audit", sourceRevision: 3,
+    sourceEmployeeId: "previous-employee", sourceEmployeeName: "EmployÃ© prÃ©cÃ©dent",
+    fields: [{ destinationField: "values.voltage.accuracy.row1.kvMeasured", sourceField: "values.voltage.accuracy.row1.kvMeasured", sourceRevision: 3, origin: "copied-from-recovery-source" as const }],
+  };
+  const hydrated = await drafts.createRecoveryDraft("successor-employee", "recovery-task", payload, recoveryProvenance);
+  assert.equal(hydrated.employeeId, "successor-employee");
+  assert.equal(hydrated.revision, 1);
+  assert.deepEqual(hydrated.recoveryProvenance, recoveryProvenance);
+  assert.equal(f.records.has("previous-employee/recovery-task"), false, "the source owner's local scope is not copied");
+
+  const saved = await drafts.save("successor-employee", "recovery-task", { ...payload, values: { ...payload.values, "voltage.accuracy.row1.kvMeasured": "50.1" } }, hydrated.revision);
+  assert.equal(saved.payload.values["voltage.accuracy.row1.kvMeasured"], "50.1");
+  assert.deepEqual(saved.recoveryProvenance, recoveryProvenance, "editing does not erase the historical source mapping");
+
+  const preexisting = await drafts.save("successor-employee", "existing-task", "successor's existing draft");
+  const winner = await drafts.createRecoveryDraft("successor-employee", "existing-task", payload, recoveryProvenance);
+  assert.equal(winner.id, preexisting.id);
+  assert.deepEqual(winner.payload, { content: "successor's existing draft" }, "seed hydration never silently overwrites an existing draft");
 });
 
 test("unsupported calculation tuple cannot hydrate or rewrite retained draft bytes", async () => {

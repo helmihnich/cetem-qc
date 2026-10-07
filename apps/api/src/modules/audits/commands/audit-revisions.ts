@@ -65,7 +65,8 @@ export async function lockAndReadTaskAudit(transaction: Transaction, taskId: str
             account.display_name AS updated_by_name
      FROM audits audit
      JOIN identity_accounts account ON account.id = audit.updated_by
-     WHERE audit.task_id = $1`,
+     WHERE audit.task_id = $1
+     FOR UPDATE OF audit`,
     [taskId],
   );
   const row = result.rows[0];

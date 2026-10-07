@@ -22,6 +22,10 @@ type TaskListResponseContract = apiV1Operations["listOwnTeamTasks"]["responses"]
 type CreateTaskRequestContract = apiV1Operations["createAssignedTask"]["requestBody"]["content"]["application/json"];
 type TaskResponseContract = apiV1Operations["createAssignedTask"]["responses"][201]["content"]["application/json"];
 type ReplacementTaskResponseContract = apiV1Operations["createReplacementControl"]["responses"][201]["content"]["application/json"];
+type ReassignUnstartedTaskRequestContract = apiV1Operations["reassignUnstartedDeactivatedTask"]["requestBody"]["content"]["application/json"];
+type ReassignUnstartedTaskResponseContract = apiV1Operations["reassignUnstartedDeactivatedTask"]["responses"][200]["content"]["application/json"];
+type CreateDeactivatedAssigneeRecoveryRequestContract = apiV1Operations["createDeactivatedAssigneeRecovery"]["requestBody"]["content"]["application/json"];
+type DeactivatedAssigneeRecoveryResponseContract = apiV1Operations["createDeactivatedAssigneeRecovery"]["responses"][201]["content"]["application/json"];
 type EmployeeTaskListResponseContract = apiV1Operations["listAssignedEmployeeTasks"]["responses"][200]["content"]["application/json"];
 type EmployeeTaskResponseContract = apiV1Operations["getAssignedEmployeeTask"]["responses"][200]["content"]["application/json"];
 
@@ -80,6 +84,12 @@ export const taskAssigneeListResponseSchema: z.ZodType<TaskAssigneeListResponseC
 export const taskListQuerySchema = z.object({}).strict();
 const taskListItemSchema = z.object({
   id: z.string().uuid(), type: z.literal("graphie_mobile"), establishment: z.string(), assignee: z.string(),
+  assigneeActive: z.boolean(), assignmentVersion: z.number().int().positive(),
+  assignmentHistory: z.array(z.object({ previousEmployee: z.string().nullable(), newEmployee: z.string(), actor: z.string(), reason: z.string(), createdAt: z.string().datetime() }).strict()),
+  recoveryState: z.enum(["unstarted", "synchronized-draft", "correction-draft", "resolution-required", "accepted", "recovered"]).nullable(),
+  recoveryRevision: z.number().int().positive().nullable(),
+  recoverySource: z.object({ taskId: z.string().uuid(), auditId: z.string().uuid(), revision: z.number().int().positive() }).strict().nullable(),
+  recoverySuccessorTaskId: z.string().uuid().nullable(),
   state: z.enum(["draft", "submitted"]), lastUpdatedAt: z.string().datetime(),
   replacementOf: z.string().uuid().nullable(), replacedBy: z.string().uuid().nullable(),
 }).strict();
@@ -97,6 +107,20 @@ export const taskResponseSchema: z.ZodType<TaskResponseContract> = z.object({ ta
 export const replacementTaskResponseSchema: z.ZodType<ReplacementTaskResponseContract> = z.object({
   task: taskSchema,
   replacementOf: z.object({ taskId: z.string().uuid(), auditId: z.string().uuid() }).strict(),
+}).strict();
+export const reassignUnstartedTaskRequestSchema: z.ZodType<ReassignUnstartedTaskRequestContract> = z.object({
+  successorId: z.string().uuid(), expectedAssignmentVersion: z.number().int().positive(),
+}).strict();
+export const reassignUnstartedTaskResponseSchema: z.ZodType<ReassignUnstartedTaskResponseContract> = z.object({
+  taskId: z.string().uuid(), assigneeId: z.string().uuid(), assignmentVersion: z.number().int().positive(),
+}).strict();
+export const createDeactivatedAssigneeRecoveryRequestSchema: z.ZodType<CreateDeactivatedAssigneeRecoveryRequestContract> = z.object({
+  successorId: z.string().uuid(), expectedAssignmentVersion: z.number().int().positive(), sourceRevision: z.number().int().positive(),
+}).strict();
+export const deactivatedAssigneeRecoveryResponseSchema: z.ZodType<DeactivatedAssigneeRecoveryResponseContract> = z.object({
+  task: taskSchema,
+  recoveryId: z.string().uuid(), recoveryKind: z.enum(["synchronized-draft", "correction-draft"]),
+  source: z.object({ taskId: z.string().uuid(), auditId: z.string().uuid(), revision: z.number().int().positive() }).strict(),
 }).strict();
 const employeeTaskSchema = z.object({
   id: z.string().uuid(), type: z.literal("graphie_mobile"), establishment: z.string(), service: z.string(),
@@ -156,12 +180,21 @@ export const employeeTaskAuditVersionSchema: z.ZodType<EmployeeTaskAuditVersionC
   lastChangedAt: z.string().datetime({ offset: true }).nullable(), lastChangedBy: syncActorSchema.nullable(),
   payload: graphieDraftPayloadSchema.nullable(),
 }).strict();
+export const employeeTaskRecoverySeedSchema = z.object({
+  recoveryId: z.string().uuid(),
+  source: z.object({ taskId: z.string().uuid(), auditId: z.string().uuid(), revision: z.number().int().positive(), employee: syncActorSchema }).strict(),
+  seed: z.object({ revision: z.number().int().positive(), payload: graphieDraftPayloadSchema }).strict(),
+  provenance: z.array(z.object({ destinationField: z.string(), sourceField: z.string(), sourceTaskId: z.string().uuid(), sourceAuditId: z.string().uuid(), sourceRevision: z.number().int().positive(), origin: z.literal("copied-from-recovery-source") }).strict()),
+}).strict();
+export const employeeTaskRecoverySeedResponseSchema = z.object({ recovery: employeeTaskRecoverySeedSchema.nullable() }).strict();
 export type GraphieDraftPayload = z.infer<typeof graphieDraftPayloadSchema>;
 export type SyncOperationRequest = z.infer<typeof syncOperationRequestSchema>;
 export type SyncOperationAccepted = z.infer<typeof syncOperationAcceptedSchema>;
 export type SyncOperationConflict = z.infer<typeof syncOperationConflictSchema>;
 export type SyncOperationRejected = z.infer<typeof syncOperationRejectedSchema>;
 export type EmployeeTaskAuditVersion = z.infer<typeof employeeTaskAuditVersionSchema>;
+export type EmployeeTaskRecoverySeed = z.infer<typeof employeeTaskRecoverySeedSchema>;
+export type EmployeeTaskRecoverySeedResponse = z.infer<typeof employeeTaskRecoverySeedResponseSchema>;
 export type HealthQuery = z.infer<typeof healthQuerySchema>;
 export type HealthResponse = z.infer<typeof healthResponseSchema>;
 export type ApiError = z.infer<typeof apiErrorSchema>;
@@ -179,6 +212,10 @@ export type TaskListResponse = z.infer<typeof taskListResponseSchema>;
 export type CreateTaskRequest = z.infer<typeof createTaskRequestSchema>;
 export type TaskResponse = z.infer<typeof taskResponseSchema>;
 export type ReplacementTaskResponse = z.infer<typeof replacementTaskResponseSchema>;
+export type ReassignUnstartedTaskRequest = z.infer<typeof reassignUnstartedTaskRequestSchema>;
+export type ReassignUnstartedTaskResponse = z.infer<typeof reassignUnstartedTaskResponseSchema>;
+export type CreateDeactivatedAssigneeRecoveryRequest = z.infer<typeof createDeactivatedAssigneeRecoveryRequestSchema>;
+export type DeactivatedAssigneeRecoveryResponse = z.infer<typeof deactivatedAssigneeRecoveryResponseSchema>;
 export type EmployeeTaskListResponse = z.infer<typeof employeeTaskListResponseSchema>;
 export type EmployeeTaskResponse = z.infer<typeof employeeTaskResponseSchema>;
 export type SessionTokenResponse = z.infer<typeof sessionTokenResponseSchema>;

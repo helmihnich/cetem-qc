@@ -13,6 +13,9 @@ export function createAuthorizedDrafts(repository: DraftRepository, authorize: D
     async save(employeeId: string, taskId: string, content: string | GraphieDraftPayload, expectedRevision?: number): Promise<LocalDraft> {
       return authorize(employeeId, () => repository.save(employeeId, taskId, content, expectedRevision));
     },
+    async createRecoveryDraft(employeeId: string, taskId: string, payload: GraphieDraftPayload, provenance: NonNullable<LocalDraft["recoveryProvenance"]>): Promise<LocalDraft> {
+      return authorize(employeeId, () => repository.createRecoveryDraft(employeeId, taskId, payload, provenance));
+    },
     async delete(employeeId: string, taskId: string, expectedRevision: number): Promise<void> {
       return authorize(employeeId, () => repository.delete(employeeId, taskId, expectedRevision));
     },

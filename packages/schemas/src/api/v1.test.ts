@@ -58,6 +58,13 @@ test("task list schema exposes only the authorized fields and rejects scope para
     type: "graphie_mobile",
     establishment: "Centre de contrôle",
     assignee: "Amel Ben Ali",
+    assigneeActive: true,
+    assignmentVersion: 1,
+    assignmentHistory: [],
+    recoveryState: null,
+    recoveryRevision: null,
+    recoverySource: null,
+    recoverySuccessorTaskId: null,
     state: "draft",
     lastUpdatedAt: "2026-09-28T10:00:00.000Z",
     replacementOf: null,
@@ -72,7 +79,7 @@ test("task list schema exposes only the authorized fields and rejects scope para
 
   const openapi = await readFile(path.resolve(contractPath), "utf8");
   assert.match(openapi, /listOwnTeamTasks[\s\S]*?TaskListResponse/);
-  assert.match(openapi, /TaskListItem:[\s\S]*?required: \[id, type, establishment, assignee, state, lastUpdatedAt, replacementOf, replacedBy\]/);
+  assert.match(openapi, /TaskListItem:[\s\S]*?required: \[id, type, establishment, assignee, assigneeActive, assignmentVersion, assignmentHistory, recoveryState, recoveryRevision, recoverySource, recoverySuccessorTaskId, state, lastUpdatedAt, replacementOf, replacedBy\]/);
 });
 
 test("K5 the task list carries the accepted state and both lineage fields; the replacement 201 body is strict", async () => {
@@ -80,6 +87,8 @@ test("K5 the task list carries the accepted state and both lineage fields; the r
   const replacement = "00000000-0000-4000-8000-000000000011";
   const item: apiV1Components["schemas"]["TaskListItem"] = {
     id: original, type: "graphie_mobile", establishment: "Centre de contrôle", assignee: "Employé Test",
+    assigneeActive: false, assignmentVersion: 1, assignmentHistory: [], recoveryState: "accepted", recoveryRevision: 1,
+    recoverySource: null, recoverySuccessorTaskId: null,
     state: "submitted", lastUpdatedAt: "2026-09-28T10:00:00.000Z", replacementOf: null, replacedBy: replacement,
   };
   const replacementItem: apiV1Components["schemas"]["TaskListItem"] = { ...item, id: replacement, state: "draft", replacementOf: original, replacedBy: null };

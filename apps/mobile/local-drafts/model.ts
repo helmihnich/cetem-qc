@@ -11,6 +11,12 @@ export type LocalDraft = {
   payloadSchemaVersion: number;
   revision: number;
   payload: { content: string } | GraphieDraftPayload;
+  /** Immutable origin metadata for server-seeded successor drafts; retained when editable payload values change. */
+  recoveryProvenance?: {
+    recoveryId: string; sourceTaskId: string; sourceAuditId: string; sourceRevision: number;
+    sourceEmployeeId: string; sourceEmployeeName: string;
+    fields: Array<{ destinationField: string; sourceField: string; sourceRevision: number; origin: "copied-from-recovery-source" }>;
+  };
   createdAt: number;
   savedAt: number;
 };
@@ -250,6 +256,20 @@ export function parseLocalDraft(raw: string): LocalDraft {
     || (payload.legacyContent !== undefined && typeof payload.legacyContent !== "string"))) {
     throw new LocalDraftPayloadCompatibilityError();
   }
+  if (draft.recoveryProvenance !== undefined) {
+    const recovery = draft.recoveryProvenance as Record<string, unknown>;
+    if (!recovery || typeof recovery !== "object" || typeof recovery.recoveryId !== "string"
+      || typeof recovery.sourceTaskId !== "string" || typeof recovery.sourceAuditId !== "string"
+      || !Number.isSafeInteger(recovery.sourceRevision) || typeof recovery.sourceEmployeeId !== "string"
+      || typeof recovery.sourceEmployeeName !== "string" || !Array.isArray(recovery.fields)
+      || recovery.fields.some((field) => !field || typeof field !== "object"
+        || typeof (field as Record<string, unknown>).destinationField !== "string"
+        || typeof (field as Record<string, unknown>).sourceField !== "string"
+        || !Number.isSafeInteger((field as Record<string, unknown>).sourceRevision)
+        || (field as Record<string, unknown>).origin !== "copied-from-recovery-source")) {
+      throw new LocalDraftPayloadCompatibilityError();
+    }
+  }
   return draft as unknown as LocalDraft;
 }
 
@@ -257,6 +277,7 @@ export interface DraftRepository {
   read(employeeId: string, taskId: string): Promise<LocalDraft | null>;
   list(employeeId: string): Promise<LocalDraft[]>;
   save(employeeId: string, taskId: string, content: string | GraphieDraftPayload, expectedRevision?: number): Promise<LocalDraft>;
+  createRecoveryDraft(employeeId: string, taskId: string, payload: GraphieDraftPayload, recoveryProvenance: NonNullable<LocalDraft["recoveryProvenance"]>): Promise<LocalDraft>;
   delete(employeeId: string, taskId: string, expectedRevision: number): Promise<void>;
   /** Deletes the draft row for one employee and task without reading or parsing it (unreadable drafts only). */
   deleteUnreadable(employeeId: string, taskId: string): Promise<void>;
@@ -355,7 +376,8 @@ export function createDraftRepository(database: DraftDatabase, now: () => number
       id: previous?.id ?? createId(), employeeId, taskId,
       payloadSchemaVersion: LOCAL_DRAFT_SCHEMA_VERSION,
       revision: (previous?.revision ?? 0) + 1,
-      payload, createdAt: previous?.createdAt ?? savedAt, savedAt,
+      payload, ...(previous?.recoveryProvenance ? { recoveryProvenance: previous.recoveryProvenance } : {}),
+      createdAt: previous?.createdAt ?? savedAt, savedAt,
     };
   }
   const newOperation = (kind: OutboxKind, snapshot: LocalDraft): NewOutboxOperation => ({
@@ -391,6 +413,22 @@ export function createDraftRepository(database: DraftDatabase, now: () => number
         const record = nextRecord(employeeId, taskId, previous, payload);
         await database.save(record, previous?.revision, newOperation("sync-draft", record));
         return record;
+      });
+    },
+    async createRecoveryDraft(employeeId, taskId, payload, recoveryProvenance) {
+      return serialize(scope(employeeId, taskId), async () => {
+        const previous = await readForWrite(employeeId, taskId, undefined);
+        if (previous) return previous;
+        const savedAt = now();
+        const draft: LocalDraft = { id: createId(), employeeId, taskId, payloadSchemaVersion: LOCAL_DRAFT_SCHEMA_VERSION,
+          revision: 1, payload, recoveryProvenance, createdAt: savedAt, savedAt };
+        try { await database.save(draft, undefined); }
+        catch (error) {
+          const winner = await database.read(employeeId, taskId);
+          if (winner !== null) return parseLocalDraft(winner);
+          throw error;
+        }
+        return draft;
       });
     },
     async requestSubmission(employeeId, taskId, payload, expectedRevision) {

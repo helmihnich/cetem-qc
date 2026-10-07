@@ -509,6 +509,47 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
+  /employee/tasks/{taskId}/recovery-seed:
+    get:
+      operationId: getEmployeeTaskRecoverySeed
+      summary: Read an assigned recovery draft seed with source provenance
+      description: Returns a recovery seed only to the employee currently assigned to its successor task. Ordinary assigned tasks return recovery null. The source employee remains attributed and every copied field includes immutable source provenance.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: taskId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Recovery seed and copied-field provenance, or null for an ordinary task
+          headers:
+            Cache-Control: { schema: { type: string } }
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EmployeeTaskRecoverySeedResponse'
+        '401':
+          description: Session rejected
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiError' }
+        '403':
+          description: Employé role required
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiError' }
+        '404':
+          description: Task not found or not assigned to the authenticated employee
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiError' }
+        '500':
+          description: Internal error
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiError' }
   /employee/tasks/{taskId}/draft-syncs:
     post:
       operationId: syncEmployeeTaskDraft
@@ -855,6 +896,68 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiError'
+  /tasks/{taskId}/deactivated-assignee-reassignment:
+    post:
+      operationId: reassignUnstartedDeactivatedTask
+      summary: Reassign an unstarted task from a deactivated employee
+      description: Responsable only. The task must be in the authenticated own team, the old assignee inactive, the successor active in that team, and server state must show no audit or unresolved submission outcome. The assignment version is checked in the mutation transaction. A tablet may still hold unsynchronized work.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: taskId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReassignUnstartedTaskRequest'
+      responses:
+        '200':
+          description: Assignment changed and history recorded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReassignUnstartedTaskResponse'
+        '400': { description: Invalid request, content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+        '401': { description: Session rejected, content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+        '403': { description: Responsable role required, content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+        '404': { description: Task not found in own team, content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+        '409': { description: Task state changed, content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+        '422': { description: Successor is not an active same-team Employe, content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+  /tasks/{taskId}/deactivated-assignee-recovery:
+    post:
+      operationId: createDeactivatedAssigneeRecovery
+      summary: Create separate recovery work from a synchronized draft owned by a deactivated employee
+      description: Creates a new task, draft audit, immutable deactivated-assignee-recovery link, and per-field copied-value provenance. Source task/audit/revisions remain unchanged.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: taskId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateDeactivatedAssigneeRecoveryRequest'
+      responses:
+        '201':
+          description: New recovery task and source provenance created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeactivatedAssigneeRecoveryResponse'
+        '400': { description: Invalid request, content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+        '401': { description: Session rejected, content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+        '403': { description: Responsable role required, content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+        '404': { description: Task not found in own team, content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+        '409': { description: Source changed, is not recoverable, or has already been recovered, content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+        '422': { description: Successor is not an active same-team Employe, content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
 components:
   securitySchemes:
     bearerAuth:
@@ -1024,10 +1127,52 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/TaskListItem'
+    ReassignUnstartedTaskRequest:
+      type: object
+      additionalProperties: false
+      required: [successorId, expectedAssignmentVersion]
+      properties:
+        successorId: { type: string, format: uuid }
+        expectedAssignmentVersion: { type: integer, minimum: 1 }
+    ReassignUnstartedTaskResponse:
+      type: object
+      additionalProperties: false
+      required: [taskId, assigneeId, assignmentVersion]
+      properties:
+        taskId: { type: string, format: uuid }
+        assigneeId: { type: string, format: uuid }
+        assignmentVersion: { type: integer, minimum: 1 }
+    CreateDeactivatedAssigneeRecoveryRequest:
+      type: object
+      additionalProperties: false
+      required: [successorId, expectedAssignmentVersion, sourceRevision]
+      properties:
+        successorId: { type: string, format: uuid }
+        expectedAssignmentVersion: { type: integer, minimum: 1 }
+        sourceRevision: { type: integer, minimum: 1 }
+    DeactivatedAssigneeRecoveryResponse:
+      type: object
+      additionalProperties: false
+      required: [task, recoveryId, recoveryKind, source]
+      properties:
+        task:
+          $ref: '#/components/schemas/Task'
+        recoveryId: { type: string, format: uuid }
+        recoveryKind:
+          type: string
+          enum: [synchronized-draft, correction-draft]
+        source:
+          type: object
+          additionalProperties: false
+          required: [taskId, auditId, revision]
+          properties:
+            taskId: { type: string, format: uuid }
+            auditId: { type: string, format: uuid }
+            revision: { type: integer, minimum: 1 }
     TaskListItem:
       type: object
       additionalProperties: false
-      required: [id, type, establishment, assignee, state, lastUpdatedAt, replacementOf, replacedBy]
+      required: [id, type, establishment, assignee, assigneeActive, assignmentVersion, assignmentHistory, recoveryState, recoveryRevision, recoverySource, recoverySuccessorTaskId, state, lastUpdatedAt, replacementOf, replacedBy]
       properties:
         id: { type: string, format: uuid }
         type:
@@ -1035,6 +1180,39 @@ components:
           enum: [graphie_mobile]
         establishment: { type: string }
         assignee: { type: string }
+        assigneeActive: { type: boolean }
+        assignmentVersion: { type: integer, minimum: 1 }
+        assignmentHistory:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [previousEmployee, newEmployee, actor, reason, createdAt]
+            properties:
+              previousEmployee: { type: [string, 'null'] }
+              newEmployee: { type: string }
+              actor: { type: string }
+              reason: { type: string }
+              createdAt: { type: string, format: date-time }
+        recoveryState:
+          type: [string, 'null']
+          enum: [unstarted, synchronized-draft, correction-draft, resolution-required, accepted, recovered, null]
+        recoveryRevision:
+          type: [integer, 'null']
+          minimum: 1
+        recoverySource:
+          oneOf:
+            - type: object
+              additionalProperties: false
+              required: [taskId, auditId, revision]
+              properties:
+                taskId: { type: string, format: uuid }
+                auditId: { type: string, format: uuid }
+                revision: { type: integer, minimum: 1 }
+            - type: 'null'
+        recoverySuccessorTaskId:
+          type: [string, 'null']
+          format: uuid
         state:
           type: string
           enum: [draft, submitted]
@@ -1225,6 +1403,50 @@ components:
           oneOf:
             - $ref: '#/components/schemas/GraphieDraftPayload'
             - type: 'null'
+    EmployeeTaskRecoverySeedResponse:
+      type: object
+      additionalProperties: false
+      required: [recovery]
+      properties:
+        recovery:
+          oneOf:
+            - $ref: '#/components/schemas/EmployeeTaskRecoverySeed'
+            - type: 'null'
+    EmployeeTaskRecoverySeed:
+      type: object
+      additionalProperties: false
+      required: [recoveryId, source, seed, provenance]
+      properties:
+        recoveryId: { type: string, format: uuid }
+        source:
+          type: object
+          additionalProperties: false
+          required: [taskId, auditId, revision, employee]
+          properties:
+            taskId: { type: string, format: uuid }
+            auditId: { type: string, format: uuid }
+            revision: { type: integer, minimum: 1 }
+            employee: { $ref: '#/components/schemas/SyncActor' }
+        seed:
+          type: object
+          additionalProperties: false
+          required: [revision, payload]
+          properties:
+            revision: { type: integer, minimum: 1 }
+            payload: { $ref: '#/components/schemas/GraphieDraftPayload' }
+        provenance:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [destinationField, sourceField, sourceTaskId, sourceAuditId, sourceRevision, origin]
+            properties:
+              destinationField: { type: string }
+              sourceField: { type: string }
+              sourceTaskId: { type: string, format: uuid }
+              sourceAuditId: { type: string, format: uuid }
+              sourceRevision: { type: integer, minimum: 1 }
+              origin: { type: string, enum: [copied-from-recovery-source] }
     HealthResponse:
       type: object
       required: [status, version]

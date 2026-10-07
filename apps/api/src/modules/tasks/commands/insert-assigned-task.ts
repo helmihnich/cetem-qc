@@ -36,7 +36,12 @@ interface TaskRow extends QueryResultRow {
  * transaction), then inserts the draft task and its assignment on the caller's transaction.
  * Throws `TaskAssigneeUnavailableError` when the assignee is not eligible.
  */
-export async function insertAssignedTask(transaction: Transaction, responsableId: string, input: CreateTaskInput): Promise<AssignedTask> {
+export async function insertAssignedTask(
+  transaction: Transaction,
+  responsableId: string,
+  input: CreateTaskInput,
+  options: { assignmentReason?: "task-created" | "deactivated-assignee-recovery" } = {},
+): Promise<AssignedTask> {
   const eligible = await transaction.query<{ id: string; team_id: string } & QueryResultRow>(
     `SELECT employee.id, employee.team_id
      FROM identity_teams team
@@ -59,6 +64,18 @@ export async function insertAssignedTask(transaction: Transaction, responsableId
     "INSERT INTO task_assignments (task_id, team_id, employee_id) VALUES ($1, $2, $3)",
     [task.id, employee.team_id, employee.id],
   );
+  const historyTable = await transaction.query<{ exists: boolean }>(
+    "SELECT to_regclass('task_assignment_history') IS NOT NULL AS exists",
+  );
+  // The API runs against the latest schema in production. This guard also lets staged migration tests
+  // exercise task creation before 0014; its later baseline backfill records that assignment.
+  if (historyTable.rows[0]!.exists) {
+    await transaction.query(
+      `INSERT INTO task_assignment_history (task_id, team_id, previous_employee_id, new_employee_id, actor_id, reason, created_at)
+       VALUES ($1, $2, NULL, $3, $4, $5, $6)`,
+      [task.id, employee.team_id, employee.id, responsableId, options.assignmentReason ?? "task-created", task.created_at],
+    );
+  }
   return {
     id: task.id,
     establishment: task.establishment,

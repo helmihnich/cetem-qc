@@ -544,7 +544,23 @@ export default function App() {
       }
       if (openRequestGenerationRef.current !== requestGeneration || activeIdentityRef.current !== employeeId) return;
       await readOutboxBeforeOpen(employeeId);
-      const draft = await draftsRef.current.read(user.id, taskId);
+      let draft = await draftsRef.current.read(user.id, taskId);
+      if (!draft && isOnline) {
+        const seedResponse = await runOnlyWhenOnlineAuthorized(
+          () => revalidateServerAuthorization(user),
+          () => api.getEmployeeTaskRecoverySeed(taskId),
+        );
+        if (seedResponse.recovery) {
+          const recovery = seedResponse.recovery;
+          draft = await draftsRef.current.createRecoveryDraft(employeeId, taskId, recovery.seed.payload, {
+            recoveryId: recovery.recoveryId, sourceTaskId: recovery.source.taskId, sourceAuditId: recovery.source.auditId,
+            sourceRevision: recovery.source.revision, sourceEmployeeId: recovery.source.employee.id,
+            sourceEmployeeName: recovery.source.employee.displayName,
+            fields: recovery.provenance.map((field) => ({ destinationField: field.destinationField, sourceField: field.sourceField,
+              sourceRevision: field.sourceRevision, origin: field.origin })),
+          });
+        }
+      }
       if (generation !== draftGenerationRef.current || openRequestGenerationRef.current !== requestGeneration || activeIdentityRef.current !== employeeId) return;
       setActiveDraft(draft ?? undefined);
       draftRevisionRef.current = draft?.revision ?? 0;
@@ -1353,7 +1369,8 @@ export default function App() {
                     <View style={styles.sectionNavigation}>{GRAPHIE_MOBILE_POV_CATALOGUE.sections.map((section) => <Pressable key={section.id} accessibilityRole="button" accessibilityState={{ selected: section.id === activeSectionId }} onPress={() => { setActiveSectionId(section.id); if (draftSaveState === "saving") void saveDraft(); }} style={styles.sectionButton}><Text style={styles.muted}>{section.labelFr}</Text></Pressable>)}</View>
                     {draftHydration === "loading" ? <Text accessibilityRole="summary" style={styles.muted}>{fr.common.loading}</Text> : null}
                     {legacyContentMode ? <Field label={fr.employeeTasks.legacyDraftContent} value={draftContent} onChangeText={changeDraftContent} editable={formEditable} multiline /> : null}
-                    {GRAPHIE_MOBILE_POV_CATALOGUE.sections.filter((section) => section.id === activeSectionId).map((section) => <GraphieSectionForm key={section.id} section={section} layout={layout} values={formValues} results={calculationResults} onChange={changeFormField} editable={formEditable} issues={fieldIssues} />)}
+                    {activeDraft?.recoveryProvenance && <RecoveryAttribution provenance={activeDraft.recoveryProvenance} />}
+                    {GRAPHIE_MOBILE_POV_CATALOGUE.sections.filter((section) => section.id === activeSectionId).map((section) => <GraphieSectionForm key={section.id} section={section} layout={layout} values={formValues} results={calculationResults} onChange={changeFormField} editable={formEditable} issues={fieldIssues} copiedFields={new Set(activeDraft?.recoveryProvenance?.fields.map((field) => field.destinationField.replace(/^values\./, "")) ?? [])} />)}
                     <Text accessibilityRole={presentedSaveState === "failed" ? "alert" : "summary"} style={presentedSaveState === "failed" ? styles.error : styles.muted}>
                       {presentedSaveState === "failed" ? fr.employeeTasks.saveFailed : presentedSaveState === "saving" ? fr.employeeTasks.savingDraft : presentedSaveState === "saved" ? fr.employeeTasks.savedLocally : fr.workflow.draft}
                     </Text>
@@ -1386,7 +1403,8 @@ export default function App() {
                   {legacyContentMode ? <Field label={fr.employeeTasks.legacyDraftContent} value={draftContent} onChangeText={changeDraftContent} editable={formEditable} multiline /> : null}
                   <Text style={styles.heading}>{fr.employeeTasks.sectionNavigation}</Text>
                   <View style={styles.sectionNavigation}>{GRAPHIE_MOBILE_POV_CATALOGUE.sections.map((section) => <Pressable key={section.id} accessibilityRole="button" accessibilityState={{ selected: section.id === activeSectionId }} onPress={() => { setActiveSectionId(section.id); if (draftSaveState === "saving") void saveDraft(); }} style={styles.sectionButton}><Text style={styles.muted}>{section.labelFr}</Text></Pressable>)}</View>
-                  {GRAPHIE_MOBILE_POV_CATALOGUE.sections.filter((section) => section.id === activeSectionId).map((section) => <GraphieSectionForm key={section.id} section={section} layout={layout} values={formValues} results={calculationResults} onChange={changeFormField} editable={formEditable} issues={fieldIssues} />)}
+                  {activeDraft?.recoveryProvenance && <RecoveryAttribution provenance={activeDraft.recoveryProvenance} />}
+                  {GRAPHIE_MOBILE_POV_CATALOGUE.sections.filter((section) => section.id === activeSectionId).map((section) => <GraphieSectionForm key={section.id} section={section} layout={layout} values={formValues} results={calculationResults} onChange={changeFormField} editable={formEditable} issues={fieldIssues} copiedFields={new Set(activeDraft?.recoveryProvenance?.fields.map((field) => field.destinationField.replace(/^values\./, "")) ?? [])} />)}
                   <Text accessibilityRole={presentedSaveState === "failed" ? "alert" : "summary"} style={presentedSaveState === "failed" ? styles.error : styles.muted}>
                     {presentedSaveState === "failed" ? fr.employeeTasks.saveFailed : presentedSaveState === "saving" ? fr.employeeTasks.savingDraft : fr.employeeTasks.savedLocally}
                   </Text>
@@ -1485,15 +1503,22 @@ function TaskSyncStatus(props: { state: TaskSyncState; running: boolean; onRetry
 
 const fieldLabel = (field: CatalogueField) => `${field.labelFr}${field.unit ? ` (${field.unit})` : ""}`;
 
-function CatalogueInput(props: { field: CatalogueField; value: string; onChange: (fieldId: string, value: string) => void; editable: boolean; rowLabelFr?: string; style?: StyleProp<ViewStyle>; issueFr?: string }) {
+function RecoveryAttribution({ provenance }: { provenance: NonNullable<LocalDraft["recoveryProvenance"]> }) {
+  return <View style={styles.recoveryAttribution}>
+    <Text accessibilityRole="summary" style={styles.muted}>{fr.employeeTasks.recoverySeedAttribution.replace("{source}", provenance.sourceEmployeeName).replace("{taskId}", provenance.sourceTaskId).replace("{revision}", String(provenance.sourceRevision))}</Text>
+    <Text style={styles.muted}>{fr.employeeTasks.recoveryCopiedFieldsRemainAttributed}</Text>
+  </View>;
+}
+
+function CatalogueInput(props: { field: CatalogueField; value: string; onChange: (fieldId: string, value: string) => void; editable: boolean; rowLabelFr?: string; style?: StyleProp<ViewStyle>; issueFr?: string; copied?: boolean }) {
   const { field } = props;
-  if (field.type === "choice") return <ChoiceField field={field} value={props.value} onSelect={(value) => props.onChange(field.id, value)} editable={props.editable} errorFr={props.issueFr} />;
+  if (field.type === "choice") return <ChoiceField field={field} value={props.value} onSelect={(value) => props.onChange(field.id, value)} editable={props.editable} errorFr={props.issueFr} copied={props.copied} />;
   const label = fieldLabel(field);
   const errorFr = [field.type === "number" && isInvalidGraphieReading(props.value) ? fr.graphieResults.invalidNumber : undefined, props.issueFr].filter(Boolean).join(" ");
   return <Field
     label={label}
     accessibilityLabel={props.rowLabelFr ? `${props.rowLabelFr} — ${label}` : label}
-    helpFr={field.helpFr}
+    helpFr={[field.helpFr, props.copied ? fr.employeeTasks.recoveryCopiedField : undefined].filter(Boolean).join(" ") || undefined}
     errorFr={errorFr || undefined}
     value={props.value}
     onChangeText={(value) => props.onChange(field.id, value)}
@@ -1505,7 +1530,7 @@ function CatalogueInput(props: { field: CatalogueField; value: string; onChange:
 }
 
 /** Renders one catalogue section in field order; table cells render as one labelled group per paper row. */
-function GraphieSectionForm(props: { section: CatalogueSection; layout: EmployeeTaskLayout; values: GraphieFormValues; results?: GraphieCalculationResults; onChange: (fieldId: string, value: string) => void; editable: boolean; issues: Readonly<Record<string, string>> }) {
+function GraphieSectionForm(props: { section: CatalogueSection; layout: EmployeeTaskLayout; values: GraphieFormValues; results?: GraphieCalculationResults; onChange: (fieldId: string, value: string) => void; editable: boolean; issues: Readonly<Record<string, string>>; copiedFields?: ReadonlySet<string> }) {
   const { section } = props;
   const tableByFieldId = new Map<string, CatalogueTable>();
   for (const table of section.tables ?? []) for (const id of table.fieldIds.flat()) tableByFieldId.set(id, table);
@@ -1519,10 +1544,10 @@ function GraphieSectionForm(props: { section: CatalogueSection; layout: Employee
     if (!resultsPlaced && field.type === "textarea") { items.push(...resultBlocks); resultsPlaced = true; }
     const table = tableByFieldId.get(field.id);
     if (!table) {
-      items.push(<CatalogueInput key={field.id} field={field} value={props.values[field.id] ?? ""} onChange={props.onChange} editable={props.editable} issueFr={props.issues[field.id]} />);
+      items.push(<CatalogueInput key={field.id} field={field} value={props.values[field.id] ?? ""} onChange={props.onChange} editable={props.editable} issueFr={props.issues[field.id]} copied={props.copiedFields?.has(field.id)} />);
     } else if (!renderedTables.has(table.id)) {
       renderedTables.add(table.id);
-      items.push(<GraphieTable key={`table:${table.id}`} table={table} fields={section.fields} layout={props.layout} values={props.values} onChange={props.onChange} editable={props.editable} issues={props.issues} />);
+      items.push(<GraphieTable key={`table:${table.id}`} table={table} fields={section.fields} layout={props.layout} values={props.values} onChange={props.onChange} editable={props.editable} issues={props.issues} copiedFields={props.copiedFields} />);
     }
   }
   if (!resultsPlaced) items.push(...resultBlocks);
@@ -1532,7 +1557,7 @@ function GraphieSectionForm(props: { section: CatalogueSection; layout: Employee
   </View>;
 }
 
-function GraphieTable(props: { table: CatalogueTable; fields: readonly CatalogueField[]; layout: EmployeeTaskLayout; values: GraphieFormValues; onChange: (fieldId: string, value: string) => void; editable: boolean; issues: Readonly<Record<string, string>> }) {
+function GraphieTable(props: { table: CatalogueTable; fields: readonly CatalogueField[]; layout: EmployeeTaskLayout; values: GraphieFormValues; onChange: (fieldId: string, value: string) => void; editable: boolean; issues: Readonly<Record<string, string>>; copiedFields?: ReadonlySet<string> }) {
   const { table } = props;
   const fieldById = new Map(props.fields.map((field) => [field.id, field]));
   const tablet = props.layout === "tablet";
@@ -1543,14 +1568,14 @@ function GraphieTable(props: { table: CatalogueTable; fields: readonly Catalogue
       return <View key={`${table.id}:${rowIndex}`} accessibilityLabel={rowLabel} style={[styles.tableRow, tablet && styles.tableRowTablet]}>
         <Text accessibilityRole="header" style={[styles.tableRowLabel, tablet && styles.tableRowLabelTablet]}>{rowLabel}</Text>
         <View style={tablet ? styles.tableCellsTablet : styles.tableCellsPhone}>
-          {row.map((id) => <CatalogueInput key={id} field={fieldById.get(id)!} rowLabelFr={rowLabel} value={props.values[id] ?? ""} onChange={props.onChange} editable={props.editable} style={tablet ? styles.tableCellTablet : undefined} issueFr={props.issues[id]} />)}
+          {row.map((id) => <CatalogueInput key={id} field={fieldById.get(id)!} rowLabelFr={rowLabel} value={props.values[id] ?? ""} onChange={props.onChange} editable={props.editable} style={tablet ? styles.tableCellTablet : undefined} issueFr={props.issues[id]} copied={props.copiedFields?.has(id)} />)}
         </View>
       </View>;
     })}
   </View>;
 }
 
-function ChoiceField(props: { field: CatalogueField; value: string; onSelect: (value: string) => void; editable?: boolean; errorFr?: string }) {
+function ChoiceField(props: { field: CatalogueField; value: string; onSelect: (value: string) => void; editable?: boolean; errorFr?: string; copied?: boolean }) {
   const label = fieldLabel(props.field);
   return <View style={styles.field}>
     <Text style={styles.label}>{label}</Text>
@@ -1562,6 +1587,7 @@ function ChoiceField(props: { field: CatalogueField; value: string; onSelect: (v
         </Pressable>;
       })}
     </View>
+    {props.copied ? <Text accessibilityRole="summary" style={styles.help}>{fr.employeeTasks.recoveryCopiedField}</Text> : null}
     {props.errorFr ? <Text style={styles.error}>{props.errorFr}</Text> : null}
   </View>;
 }
@@ -1576,6 +1602,7 @@ function Detail({ label, value }: { label: string; value: string }) {
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: "#f4f7f5" },
+  recoveryAttribution: { gap: 4, padding: 12, borderWidth: 1, borderColor: "#c7d5d0", borderRadius: 8, backgroundColor: "#eef4f1" },
   sectionNavigation: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   sectionButton: { minHeight: 48, justifyContent: "center", borderWidth: 1, borderColor: "#c7d5d0", borderRadius: 10, paddingHorizontal: 12 },
   container: { flexGrow: 1, justifyContent: "center", paddingHorizontal: 20, paddingVertical: 20 },

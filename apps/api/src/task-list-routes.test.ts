@@ -26,6 +26,7 @@ const ownTask = {
   establishment: "Centre de contrôle",
   assignee: "Amel Ben Ali",
   assignee_is_active: true,
+  assignment_version: "1",
   state: "draft",
   last_updated_at: new Date("2026-09-28T10:00:00.000Z"),
 };
@@ -52,10 +53,15 @@ function fakePool(): Pool {
         return { rows: values?.[0] === ownerId ? [ownTask, inactiveTask] : [], rowCount: values?.[0] === ownerId ? 2 : 0 };
       }
       if (sql.includes("FROM unnest($1::uuid[]) AS listed(id)")) {
-        return { rows: [{ id: ownTask.id, has_submitted_audit: false, replacement_of: null, replaced_by: null }, {
-          id: inactiveTask.id, has_submitted_audit: true, replacement_of: ownTask.id, replaced_by: null,
-        }], rowCount: 2 };
+        return { rows: [ownTask.id, inactiveTask.id].map((id) => ({
+          id, has_accepted_submission: id === inactiveTask.id, has_audit: id === inactiveTask.id,
+          replacement_of: id === inactiveTask.id ? ownTask.id : null, replaced_by: null,
+          open_conflict: false, open_rejection: false, correction_revision: false,
+          current_revision: id === inactiveTask.id ? 1 : null, recovered_by_task: null,
+          recovery_source_task: null, recovery_source_audit: null, recovery_source_revision: null,
+        })), rowCount: 2 };
       }
+      if (sql.includes("FROM task_assignment_history history")) return { rows: [], rowCount: 0 };
       return { rows: [], rowCount: 0 };
     },
   } as unknown as Pool;
@@ -89,6 +95,13 @@ test("GET /tasks returns the scoped fields with inactive assignee labels and den
       lastUpdatedAt: "2026-09-28T10:00:00.000Z",
       replacementOf: null,
       replacedBy: null,
+      assigneeActive: true,
+      assignmentVersion: 1,
+      assignmentHistory: [],
+      recoveryState: "unstarted",
+      recoverySource: null,
+      recoverySuccessorTaskId: null,
+      recoveryRevision: null,
     }, {
       id: inactiveTask.id,
       type: "graphie_mobile",
@@ -98,9 +111,15 @@ test("GET /tasks returns the scoped fields with inactive assignee labels and den
       lastUpdatedAt: "2026-09-28T10:00:00.000Z",
       replacementOf: ownTask.id,
       replacedBy: null,
+      assigneeActive: false,
+      assignmentVersion: 1,
+      assignmentHistory: [],
+      recoveryState: "accepted",
+      recoverySource: null,
+      recoverySuccessorTaskId: null,
+      recoveryRevision: 1,
     }] });
-    // Story 8.3 adds the two lineage fields (null without a replacement-control link).
-    for (const task of ownPayload.tasks) assert.deepEqual(Object.keys(task).sort(), ["assignee", "establishment", "id", "lastUpdatedAt", "replacedBy", "replacementOf", "state", "type"]);
+    for (const task of ownPayload.tasks) assert.deepEqual(Object.keys(task).sort(), ["assignee", "assigneeActive", "assignmentHistory", "assignmentVersion", "establishment", "id", "lastUpdatedAt", "recoveryRevision", "recoverySource", "recoveryState", "recoverySuccessorTaskId", "replacedBy", "replacementOf", "state", "type"]);
     assert.equal(taskQueryCount, 1);
 
     const unsupportedTeam = await getTasks(ownerToken, "/tasks?teamId=other-team");

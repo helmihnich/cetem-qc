@@ -56,6 +56,7 @@ test("PostgreSQL scopes the operational task list by assigned team and tracks th
       await migrate({ through: "0007_task_last_update" });
       const backfilled = await setup.query<{ created_at: Date; updated_at: Date }>("SELECT created_at, updated_at FROM tasks WHERE id = $1", [oldTask.id]);
       assert.equal(backfilled.rows[0]!.updated_at.toISOString(), oldTask.created_at.toISOString());
+      await migrate();
       setup.release();
       setupReleased = true;
       const scopedPool = pool;
@@ -67,7 +68,7 @@ test("PostgreSQL scopes the operational task list by assigned team and tracks th
       assert.equal(rows.length, 3);
       assert.deepEqual(rows.map((task) => task.establishment).sort(), ["Centre A", "Centre B", "Centre préexistant"]);
       assert.equal(JSON.stringify(rows).includes("Centre secret"), false);
-      assert.deepEqual(Object.keys(rows[0]!).sort(), ["assignee", "establishment", "id", "lastUpdatedAt", "state", "type"]);
+      assert.deepEqual(Object.keys(rows[0]!).sort(), ["assignee", "assigneeActive", "assignmentHistory", "assignmentVersion", "establishment", "id", "lastUpdatedAt", "state", "type"]);
       assert.ok(rows.every((task) => task.assignee === "Amel Ben Ali" && task.state === "draft"));
       assert.equal(rows.find((task) => task.establishment === "Centre préexistant")?.lastUpdatedAt, oldTask.created_at.toISOString());
 
@@ -77,10 +78,6 @@ test("PostgreSQL scopes the operational task list by assigned team and tracks th
       assert.ok(timestamps.rows[0]!.updated_at > timestamps.rows[0]!.created_at);
       const updatedList = await listOwnTeamTasks(scopedPool, owner);
       assert.equal(updatedList.find((task) => task.id === ownTask.id)?.lastUpdatedAt, timestamps.rows[0]!.updated_at.toISOString());
-
-      // Keep the 0007 backfill assertions above on the staged schema, then bring the current API
-      // through all migrations before exercising GET /tasks (Story 8.3 reads accepted audits/lineage).
-      await migrate();
 
       const ownerToken = await addSession(scopedPool, owner);
       const otherOwnerToken = await addSession(scopedPool, otherOwner);

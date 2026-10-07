@@ -21,6 +21,8 @@ const ASSIGNEE = "00000000-0000-4000-8000-000000000105";
 type Task = TaskListViewProps["tasks"][number];
 const task = (id: string, overrides: Partial<Task> = {}): Task => ({
   id, type: "graphie_mobile", establishment: `Centre ${id.slice(-3)}`, assignee: "Employé Test",
+  assigneeActive: true, assignmentVersion: 1, assignmentHistory: [], recoveryState: null, recoveryRevision: null,
+  recoverySource: null, recoverySuccessorTaskId: null,
   state: "draft", lastUpdatedAt: "2026-10-05T10:00:00.000Z", replacementOf: null, replacedBy: null, ...overrides,
 });
 const input = { establishment: "Centre Remplacement", service: "Radiologie", type: "graphie_mobile", assigneeId: ASSIGNEE } as const;
@@ -93,6 +95,35 @@ test("an inactive original assignee keeps accepted replacement action and histor
   assert.ok(replacedRow.includes("Amel Ben Ali \u2014 Inactif"));
   assert.ok(replacedRow.includes(`Remplac\u00e9 par l\u2019audit ${REPLACEMENT}`));
   assert.doesNotMatch(rowOf(html, ORIGINAL), /Cr\u00e9er un contr\u00f4le de remplacement/, "an already replaced task stays non-actionable");
+});
+
+test("Story 8.4 renders state-specific actions without overriding 8.1–8.3 owners", () => {
+  const unstarted = task(ORIGINAL, { assignee: "Employé Test — Inactif", assigneeActive: false, recoveryState: "unstarted" });
+  const synchronized = task(DRAFT, { assignee: "Employé Test — Inactif", assigneeActive: false, recoveryState: "synchronized-draft", recoveryRevision: 1 });
+  const correction = task(REPLACEMENT, { assignee: "Employé Test — Inactif", assigneeActive: false, recoveryState: "correction-draft", recoveryRevision: 2 });
+  const conflict = task(ASSIGNEE, { assignee: "Employé Test — Inactif", assigneeActive: false, recoveryState: "resolution-required" });
+  const accepted = task(ACCEPTED, { assignee: "Employé Test — Inactif", assigneeActive: false, state: "submitted", recoveryState: "accepted" });
+  const recoveredSource = task("00000000-0000-4000-8000-000000000106", {
+    assignee: "Employé Test — Inactif", assigneeActive: false, recoveryState: "recovered",
+    recoverySuccessorTaskId: REPLACEMENT, assignmentHistory: [{ previousEmployee: "Employé Test", newEmployee: "Successor Test", actor: "Responsable Test", reason: "deactivated-assignee-recovery", createdAt: "2026-10-05T10:00:00.000Z" }],
+  });
+  const successor = task("00000000-0000-4000-8000-000000000107", {
+    assigneeActive: false, recoveryState: "recovered", recoverySuccessorTaskId: null,
+    recoverySource: { taskId: recoveredSource.id, auditId: ASSIGNEE, revision: 1 },
+  });
+  const html = render({ tasks: [unstarted, synchronized, correction, conflict, accepted, recoveredSource, successor] });
+  const row = (id: string) => rowOf(html, id);
+  assert.match(row(ORIGINAL), /Action requise[\s\S]*peut contenir du travail non synchronisé[\s\S]*données présentes uniquement sur une tablette[\s\S]*Réaffecter la tâche/);
+  assert.match(row(DRAFT), /Action requise[\s\S]*Créer un nouveau travail de récupération/);
+  assert.match(row(REPLACEMENT), /Action requise[\s\S]*brouillon source et son historique de correction restent attribués au compte d’origine[\s\S]*Créer un nouveau travail de récupération/);
+  assert.match(row(ASSIGNEE), /Résolution requise[\s\S]*Aucun transfert[\s\S]*reste à résoudre selon le parcours de synchronisation/);
+  assert.doesNotMatch(row(ASSIGNEE), /Réaffecter la tâche|Créer un nouveau travail de récupération/);
+  assert.match(row(ACCEPTED), /accepté par le serveur[\s\S]*Créer un contrôle de remplacement/);
+  assert.doesNotMatch(row(ACCEPTED), /Action requise|Créer un nouveau travail de récupération/);
+  assert.match(row(recoveredSource.id), /Nouveau travail créé : tâche/);
+  assert.match(row(successor.id), new RegExp(`Travail récupéré depuis la tâche ${recoveredSource.id}, révision 1`));
+  assert.match(row(recoveredSource.id), /Historique des affectations/);
+  assert.equal(html.split("Créer un contrôle de remplacement").length - 1, 1);
 });
 
 test("W3 the action opens the empty creation form in replacement mode, the 201 shows its status and the reloaded list both lines", async () => {

@@ -11,6 +11,8 @@ import type { AuditActor } from "../../audits/commands/audit-revisions.js";
 export type SyncOperationKind = "sync-draft" | "submit";
 
 export type SyncOperationOutcome =
+  | { type: "authorization-failed" }
+  | { type: "task-not-assigned" }
   | { type: "stored"; httpStatus: 200; body: SyncOperationAccepted }
   | { type: "stored"; httpStatus: 409; body: SyncOperationConflict }
   | { type: "stored"; httpStatus: 422; body: SyncOperationRejected }
@@ -66,6 +68,17 @@ async function runOnce(
   fingerprint: string,
 ): Promise<SyncOperationOutcome> {
   const { kind, taskId, actor, request } = input;
+  const authorization = await transaction.query<{ is_active: boolean }>(
+    `SELECT account.is_active
+     FROM tasks task
+     JOIN task_assignments assignment ON assignment.task_id = task.id AND assignment.employee_id = $2
+     JOIN identity_accounts account ON account.id = assignment.employee_id AND account.role = 'employe'
+     WHERE task.id = $1
+     FOR UPDATE OF task, assignment, account`,
+    [taskId, actor.id],
+  );
+  if (!authorization.rows[0]) return { type: "task-not-assigned" };
+  if (!authorization.rows[0].is_active) return { type: "authorization-failed" };
   const audit = await lockAndReadTaskAudit(transaction, taskId);
 
   const stored = await transaction.query<StoredOutcomeRow>(

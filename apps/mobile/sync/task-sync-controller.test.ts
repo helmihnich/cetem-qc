@@ -109,6 +109,17 @@ test("W1 no run offline, without online authorization, for another identity or w
   }
 });
 
+test("Story 8.4 known deactivation blocks the queued operation without changing its actor or snapshot", async () => {
+  const f = setup({ status: "locked-deactivated" });
+  f.store.add("task-deactivated", 7);
+  const before = await f.store.listOutbox("employee-a");
+  assert.equal(await f.controller.trigger("employee-a", "reconnect"), false);
+  assert.equal(await f.controller.runSync("employee-a"), false);
+  assert.deepEqual(f.sent, []);
+  assert.deepEqual(await f.store.listOutbox("employee-a"), before);
+  assert.equal((await f.store.readOutboxSnapshot("employee-a", "op-7")).employeeId, "employee-a");
+});
+
 test("W1 a failed refresh keeps the previous rows and a refresh for another identity is ignored", async () => {
   const f = setup();
   f.store.add("task-a", 1);

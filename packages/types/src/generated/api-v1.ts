@@ -202,6 +202,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/employee/tasks/{taskId}/recovery-seed": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read an assigned recovery draft seed with source provenance
+         * @description Returns a recovery seed only to the employee currently assigned to its successor task. Ordinary assigned tasks return recovery null. The source employee remains attributed and every copied field includes immutable source provenance.
+         */
+        get: operations["getEmployeeTaskRecoverySeed"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/employee/tasks/{taskId}/draft-syncs": {
         parameters: {
             query?: never;
@@ -294,6 +314,46 @@ export interface paths {
          * @description Responsable only. Creates, in one transaction, a new draft Graphie Mobile task assigned like POST /tasks and one insert-only `replacement-control` link to the accepted audit of the own-team task `taskId`. The original task, audit and evidence are never written. One replacement per original. Nothing is copied from the original.
          */
         post: operations["createReplacementControl"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tasks/{taskId}/deactivated-assignee-reassignment": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reassign an unstarted task from a deactivated employee
+         * @description Responsable only. The task must be in the authenticated own team, the old assignee inactive, the successor active in that team, and server state must show no audit or unresolved submission outcome. The assignment version is checked in the mutation transaction. A tablet may still hold unsynchronized work.
+         */
+        post: operations["reassignUnstartedDeactivatedTask"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tasks/{taskId}/deactivated-assignee-recovery": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create separate recovery work from a synchronized draft owned by a deactivated employee
+         * @description Creates a new task, draft audit, immutable deactivated-assignee-recovery link, and per-field copied-value provenance. Source task/audit/revisions remain unchanged.
+         */
+        post: operations["createDeactivatedAssigneeRecovery"];
         delete?: never;
         options?: never;
         head?: never;
@@ -409,6 +469,38 @@ export interface components {
         TaskListResponse: {
             tasks: components["schemas"]["TaskListItem"][];
         };
+        ReassignUnstartedTaskRequest: {
+            /** Format: uuid */
+            successorId: string;
+            expectedAssignmentVersion: number;
+        };
+        ReassignUnstartedTaskResponse: {
+            /** Format: uuid */
+            taskId: string;
+            /** Format: uuid */
+            assigneeId: string;
+            assignmentVersion: number;
+        };
+        CreateDeactivatedAssigneeRecoveryRequest: {
+            /** Format: uuid */
+            successorId: string;
+            expectedAssignmentVersion: number;
+            sourceRevision: number;
+        };
+        DeactivatedAssigneeRecoveryResponse: {
+            task: components["schemas"]["Task"];
+            /** Format: uuid */
+            recoveryId: string;
+            /** @enum {string} */
+            recoveryKind: "synchronized-draft" | "correction-draft";
+            source: {
+                /** Format: uuid */
+                taskId: string;
+                /** Format: uuid */
+                auditId: string;
+                revision: number;
+            };
+        };
         TaskListItem: {
             /** Format: uuid */
             id: string;
@@ -416,6 +508,28 @@ export interface components {
             type: "graphie_mobile";
             establishment: string;
             assignee: string;
+            assigneeActive: boolean;
+            assignmentVersion: number;
+            assignmentHistory: {
+                previousEmployee: string | null;
+                newEmployee: string;
+                actor: string;
+                reason: string;
+                /** Format: date-time */
+                createdAt: string;
+            }[];
+            /** @enum {string|null} */
+            recoveryState: "unstarted" | "synchronized-draft" | "correction-draft" | "resolution-required" | "accepted" | "recovered" | null;
+            recoveryRevision: number | null;
+            recoverySource: {
+                /** Format: uuid */
+                taskId: string;
+                /** Format: uuid */
+                auditId: string;
+                revision: number;
+            } | null;
+            /** Format: uuid */
+            recoverySuccessorTaskId: string | null;
             /**
              * @description submitted when the task's audit was accepted by the server; draft otherwise.
              * @enum {string}
@@ -554,6 +668,36 @@ export interface components {
             lastChangedAt: string | null;
             lastChangedBy: components["schemas"]["SyncActor"] | null;
             payload: components["schemas"]["GraphieDraftPayload"] | null;
+        };
+        EmployeeTaskRecoverySeedResponse: {
+            recovery: components["schemas"]["EmployeeTaskRecoverySeed"] | null;
+        };
+        EmployeeTaskRecoverySeed: {
+            /** Format: uuid */
+            recoveryId: string;
+            source: {
+                /** Format: uuid */
+                taskId: string;
+                /** Format: uuid */
+                auditId: string;
+                revision: number;
+                employee: components["schemas"]["SyncActor"];
+            };
+            seed: {
+                revision: number;
+                payload: components["schemas"]["GraphieDraftPayload"];
+            };
+            provenance: {
+                destinationField: string;
+                sourceField: string;
+                /** Format: uuid */
+                sourceTaskId: string;
+                /** Format: uuid */
+                sourceAuditId: string;
+                sourceRevision: number;
+                /** @enum {string} */
+                origin: "copied-from-recovery-source";
+            }[];
         };
         HealthResponse: {
             /** @constant */
@@ -1290,6 +1434,65 @@ export interface operations {
             };
         };
     };
+    getEmployeeTaskRecoverySeed: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                taskId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Recovery seed and copied-field provenance, or null for an ordinary task */
+            200: {
+                headers: {
+                    "Cache-Control"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EmployeeTaskRecoverySeedResponse"];
+                };
+            };
+            /** @description Session rejected */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Employé role required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Task not found or not assigned to the authenticated employee */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
     syncEmployeeTaskDraft: {
         parameters: {
             query?: never;
@@ -1739,6 +1942,166 @@ export interface operations {
             };
             /** @description Internal error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    reassignUnstartedDeactivatedTask: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                taskId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReassignUnstartedTaskRequest"];
+            };
+        };
+        responses: {
+            /** @description Assignment changed and history recorded */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReassignUnstartedTaskResponse"];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Session rejected */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Responsable role required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Task not found in own team */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Task state changed */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Successor is not an active same-team Employe */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    createDeactivatedAssigneeRecovery: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                taskId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateDeactivatedAssigneeRecoveryRequest"];
+            };
+        };
+        responses: {
+            /** @description New recovery task and source provenance created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeactivatedAssigneeRecoveryResponse"];
+                };
+            };
+            /** @description Invalid request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Session rejected */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Responsable role required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Task not found in own team */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Source changed */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Successor is not an active same-team Employe */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };

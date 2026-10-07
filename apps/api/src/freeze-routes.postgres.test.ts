@@ -85,6 +85,8 @@ const OTHER_MUTATING_ROUTES = [
   "POST /authenticate",
   "DELETE /session",
   "POST /tasks",
+  "POST /tasks/:taskId/deactivated-assignee-reassignment",
+  "POST /tasks/:taskId/deactivated-assignee-recovery",
   "POST /tasks/:taskId/replacements",
   "POST /employees",
   "POST /employees/:employeeId/credential",
@@ -178,6 +180,8 @@ test("F5 every other mutating route, called by both roles, leaves the accepted e
       ["POST", () => "/tasks", { establishment: "Établissement B", service: "Radiologie", type: "graphie_mobile", assigneeId: employee }],
       // Story 8.3: a replacement control of the accepted task creates a new task and leaves the original's evidence unchanged.
       ["POST", () => `/tasks/${taskId}/replacements`, { establishment: "Établissement B", service: "Radiologie", type: "graphie_mobile", assigneeId: employee }],
+      ["POST", () => `/tasks/${taskId}/deactivated-assignee-reassignment`, { successorId: employee, expectedAssignmentVersion: 1 }],
+      ["POST", () => `/tasks/${taskId}/deactivated-assignee-recovery`, { sourceRevision: 1, successorId: employee, establishment: "Établissement B", service: "Radiologie", type: "graphie_mobile" }],
       ["POST", () => "/employees", { firstName: "Nouveau", surname: "Test", email: `${randomUUID()}@example.test` }],
       ["POST", () => `/employees/${createdEmployee}/credential`, undefined],
       ["POST", () => `/employees/${colleague}/password-reset`, undefined],
@@ -394,6 +398,13 @@ test("M1 migrating 0009 to 0010 keeps every row, freezes the submitted audit and
   await withPostgresUpgrade(async (fixture, migrate) => {
     const { pool, employee, newTask, send } = fixture;
     const submitted = await acceptedTask(fixture);
+    const owner = fixture.owner;
+    const team = (await pool.query<{ id: string }>("SELECT id FROM identity_teams WHERE responsable_account_id = $1", [owner])).rows[0]!.id;
+    const legacyTask = (await pool.query<{ id: string }>(
+      "INSERT INTO tasks (establishment, service, task_type, created_by) VALUES ('Upgrade Centre', 'Service', 'graphie_mobile', $1) RETURNING id", [owner],
+    )).rows[0]!.id;
+    await pool.query("INSERT INTO task_assignments (task_id, team_id, employee_id) VALUES ($1, $2, $3)", [legacyTask, team, employee]);
+    await migrate();
     const draftTask = await newTask(employee);
     assert.equal((await send("draft-syncs", draftTask, envelope(0))).status, 200);
     const dump = () => pool.query(

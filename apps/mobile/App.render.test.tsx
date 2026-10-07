@@ -13,6 +13,7 @@ import type { SyncRequest, SyncResult, SyncTransport } from "./sync/sync-engine.
 const runtime = globalThis as typeof globalThis & {
   __mobileTestWidth?: number;
   __mobileTestApi?: MockApi;
+  __recoverySeed?: unknown;
   __secureValues?: Map<string, string>;
   __networkListener?: (state: { isConnected?: boolean; isInternetReachable?: boolean }) => void;
   __networkOnline?: boolean;
@@ -355,6 +356,7 @@ interface MockApi {
   logout: () => Promise<void>;
   /** Story 8.1: the current server version; absent unless a test installs it. */
   getEmployeeTaskAuditVersion?: (taskId: string, options?: { signal?: AbortSignal }) => Promise<unknown>;
+  getEmployeeTaskRecoverySeed: (taskId: string) => Promise<{ recovery: unknown | null }>;
   listCalls: number;
   sessionCalls: number;
   detailCalls: string[];
@@ -386,6 +388,7 @@ function deferred() {
 }
 
 function installMocks() {
+  runtime.__recoverySeed = undefined;
   runtime.__mobileTestWidth = 390;
   runtime.__secureValues = new Map();
   runtime.__draftRows = new Map();
@@ -443,6 +446,7 @@ function installMocks() {
       }
       return { task: id === secondTask.id ? secondTask : id === thirdTask.id ? thirdTask : firstTask };
     },
+    getEmployeeTaskRecoverySeed: async () => ({ recovery: runtime.__recoverySeed ?? null }),
     getSession: async () => {
       api.sessionCalls++;
       if (runtime.__sessionFailure) {
@@ -551,6 +555,33 @@ test("phone App renders task list, opens read-only detail, retries failures and 
   assert.ok(findButton(tree, "Retour à Mes tâches"));
   await act(async () => { findButton(tree, "Retour à Mes tâches").props.onPress(); });
   assert.ok(findText(tree, "Mes tâches"));
+  await act(async () => { tree.unmount(); });
+});
+
+test("Story 8.4 hydrates a new successor draft with source and per-field provenance", async () => {
+  await loadApp();
+  const api = installMocks();
+  const copiedField = "header.reportNumber";
+  runtime.__recoverySeed = {
+    recoveryId: "00000000-0000-4000-8000-000000000061",
+    source: { taskId: "00000000-0000-4000-8000-000000000062", auditId: "00000000-0000-4000-8000-000000000063", revision: 2,
+      employee: { id: "previous-employee", displayName: "EmployÃƒÂ© source" } },
+    seed: { revision: 1, payload: { ...GRAPHIE_CALCULATION_IDENTITY, values: { [copiedField]: "R-49" } } },
+    provenance: [{ destinationField: `values.${copiedField}`, sourceField: `values.${copiedField}`,
+      sourceTaskId: "00000000-0000-4000-8000-000000000062", sourceAuditId: "00000000-0000-4000-8000-000000000063", sourceRevision: 2, origin: "copied-from-recovery-source" }],
+  };
+  let tree!: ReactTestRenderer;
+  await act(async () => { tree = create(<App />); });
+  await signIn(tree);
+  await act(async () => { findTaskRow(tree, firstTask.establishment).props.onPress(); await new Promise((resolve) => setTimeout(resolve, 150)); });
+  assert.equal(api.detailCalls.at(-1), firstTask.id);
+  assert.ok(runtime.__draftRows!.has(`employee-1/${firstTask.id}`));
+  assert.equal(findInput(tree, GRAPHIE_MOBILE_POV_CATALOGUE.sections[0]!.fields[0]!.labelFr)?.props.value, "R-49");
+  assert.ok(findText(tree, "Brouillon initial crÃ©Ã© Ã  partir du travail synchronisÃ© de EmployÃ© source, tÃ¢che 00000000-0000-4000-8000-000000000062, rÃ©vision 2."));
+  assert.ok(tree.root.findAll((node) => node.type === "Text" && node.children.join("").includes("Valeur initiale copiÃ©e du travail synchronisÃ© antÃ©rieur")).length > 0);
+  const local = JSON.parse(runtime.__draftRows!.get(`employee-1/${firstTask.id}`)!) as { employeeId: string; recoveryProvenance: { sourceEmployeeId: string } };
+  assert.equal(local.employeeId, "employee-1");
+  assert.equal(local.recoveryProvenance.sourceEmployeeId, "previous-employee");
   await act(async () => { tree.unmount(); });
 });
 

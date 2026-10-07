@@ -361,13 +361,17 @@ test("A16 migrating 0008 to 0009 keeps existing tasks and adds the tables and hi
       const owner = await account(setup, "responsable", "Responsable Test");
       const team = (await setup.query<{ id: string }>("INSERT INTO identity_teams (responsable_account_id) VALUES ($1) RETURNING id", [owner])).rows[0]!.id;
       const employee = await account(setup, "employe", "Employé Test", team);
-      const task = await createAssignedTask(pool, owner, { establishment: "Établissement A", service: "Radiologie", type: "graphie_mobile", assigneeId: employee });
+      const seededTask = (await setup.query<{ id: string }>(
+        `INSERT INTO tasks (establishment, service, task_type, created_by)
+         VALUES ('Établissement A', 'Radiologie', 'graphie_mobile', $1) RETURNING id`, [owner],
+      )).rows[0]!;
+      await setup.query("INSERT INTO task_assignments (task_id, team_id, employee_id) VALUES ($1, $2, $3)", [seededTask.id, team, employee]);
       const before = (await setup.query("SELECT * FROM tasks ORDER BY id")).rows;
-      const assignments = (await setup.query("SELECT * FROM task_assignments ORDER BY task_id")).rows;
+      const assignments = (await setup.query("SELECT task_id, team_id, employee_id, assigned_at FROM task_assignments ORDER BY task_id")).rows;
       await migrate();
       assert.deepEqual((await setup.query("SELECT * FROM tasks ORDER BY id")).rows, before);
-      assert.deepEqual((await setup.query("SELECT * FROM task_assignments ORDER BY task_id")).rows, assignments);
-      assert.equal(before[0].id, task.id);
+      assert.deepEqual((await setup.query("SELECT task_id, team_id, employee_id, assigned_at FROM task_assignments ORDER BY task_id")).rows, assignments);
+      assert.equal(before[0].id, seededTask.id);
       const tables = (await setup.query<{ table_name: string }>(
         "SELECT table_name FROM information_schema.tables WHERE table_schema = current_schema() AND table_name IN ('audits', 'audit_revisions', 'audit_submissions', 'sync_operation_outcomes') ORDER BY table_name",
       )).rows.map((row) => row.table_name);
@@ -375,7 +379,7 @@ test("A16 migrating 0008 to 0009 keeps existing tasks and adds the tables and hi
       const triggers = (await setup.query<{ trigger_name: string }>(
         "SELECT DISTINCT trigger_name FROM information_schema.triggers WHERE trigger_schema = current_schema() AND trigger_name LIKE '%insert_only' ORDER BY trigger_name",
       )).rows.map((row) => row.trigger_name);
-      assert.deepEqual(triggers, ["audit_revisions_insert_only", "audit_submissions_insert_only", "sync_operation_outcomes_insert_only"]);
+      assert.deepEqual(triggers, ["audit_revisions_insert_only", "audit_submissions_insert_only", "sync_operation_outcomes_insert_only", "task_assignment_history_insert_only"]);
     } finally {
       setup.release();
     }

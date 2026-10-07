@@ -5,6 +5,7 @@ import { taskListResponseSchema } from "@cetem-qc/api-client/v1";
 import type { TaskListResponse } from "@cetem-qc/api-client/v1";
 import { fr } from "@cetem-qc/i18n";
 import { TaskCreation } from "./task-creation";
+import { DeactivatedTaskRecovery } from "./task-recovery";
 
 type TaskListItem = TaskListResponse["tasks"][number];
 
@@ -46,9 +47,14 @@ export function TaskListView(props: TaskListViewProps) {
               <td>{fr.tasks.graphieMobile}</td><td>{task.establishment}</td><td className="name-cell">{task.assignee}</td>
               <td>{task.state === "submitted"
                 ? <span className="status-pill task-state-submitted"><span className="status-dot" />{fr.tasks.submittedAccepted}</span>
-                : <span className="status-pill task-state-draft"><span className="status-dot" />{fr.tasks.draft}</span>}</td>
+                : <span className="status-pill task-state-draft"><span className="status-dot" />{fr.tasks.draft}</span>}
+                {!task.assigneeActive && task.recoveryState === "resolution-required" && <span className="status-pill task-state-draft">{fr.tasks.resolutionRequired}</span>}
+                {!task.assigneeActive && task.state !== "submitted" && task.recoveryState !== "resolution-required" && task.recoveryState !== "recovered" && <span className="status-pill task-state-draft">{fr.tasks.actionRequired}</span>}
+              </td>
               <td>{dateFormatter.format(new Date(task.lastUpdatedAt))}</td>
-              <td className="task-actions-cell">{canReplace(task) && <button className="secondary-button" type="button" aria-expanded={replacingTaskId === task.id} onClick={() => props.onReplace(task.id)}>{fr.tasks.replacementAction}</button>}</td>
+              <td className="task-actions-cell">{canReplace(task) && <button className="secondary-button" type="button" aria-expanded={replacingTaskId === task.id} onClick={() => props.onReplace(task.id)}>{fr.tasks.replacementAction}</button>}
+                <DeactivatedTaskRecovery task={task} onChanged={props.onStale} />
+              </td>
             </tr>)}</tbody>
           </table></div>}
     {replacingTaskId && <TaskCreation key={replacingTaskId} replacement={{
