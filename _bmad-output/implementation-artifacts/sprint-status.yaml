@@ -29,7 +29,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 # - Retrospective appends its action items to action_items; the status view surfaces open ones
 generated: 09-26-2026 18:00
-last_updated: 10-07-2026 12:00
+last_updated: 10-07-2026 13:00
 project: cetem-qc
 project_key: NOKEY
 tracking_system: file-system
@@ -86,12 +86,12 @@ development_status:
   7-4-freeze-accepted-measurements-and-comments: done
   epic-7-retrospective: done
 
-  epic-8: in-progress
+  epic-8: done
   8-1-resolve-a-synchronization-conflict-explicitly: done
   8-2-create-a-correction-draft-after-validation-rejection: done
   8-3-create-a-responsable-only-replacement-after-acceptance: done
   8-4-handle-unfinished-tasks-after-employee-deactivation: done
-  epic-8-retrospective: optional
+  epic-8-retrospective: done
 
   epic-9: backlog
   9-1-review-accepted-audit-evidence-read-only: backlog
@@ -310,8 +310,8 @@ action_items:
     status: done
     note: "Story 8.2: parseGraphiePayload delegates to the domain checkGraphiePayloadStructure
       (one copy of each structural rule); the domain refuses unpaired surrogates and
-      requestSubmission runs validateGraphiePayload(submit); parity test P1 in
-      apps/mobile/graphie-pov-catalogue.test.ts, domain V1/V2."
+      requestSubmission runs validateGraphiePayload(submit); parity test P1 in apps/mobile/graphie-pov-catalogue.test.ts,
+      domain V1/V2."
     ref: "_bmad-output/implementation-artifacts/epic-7-retro-2026-10-05.md"
   - id: "epic-7-retro-item-21-extract-the-mobile-sync-wiring-engine-cr"
     epic: 7
@@ -320,9 +320,9 @@ action_items:
       8.1/8.2 add conflict and correction UI."
     owner: "Mobile maintainers / Story 8.1 author"
     status: done
-    note: "Story 8.1: apps/mobile/sync/task-sync-controller.ts (non-React controller) and
-      use-task-sync.ts (thin hook); covered by W1 in task-sync-controller.test.ts with the
-      existing 7.2/7.3 App render tests passing on the extracted wiring."
+    note: "Story 8.1: apps/mobile/sync/task-sync-controller.ts (non-React controller)
+      and use-task-sync.ts (thin hook); covered by W1 in task-sync-controller.test.ts
+      with the existing 7.2/7.3 App render tests passing on the extracted wiring."
     ref: "_bmad-output/implementation-artifacts/epic-7-retro-2026-10-05.md"
   - id: "epic-7-retro-item-22-in-the-epic-12-deployment-templates-and"
     epic: 7
@@ -340,3 +340,45 @@ action_items:
     owner: "Story 12.4 author"
     status: open
     ref: "_bmad-output/implementation-artifacts/epic-7-retro-2026-10-05.md"
+  - id: "epic-8-retro-item-24-confirm-story-8-4-closed-the-assignment"
+    epic: 8
+    action: "Confirm Story 8.4 closed the assignment-checked-outside-task-lock deferral
+      with a concurrency test and add the resolved line to deferred-work.md."
+    owner: "Story 8.4 author / API maintainers"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-8-retro-2026-10-07.md"
+  - id: "epic-8-retro-item-25-reconcile-story-8-4-spec-md-status-to-do"
+    epic: 8
+    action: "Reconcile Story 8.4 SPEC.md status to done and replace the ready-for-dev
+      sentence in its delivery-notes.md."
+    owner: "Story author"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-8-retro-2026-10-07.md"
+  - id: "epic-8-retro-item-26-add-the-8-1-follow-up-tests-30-s-version"
+    epic: 8
+    action: "Add the 8.1 follow-up tests (30 s version-read abort with fake timers,
+      v4 startup guard restart) and the 7.3 joined-run retryBlocked engine test."
+    owner: "Mobile maintainers"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-8-retro-2026-10-07.md"
+  - id: "epic-8-retro-item-27-at-the-first-catalogue-or-rule-version-b"
+    epic: 8
+    action: "At the first catalogue or rule version bump, handle unparseable stored
+      revisions and correction snapshots (conflict discard path, snapshot-unavailable)."
+    owner: "Calculation and mobile maintainers"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-8-retro-2026-10-07.md"
+  - id: "epic-8-retro-item-28-add-a-cross-lineage-test-conflict-correc"
+    epic: 8
+    action: "Add a cross-lineage test (conflict, correction, replacement, deactivation
+      recovery) before Story 9.1 reads lineage."
+    owner: "Story 9.1 author"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-8-retro-2026-10-07.md"
+  - id: "epic-8-retro-item-29-reject-pipeline-commit-subjects-that-lac"
+    epic: 8
+    action: "Reject pipeline commit subjects that lack a story key and avoid wip checkpoint
+      commits in epic history."
+    owner: "Pipeline operator (Helmi)"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-8-retro-2026-10-07.md"
