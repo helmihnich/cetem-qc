@@ -675,6 +675,9 @@ if ((Get-StoryStatus '6-6-align-calculation-rules-with-the-official-cetem-paper-
 
 Write-Utf8 $RulesFile $Rules
 
+# make the local DB available to every Claude session, not only to Invoke-Gates
+$env:DATABASE_URL = $LocalDbUrl
+
 # keep Windows awake while the pipeline runs
 try {
   Add-Type -Namespace Win32 -Name Power -MemberDefinition '[DllImport("kernel32.dll")] public static extern uint SetThreadExecutionState(uint esFlags);' -ErrorAction Stop
