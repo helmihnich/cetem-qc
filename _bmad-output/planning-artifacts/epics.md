@@ -832,7 +832,7 @@ So that the report sequence proceeds only from my approved text.
 **And** a manual-only summary follows the same confirmation gate without fictitious model metadata; zero retained insights does not block confirmation
 **And** until explicit confirmation, conformity decision and report designation remain unavailable; failed save never claims confirmation.
 
-**Traceability:** FR-031–FR-033, DR-005, DR-008, DR-009, SEC-011 (AI control), UX-DR2 (summary-editor, button-primary), UX-DR8.
+**Traceability:** spec `_bmad-output/specs/spec-10-2-write-edit-and-explicitly-confirm-a-summary/SPEC.md`; FR-031–FR-033, DR-005, DR-008, DR-009, SEC-011 (AI control), UX-DR2 (summary-editor, button-primary), UX-DR8. **Dependency:** Stories 9.1–9.4, 10.1 (done); after confirmation, manual insights, insight decisions and draft requests are refused (409).
 
 ### Story 10.3: Reopen a confirmed summary before official designation
 

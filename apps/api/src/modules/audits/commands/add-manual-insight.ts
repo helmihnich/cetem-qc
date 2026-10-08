@@ -1,6 +1,7 @@
 import type { ManualInsight } from "@cetem-qc/domain";
 import type { Pool } from "pg";
 import { withTransaction } from "../../../db/transaction.js";
+import { isSummaryConfirmed, lockTaskSummary } from "../../summaries/queries/confirmed-summary.js";
 import { getAcceptedSubmissionForReview } from "../queries/accepted-submission.js";
 import { toManualInsight } from "../queries/manual-insights.js";
 import type { ManualInsightRow } from "../queries/manual-insights.js";
@@ -9,6 +10,7 @@ import { isConsistentSnapshot, reviewCommandTestSeams } from "./record-review-ac
 export type AddManualInsightOutcome =
   | { type: "added"; insight: ManualInsight }
   | { type: "not-found" }
+  | { type: "summary-confirmed" }
   | { type: "inconsistent" };
 
 /**
@@ -19,9 +21,11 @@ export async function addManualInsight(
   pool: Pool, responsableId: string, taskId: string, input: { text: string; justification?: string | null },
 ): Promise<AddManualInsightOutcome> {
   return withTransaction(pool, async (transaction): Promise<AddManualInsightOutcome> => {
+    await lockTaskSummary(transaction, taskId);
     const stored = await getAcceptedSubmissionForReview(transaction, responsableId, taskId);
     if (!stored) return { type: "not-found" };
     const evidence = reviewCommandTestSeams.snapshot ? reviewCommandTestSeams.snapshot(stored) : stored;
+    if (await isSummaryConfirmed(transaction, evidence.submissionId)) return { type: "summary-confirmed" };
     if (!isConsistentSnapshot(evidence.identity, evidence.results)) return { type: "inconsistent" };
     const result = await transaction.query<ManualInsightRow>(
       `WITH inserted AS (

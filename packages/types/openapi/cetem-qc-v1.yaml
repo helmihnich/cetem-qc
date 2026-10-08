@@ -1018,6 +1018,7 @@ paths:
         '401': { description: Session rejected, content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
         '403': { description: Responsable role required (FORBIDDEN), content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
         '404': { description: Malformed, unknown or another team's task, or no accepted submission (TASK_NOT_FOUND), content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+        '409': { description: Summary already confirmed for this audit (SUMMARY_CONFIRMED), content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
         '422': { description: Invalid decision or unknown proposal (VALIDATION_FAILED), content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
         '500': { description: Evidence inconsistent or decision not recorded (INTERNAL_ERROR), content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
   /tasks/{taskId}/manual-insights:
@@ -1052,6 +1053,7 @@ paths:
         '401': { description: Session rejected, content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
         '403': { description: Responsable role required (FORBIDDEN), content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
         '404': { description: Malformed, unknown or another team's task, or no accepted submission (TASK_NOT_FOUND), content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+        '409': { description: Summary already confirmed for this audit (SUMMARY_CONFIRMED), content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
         '422': { description: Invalid body (VALIDATION_FAILED), content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
         '500': { description: Evidence inconsistent or insight not recorded (INTERNAL_ERROR), content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
   /tasks/{taskId}/summary-drafts:
@@ -1086,9 +1088,46 @@ paths:
         '401': { description: Session rejected, content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
         '403': { description: Responsable role required (FORBIDDEN), content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
         '404': { description: Malformed, unknown or another team's task, or no accepted submission (TASK_NOT_FOUND), content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+        '409': { description: Summary already confirmed for this audit (SUMMARY_CONFIRMED), content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
         '422': { description: Non-empty body (VALIDATION_FAILED), content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
         '500': { description: Evidence inconsistent or request not recorded (INTERNAL_ERROR), content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
         '502': { description: Provider failed; a failed row is recorded and the request can be sent again (AI_UNAVAILABLE), content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+  /tasks/{taskId}/summary-confirmation:
+    post:
+      operationId: confirmSummary
+      summary: Confirm the final summary of an own-team accepted audit
+      description: >-
+        Responsable only. Saves the final text and confirms it in one explicit action. Inserts one insert-only row with
+        the confirmer, the server date, the audit version, the final text, the actual input set rebuilt by the server and
+        its identity, and the optional link to the initial AI draft. The body carries no actor, date, input set or
+        provider data. It sets no conformity. A malformed, unknown or another team's task, and an own-team task without
+        accepted submission, all get the same 404.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: taskId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SummaryConfirmationRequest'
+      responses:
+        '201':
+          description: Confirmed summary (Cache-Control no-store)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConfirmedSummary'
+        '401': { description: Session rejected, content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+        '403': { description: Responsable role required (FORBIDDEN), content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+        '404': { description: Malformed, unknown or another team's task, or no accepted submission (TASK_NOT_FOUND), content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+        '409': { description: A summary is already confirmed for this audit (SUMMARY_ALREADY_CONFIRMED), content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+        '422': { description: Invalid text or unusable draftId (VALIDATION_FAILED), content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+        '500': { description: Evidence inconsistent or summary not recorded (INTERNAL_ERROR), content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
 components:
   securitySchemes:
     bearerAuth:
@@ -1360,12 +1399,16 @@ components:
     AcceptedEvidenceResponse:
       type: object
       additionalProperties: false
-      required: [task, submission, identity, values, results, lineage, insights, insightDecisions, manualInsights]
+      required: [task, submission, identity, values, results, lineage, insights, insightDecisions, manualInsights, summary]
       properties:
         manualInsights:
           type: array
           items:
             $ref: '#/components/schemas/ManualInsight'
+        summary:
+          oneOf:
+            - type: 'null'
+            - $ref: '#/components/schemas/ConfirmedSummary'
         insights:
           $ref: '#/components/schemas/InsightProposalSet'
         insightDecisions:
@@ -1489,6 +1532,42 @@ components:
             id: { type: string }
             displayName: { type: string }
         summaryInputSetId: { type: string, pattern: '^[0-9a-f]{64}$' }
+    SummaryConfirmationRequest:
+      type: object
+      additionalProperties: false
+      required: [text]
+      properties:
+        text: { type: string, minLength: 1, maxLength: 5000 }
+        draftId: { type: string, format: uuid }
+    ConfirmedSummary:
+      type: object
+      additionalProperties: false
+      required: [id, text, confirmedAt, confirmedBy, summaryInputSetId, initialDraft]
+      properties:
+        id: { type: string, format: uuid }
+        text: { type: string, minLength: 1, maxLength: 5000 }
+        confirmedAt: { type: string, format: date-time }
+        confirmedBy:
+          type: object
+          additionalProperties: false
+          required: [id, displayName]
+          properties:
+            id: { type: string }
+            displayName: { type: string }
+        summaryInputSetId: { type: string, pattern: '^[0-9a-f]{64}$' }
+        initialDraft:
+          oneOf:
+            - type: 'null'
+            - type: object
+              additionalProperties: false
+              required: [id, text, provider, model, requestedAt, summaryInputSetId]
+              properties:
+                id: { type: string, format: uuid }
+                text: { type: string, minLength: 1 }
+                provider: { type: string, minLength: 1 }
+                model: { type: string, minLength: 1 }
+                requestedAt: { type: string, format: date-time }
+                summaryInputSetId: { type: string, pattern: '^[0-9a-f]{64}$' }
     InsightDecisionRequest:
       type: object
       additionalProperties: false
@@ -1817,7 +1896,7 @@ components:
       description: >-
         Error envelope. Codes include VALIDATION_ERROR, AUTHENTICATION_FAILED, FORBIDDEN, TASK_NOT_FOUND,
         PAYLOAD_TOO_LARGE, IDEMPOTENCY_KEY_REUSED, AUDIT_NOT_ACCEPTED, REPLACEMENT_ALREADY_EXISTS,
-        TASK_ASSIGNEE_UNAVAILABLE, AI_UNAVAILABLE and INTERNAL_ERROR.
+        TASK_ASSIGNEE_UNAVAILABLE, AI_UNAVAILABLE, SUMMARY_ALREADY_CONFIRMED, SUMMARY_CONFIRMED and INTERNAL_ERROR.
       required: [error]
       properties:
         error:

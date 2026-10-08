@@ -4,7 +4,7 @@ import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import type { apiV1Components, apiV1Operations } from "@cetem-qc/types";
-import { summaryDraftRequestSchema, summaryDraftResponseSchema, acceptedEvidenceResponseSchema, insightDecisionRequestSchema, insightDecisionResponseSchema, manualInsightRequestSchema, manualInsightResponseSchema, apiErrorSchema, createEmployeeRequestSchema, createTaskRequestSchema, employeeCredentialResponseSchema, employeeListResponseSchema, employeeTaskListQuerySchema, employeeTaskListResponseSchema, employeeTaskAuditVersionSchema, employeeTaskResponseSchema, graphieDraftPayloadSchema, healthQuerySchema, healthResponseSchema, replacementTaskResponseSchema, syncOperationAcceptedSchema, syncOperationConflictSchema, syncOperationRejectedSchema, syncOperationRequestSchema, taskListQuerySchema, taskListResponseSchema, updateEmployeeStatusRequestSchema, updateEmployeeStatusResponseSchema } from "./v1.js";
+import { confirmedSummarySchema, summaryConfirmationRequestSchema, summaryDraftRequestSchema, summaryDraftResponseSchema, acceptedEvidenceResponseSchema, insightDecisionRequestSchema, insightDecisionResponseSchema, manualInsightRequestSchema, manualInsightResponseSchema, apiErrorSchema, createEmployeeRequestSchema, createTaskRequestSchema, employeeCredentialResponseSchema, employeeListResponseSchema, employeeTaskListQuerySchema, employeeTaskListResponseSchema, employeeTaskAuditVersionSchema, employeeTaskResponseSchema, graphieDraftPayloadSchema, healthQuerySchema, healthResponseSchema, replacementTaskResponseSchema, syncOperationAcceptedSchema, syncOperationConflictSchema, syncOperationRejectedSchema, syncOperationRequestSchema, taskListQuerySchema, taskListResponseSchema, updateEmployeeStatusRequestSchema, updateEmployeeStatusResponseSchema } from "./v1.js";
 
 const contractPath = fileURLToPath(new URL("../../../types/openapi/cetem-qc-v1.yaml", import.meta.url));
 
@@ -319,6 +319,7 @@ test("K7 accepted evidence response schema parses a full body and refuses extras
     insights: { status: "unavailable", reason: "no-approved-rules", registryVersion: "insight-registry-1", proposals: [] },
     insightDecisions: [],
     manualInsights: [],
+    summary: null,
   };
   assert.deepEqual(acceptedEvidenceResponseSchema.parse(body), body);
   assert.equal(acceptedEvidenceResponseSchema.safeParse({ ...body, extra: true }).success, false);
@@ -347,6 +348,7 @@ test("K9 accepted evidence insights are required, parse both statuses and refuse
     insights: { status: "available", registryVersion: "insight-registry-1", proposals: [proposal] },
     insightDecisions: [],
     manualInsights: [],
+    summary: null,
   };
   assert.deepEqual(acceptedEvidenceResponseSchema.parse(body), body);
   assert.equal(acceptedEvidenceResponseSchema.safeParse({ ...body, insights: { ...body.insights, proposals: [] } }).success, true);
@@ -380,6 +382,7 @@ test("K11 insightDecisions is required, parses empty and populated, and refuses 
     insights: { status: "unavailable", reason: "no-approved-rules", registryVersion: "insight-registry-1", proposals: [] },
     insightDecisions: [decision],
     manualInsights: [],
+    summary: null,
   };
   assert.deepEqual(acceptedEvidenceResponseSchema.parse(body), body);
   assert.equal(acceptedEvidenceResponseSchema.safeParse({ ...body, insightDecisions: [] }).success, true);
@@ -410,6 +413,7 @@ test("K13 manualInsights is required, parses empty and populated, and refuses ex
     insights: { status: "unavailable", reason: "no-approved-rules", registryVersion: "insight-registry-1", proposals: [] },
     insightDecisions: [],
     manualInsights: [insight],
+    summary: null,
   };
   assert.deepEqual(acceptedEvidenceResponseSchema.parse(body), body);
   assert.equal(acceptedEvidenceResponseSchema.safeParse({ ...body, manualInsights: [] }).success, true);
@@ -436,4 +440,21 @@ test("K16 summaryDraftResponseSchema is strict, needs a 64-hex input set identit
   }
   assert.equal(summaryDraftRequestSchema.safeParse({}).success, true);
   for (const invalid of [{ text: "x" }, { input: {} }, null, [], "x"]) assert.equal(summaryDraftRequestSchema.safeParse(invalid).success, false);
+});
+
+test("K19 confirmedSummarySchema is strict with a 64-hex identity and a nullable initial draft; the request schema trims and bounds the text", () => {
+  const id = "00000000-0000-4000-8000-000000000041";
+  const draft = { id, text: "Brouillon.", provider: "mock", model: "mock-fixed-text", requestedAt: "2026-10-08T09:00:00.000Z", summaryInputSetId: "a".repeat(64) };
+  const summary = { id, text: "Synthèse.", confirmedAt: "2026-10-08T10:00:00.000Z", confirmedBy: { id, displayName: "Responsable Test" }, summaryInputSetId: "b".repeat(64), initialDraft: null };
+  assert.deepEqual(confirmedSummarySchema.parse(summary), summary);
+  assert.deepEqual(confirmedSummarySchema.parse({ ...summary, initialDraft: draft }), { ...summary, initialDraft: draft });
+  for (const bad of [{ ...summary, extra: 1 }, { ...summary, summaryInputSetId: "B".repeat(64) }, { ...summary, summaryInputSetId: "b" }, { ...summary, initialDraft: { ...draft, extra: 1 } }, { ...summary, initialDraft: undefined }, { ...summary, text: "" }, { ...summary, confirmedAt: "hier" }]) {
+    assert.equal(confirmedSummarySchema.safeParse(bad).success, false, JSON.stringify(bad));
+  }
+  assert.deepEqual(summaryConfirmationRequestSchema.parse({ text: "  Texte.  " }), { text: "Texte." });
+  assert.deepEqual(summaryConfirmationRequestSchema.parse({ text: "T", draftId: id }), { text: "T", draftId: id });
+  assert.equal(summaryConfirmationRequestSchema.safeParse({ text: "a".repeat(5000) }).success, true);
+  for (const bad of [{}, { text: "" }, { text: "  \n" }, { text: "a".repeat(5001) }, { text: "a\u0000b" }, { text: "T", extra: 1 }, { text: "T", draftId: "x" }, { text: "T", actor: id }]) {
+    assert.equal(summaryConfirmationRequestSchema.safeParse(bad).success, false, JSON.stringify(bad));
+  }
 });

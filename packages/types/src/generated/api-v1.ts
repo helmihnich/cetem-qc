@@ -440,6 +440,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/tasks/{taskId}/summary-confirmation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Confirm the final summary of an own-team accepted audit
+         * @description Responsable only. Saves the final text and confirms it in one explicit action. Inserts one insert-only row with the confirmer, the server date, the audit version, the final text, the actual input set rebuilt by the server and its identity, and the optional link to the initial AI draft. The body carries no actor, date, input set or provider data. It sets no conformity. A malformed, unknown or another team's task, and an own-team task without accepted submission, all get the same 404.
+         */
+        post: operations["confirmSummary"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -630,6 +650,7 @@ export interface components {
         };
         AcceptedEvidenceResponse: {
             manualInsights: components["schemas"]["ManualInsight"][];
+            summary: null | components["schemas"]["ConfirmedSummary"];
             insights: components["schemas"]["InsightProposalSet"];
             insightDecisions: components["schemas"]["EvidenceInsightDecision"][];
             task: {
@@ -733,6 +754,33 @@ export interface components {
                 displayName: string;
             };
             summaryInputSetId: string;
+        };
+        SummaryConfirmationRequest: {
+            text: string;
+            /** Format: uuid */
+            draftId?: string;
+        };
+        ConfirmedSummary: {
+            /** Format: uuid */
+            id: string;
+            text: string;
+            /** Format: date-time */
+            confirmedAt: string;
+            confirmedBy: {
+                id: string;
+                displayName: string;
+            };
+            summaryInputSetId: string;
+            initialDraft: null | {
+                /** Format: uuid */
+                id: string;
+                text: string;
+                provider: string;
+                model: string;
+                /** Format: date-time */
+                requestedAt: string;
+                summaryInputSetId: string;
+            };
         };
         InsightDecisionRequest: {
             proposalId: string;
@@ -953,7 +1001,7 @@ export interface components {
             /** @constant */
             version: "v1";
         };
-        /** @description Error envelope. Codes include VALIDATION_ERROR, AUTHENTICATION_FAILED, FORBIDDEN, TASK_NOT_FOUND, PAYLOAD_TOO_LARGE, IDEMPOTENCY_KEY_REUSED, AUDIT_NOT_ACCEPTED, REPLACEMENT_ALREADY_EXISTS, TASK_ASSIGNEE_UNAVAILABLE, AI_UNAVAILABLE and INTERNAL_ERROR. */
+        /** @description Error envelope. Codes include VALIDATION_ERROR, AUTHENTICATION_FAILED, FORBIDDEN, TASK_NOT_FOUND, PAYLOAD_TOO_LARGE, IDEMPOTENCY_KEY_REUSED, AUDIT_NOT_ACCEPTED, REPLACEMENT_ALREADY_EXISTS, TASK_ASSIGNEE_UNAVAILABLE, AI_UNAVAILABLE, SUMMARY_ALREADY_CONFIRMED, SUMMARY_CONFIRMED and INTERNAL_ERROR. */
         ApiError: {
             error: {
                 code: string;
@@ -2468,6 +2516,15 @@ export interface operations {
                     "application/json": components["schemas"]["ApiError"];
                 };
             };
+            /** @description Summary already confirmed for this audit (SUMMARY_CONFIRMED) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
             /** @description Invalid decision or unknown proposal (VALIDATION_FAILED) */
             422: {
                 headers: {
@@ -2532,6 +2589,15 @@ export interface operations {
             };
             /** @description Malformed */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Summary already confirmed for this audit (SUMMARY_CONFIRMED) */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -2610,6 +2676,15 @@ export interface operations {
                     "application/json": components["schemas"]["ApiError"];
                 };
             };
+            /** @description Summary already confirmed for this audit (SUMMARY_CONFIRMED) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
             /** @description Non-empty body (VALIDATION_FAILED) */
             422: {
                 headers: {
@@ -2630,6 +2705,86 @@ export interface operations {
             };
             /** @description Provider failed; a failed row is recorded and the request can be sent again (AI_UNAVAILABLE) */
             502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    confirmSummary: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                taskId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SummaryConfirmationRequest"];
+            };
+        };
+        responses: {
+            /** @description Confirmed summary (Cache-Control no-store) */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConfirmedSummary"];
+                };
+            };
+            /** @description Session rejected */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Responsable role required (FORBIDDEN) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Malformed */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description A summary is already confirmed for this audit (SUMMARY_ALREADY_CONFIRMED) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Invalid text or unusable draftId (VALIDATION_FAILED) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Evidence inconsistent or summary not recorded (INTERNAL_ERROR) */
+            500: {
                 headers: {
                     [name: string]: unknown;
                 };

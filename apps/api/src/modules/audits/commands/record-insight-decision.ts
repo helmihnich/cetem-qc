@@ -1,12 +1,14 @@
 import type { CurrentInsightDecision, InsightDecisionValue } from "@cetem-qc/domain";
 import type { Pool } from "pg";
 import { withTransaction } from "../../../db/transaction.js";
+import { isSummaryConfirmed, lockTaskSummary } from "../../summaries/queries/confirmed-summary.js";
 import { getAcceptedSubmissionForReview } from "../queries/accepted-submission.js";
 import { evaluateProposalsForSnapshot, isConsistentSnapshot, reviewCommandTestSeams } from "./record-review-access.js";
 
 export type RecordInsightDecisionOutcome =
   | { type: "recorded"; current: CurrentInsightDecision }
   | { type: "not-found" }
+  | { type: "summary-confirmed" }
   | { type: "inconsistent" }
   | { type: "unknown-proposal" };
 
@@ -18,9 +20,11 @@ export async function recordInsightDecision(
   pool: Pool, responsableId: string, taskId: string, proposalId: string, decision: InsightDecisionValue,
 ): Promise<RecordInsightDecisionOutcome> {
   return withTransaction(pool, async (transaction): Promise<RecordInsightDecisionOutcome> => {
+    await lockTaskSummary(transaction, taskId);
     const stored = await getAcceptedSubmissionForReview(transaction, responsableId, taskId);
     if (!stored) return { type: "not-found" };
     const evidence = reviewCommandTestSeams.snapshot ? reviewCommandTestSeams.snapshot(stored) : stored;
+    if (await isSummaryConfirmed(transaction, evidence.submissionId)) return { type: "summary-confirmed" };
     if (!isConsistentSnapshot(evidence.identity, evidence.results)) return { type: "inconsistent" };
     const proposal = evaluateProposalsForSnapshot(evidence).proposals.find((candidate) => candidate.proposalId === proposalId);
     if (!proposal) return { type: "unknown-proposal" };

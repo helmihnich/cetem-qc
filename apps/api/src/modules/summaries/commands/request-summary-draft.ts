@@ -1,13 +1,12 @@
-import { createHash } from "node:crypto";
-import { buildSummaryInputSet, buildSummaryPrompt, canonicalJson, collectRetainedInsights, summaryInputSetPlainObject } from "@cetem-qc/domain";
+import { buildSummaryPrompt, summaryInputSetPlainObject } from "@cetem-qc/domain";
 import type { Pool } from "pg";
 import { withTransaction } from "../../../db/transaction.js";
 import { AI_REQUEST_TIMEOUT_MS, SummaryProviderError } from "../../ai/index.js";
 import type { SummaryDraftProvider, SummaryFailureClass } from "../../ai/index.js";
-import { evaluateProposalsForSnapshot, isConsistentSnapshot, reviewCommandTestSeams } from "../../audits/commands/record-review-access.js";
+import { isConsistentSnapshot, reviewCommandTestSeams } from "../../audits/commands/record-review-access.js";
 import { getAcceptedSubmissionForReview } from "../../audits/queries/accepted-submission.js";
-import { getCurrentInsightDecisions } from "../../audits/queries/insight-decisions.js";
-import { getManualInsights } from "../../audits/queries/manual-insights.js";
+import { buildInputSetForSnapshot } from "../input-set.js";
+import { isSummaryConfirmed, lockTaskSummary } from "../queries/confirmed-summary.js";
 
 export interface SummaryAiDraft {
   id: string;
@@ -24,6 +23,7 @@ export type RequestSummaryDraftOutcome =
   | { type: "generated"; draft: SummaryAiDraft; durationMs: number }
   | { type: "failed"; failureClass: SummaryFailureClass; provider: string; durationMs: number }
   | { type: "not-found" }
+  | { type: "summary-confirmed" }
   | { type: "inconsistent" };
 
 /** Test-only seams: replace the provider the route uses, or observe the moment just before the provider call. Never set in production. */
@@ -66,16 +66,13 @@ export async function requestSummaryDraft(
   pool: Pool, provider: SummaryDraftProvider, responsableId: string, taskId: string,
 ): Promise<RequestSummaryDraftOutcome> {
   const prepared = await withTransaction(pool, async (transaction) => {
+    await lockTaskSummary(transaction, taskId);
     const stored = await getAcceptedSubmissionForReview(transaction, responsableId, taskId);
     if (!stored) return { type: "not-found" as const };
     const evidence = reviewCommandTestSeams.snapshot ? reviewCommandTestSeams.snapshot(stored) : stored;
+    if (await isSummaryConfirmed(transaction, evidence.submissionId)) return { type: "summary-confirmed" as const };
     if (!isConsistentSnapshot(evidence.identity, evidence.results)) return { type: "inconsistent" as const };
-    const proposals = evaluateProposalsForSnapshot(evidence);
-    const decisions = await getCurrentInsightDecisions(transaction, evidence.submissionId);
-    const manualInsights = await getManualInsights(transaction, evidence.submissionId);
-    const retained = collectRetainedInsights(proposals.proposals, decisions, manualInsights);
-    const inputSet = buildSummaryInputSet({ identity: evidence.identity, values: evidence.payload.values, results: evidence.results }, retained);
-    return { type: "ready" as const, evidence, inputSet, summaryInputSetId: createHash("sha256").update(canonicalJson(inputSet)).digest("hex") };
+    return { type: "ready" as const, evidence, ...(await buildInputSetForSnapshot(transaction, evidence)) };
   });
   if (prepared.type !== "ready") return prepared;
 
@@ -88,6 +85,9 @@ export async function requestSummaryDraft(
 
   const status = "text" in result ? "generated" : "failed";
   const row = await withTransaction(pool, async (transaction) => {
+    // A confirmation may have landed during the provider call: then no row is added.
+    await lockTaskSummary(transaction, evidence.taskId);
+    if (await isSummaryConfirmed(transaction, evidence.submissionId)) return null;
     const inserted = await transaction.query<DraftRow>(
       `WITH inserted AS (
          INSERT INTO summary_ai_drafts (requested_by, task_id, audit_id, submission_id, revision, revision_identity, summary_input_set_id, input_set, provider, model, status, failure_class, draft_text)
@@ -104,6 +104,7 @@ export async function requestSummaryDraft(
     );
     return inserted.rows[0]!;
   });
+  if (!row) return { type: "summary-confirmed" };
   if (!("text" in result)) return { type: "failed", failureClass: result.failureClass, provider: provider.name, durationMs };
   return {
     type: "generated",

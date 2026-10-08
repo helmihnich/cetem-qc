@@ -33,6 +33,8 @@ type ManualInsightRequestContract = apiV1Operations["addManualInsight"]["request
 type ManualInsightContract = apiV1Operations["addManualInsight"]["responses"][201]["content"]["application/json"];
 type SummaryDraftRequestContract = apiV1Operations["requestSummaryDraft"]["requestBody"]["content"]["application/json"];
 type SummaryDraftResponseContract = apiV1Operations["requestSummaryDraft"]["responses"][201]["content"]["application/json"];
+type SummaryConfirmationRequestContract = apiV1Operations["confirmSummary"]["requestBody"]["content"]["application/json"];
+type ConfirmedSummaryContract = apiV1Operations["confirmSummary"]["responses"][201]["content"]["application/json"];
 type EmployeeTaskListResponseContract = apiV1Operations["listAssignedEmployeeTasks"]["responses"][200]["content"]["application/json"];
 type EmployeeTaskResponseContract = apiV1Operations["getAssignedEmployeeTask"]["responses"][200]["content"]["application/json"];
 
@@ -181,8 +183,31 @@ export const summaryDraftResponseSchema: z.ZodType<SummaryDraftResponseContract>
   requestedBy: z.object({ id: z.string(), displayName: z.string() }).strict(),
   summaryInputSetId: z.string().regex(/^[0-9a-f]{64}$/),
 }).strict();
+/** Technical bound shared with the migration check; not a CETEM rule. */
+export const SUMMARY_TEXT_MAX = 5000;
+export const summaryConfirmationRequestSchema: z.ZodType<SummaryConfirmationRequestContract> = z.object({
+  // A NUL character cannot be stored by PostgreSQL: refuse it as invalid input instead of failing at insert.
+  text: z.string().trim().min(1).max(SUMMARY_TEXT_MAX).refine((value) => !value.includes(" ")),
+  draftId: z.string().uuid().optional(),
+}).strict();
+export const confirmedSummarySchema: z.ZodType<ConfirmedSummaryContract> = z.object({
+  id: z.string().uuid(),
+  text: z.string().min(1).max(SUMMARY_TEXT_MAX),
+  confirmedAt: z.string().datetime(),
+  confirmedBy: z.object({ id: z.string(), displayName: z.string() }).strict(),
+  summaryInputSetId: z.string().regex(/^[0-9a-f]{64}$/),
+  initialDraft: z.object({
+    id: z.string().uuid(),
+    text: z.string().min(1),
+    provider: z.string().min(1),
+    model: z.string().min(1),
+    requestedAt: z.string().datetime(),
+    summaryInputSetId: z.string().regex(/^[0-9a-f]{64}$/),
+  }).strict().nullable(),
+}).strict();
 export const acceptedEvidenceResponseSchema: z.ZodType<AcceptedEvidenceResponseContract> = z.object({
   manualInsights: z.array(manualInsightSchema),
+  summary: confirmedSummarySchema.nullable(),
   insights: insightProposalSetSchema,
   insightDecisions: z.array(evidenceInsightDecisionSchema),
   task: z.object({ id: z.string().uuid(), establishment: z.string(), service: z.string(), assignee: z.string() }).strict(),
@@ -304,6 +329,8 @@ export type InsightDecisionRequest = z.infer<typeof insightDecisionRequestSchema
 export type InsightDecisionResponse = z.infer<typeof insightDecisionResponseSchema>;
 export type ManualInsightRequest = z.infer<typeof manualInsightRequestSchema>;
 export type ManualInsightResponse = z.infer<typeof manualInsightResponseSchema>;
+export type SummaryConfirmationRequest = z.infer<typeof summaryConfirmationRequestSchema>;
+export type ConfirmedSummary = z.infer<typeof confirmedSummarySchema>;
 export type SummaryDraftRequest = z.infer<typeof summaryDraftRequestSchema>;
 export type SummaryDraftResponse = z.infer<typeof summaryDraftResponseSchema>;
 export type EmployeeTaskListResponse = z.infer<typeof employeeTaskListResponseSchema>;

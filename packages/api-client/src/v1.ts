@@ -1,8 +1,8 @@
-import { acceptedEvidenceResponseSchema, apiErrorSchema, authenticationRequestSchema, authenticationResponseSchema, createDeactivatedAssigneeRecoveryRequestSchema, createEmployeeRequestSchema, createTaskRequestSchema, deactivatedAssigneeRecoveryResponseSchema, employeeCredentialResponseSchema, employeeListResponseSchema, employeeTaskAuditVersionSchema, employeeTaskRecoverySeedResponseSchema, employeeTaskListQuerySchema, employeeTaskListResponseSchema, employeeTaskResponseSchema, healthResponseSchema, insightDecisionRequestSchema, insightDecisionResponseSchema, manualInsightRequestSchema, manualInsightResponseSchema, passwordReplacementRequestSchema, reassignUnstartedTaskRequestSchema, reassignUnstartedTaskResponseSchema, replacementTaskResponseSchema, sessionResponseSchema, summaryDraftRequestSchema, summaryDraftResponseSchema, syncOperationAcceptedSchema, syncOperationConflictSchema, syncOperationRejectedSchema, syncOperationRequestSchema, taskAssigneeListResponseSchema, taskListResponseSchema, taskResponseSchema } from "@cetem-qc/schemas/api/v1";
-import type { AcceptedEvidenceResponse, AuthenticationRequest, AuthenticationResponse, CreateDeactivatedAssigneeRecoveryRequest, CreateEmployeeRequest, CreateTaskRequest, DeactivatedAssigneeRecoveryResponse, EmployeeCredentialResponse, EmployeeListResponse, EmployeeTaskAuditVersion, EmployeeTaskRecoverySeedResponse, EmployeeTaskListResponse, EmployeeTaskResponse, HealthResponse, InsightDecisionRequest, InsightDecisionResponse, ManualInsightRequest, ManualInsightResponse, PasswordReplacementRequest, ReassignUnstartedTaskRequest, ReassignUnstartedTaskResponse, ReplacementTaskResponse, SummaryDraftResponse, SyncOperationAccepted, SyncOperationConflict, SyncOperationRejected, SyncOperationRequest, TaskListResponse, TaskResponse } from "@cetem-qc/schemas/api/v1";
+import { acceptedEvidenceResponseSchema, apiErrorSchema, authenticationRequestSchema, authenticationResponseSchema, confirmedSummarySchema, createDeactivatedAssigneeRecoveryRequestSchema, createEmployeeRequestSchema, createTaskRequestSchema, deactivatedAssigneeRecoveryResponseSchema, employeeCredentialResponseSchema, employeeListResponseSchema, employeeTaskAuditVersionSchema, employeeTaskRecoverySeedResponseSchema, employeeTaskListQuerySchema, employeeTaskListResponseSchema, employeeTaskResponseSchema, healthResponseSchema, insightDecisionRequestSchema, insightDecisionResponseSchema, manualInsightRequestSchema, manualInsightResponseSchema, passwordReplacementRequestSchema, reassignUnstartedTaskRequestSchema, reassignUnstartedTaskResponseSchema, replacementTaskResponseSchema, sessionResponseSchema, summaryConfirmationRequestSchema, summaryDraftRequestSchema, summaryDraftResponseSchema, syncOperationAcceptedSchema, syncOperationConflictSchema, syncOperationRejectedSchema, syncOperationRequestSchema, taskAssigneeListResponseSchema, taskListResponseSchema, taskResponseSchema } from "@cetem-qc/schemas/api/v1";
+import type { AcceptedEvidenceResponse, AuthenticationRequest, AuthenticationResponse, ConfirmedSummary, CreateDeactivatedAssigneeRecoveryRequest, CreateEmployeeRequest, CreateTaskRequest, DeactivatedAssigneeRecoveryResponse, EmployeeCredentialResponse, EmployeeListResponse, EmployeeTaskAuditVersion, EmployeeTaskRecoverySeedResponse, EmployeeTaskListResponse, EmployeeTaskResponse, HealthResponse, InsightDecisionRequest, InsightDecisionResponse, ManualInsightRequest, ManualInsightResponse, PasswordReplacementRequest, ReassignUnstartedTaskRequest, ReassignUnstartedTaskResponse, ReplacementTaskResponse, SummaryConfirmationRequest, SummaryDraftResponse, SyncOperationAccepted, SyncOperationConflict, SyncOperationRejected, SyncOperationRequest, TaskListResponse, TaskResponse } from "@cetem-qc/schemas/api/v1";
 
-export { acceptedEvidenceResponseSchema, insightDecisionResponseSchema, manualInsightResponseSchema, replacementTaskResponseSchema, summaryDraftResponseSchema, taskListResponseSchema };
-export type { SummaryDraftResponse, AcceptedEvidenceResponse, InsightDecisionRequest, InsightDecisionResponse, ManualInsightRequest, ManualInsightResponse, CreateDeactivatedAssigneeRecoveryRequest, CreateTaskRequest, DeactivatedAssigneeRecoveryResponse, EmployeeTaskAuditVersion, EmployeeTaskRecoverySeedResponse, EmployeeTaskListResponse, EmployeeTaskResponse, ReassignUnstartedTaskRequest, ReassignUnstartedTaskResponse, ReplacementTaskResponse, SyncOperationAccepted, SyncOperationConflict, SyncOperationRejected, SyncOperationRequest, TaskListResponse };
+export { acceptedEvidenceResponseSchema, confirmedSummarySchema, insightDecisionResponseSchema, manualInsightResponseSchema, replacementTaskResponseSchema, summaryDraftResponseSchema, taskListResponseSchema };
+export type { ConfirmedSummary, SummaryConfirmationRequest, SummaryDraftResponse, AcceptedEvidenceResponse, InsightDecisionRequest, InsightDecisionResponse, ManualInsightRequest, ManualInsightResponse, CreateDeactivatedAssigneeRecoveryRequest, CreateTaskRequest, DeactivatedAssigneeRecoveryResponse, EmployeeTaskAuditVersion, EmployeeTaskRecoverySeedResponse, EmployeeTaskListResponse, EmployeeTaskResponse, ReassignUnstartedTaskRequest, ReassignUnstartedTaskResponse, ReplacementTaskResponse, SyncOperationAccepted, SyncOperationConflict, SyncOperationRejected, SyncOperationRequest, TaskListResponse };
 
 export type SyncOperationResponse =
   | { status: 200; body: SyncOperationAccepted }
@@ -28,6 +28,7 @@ export type InsightDecisionOutcome =
   | { status: 200; body: InsightDecisionResponse }
   | { status: 403; code: "FORBIDDEN"; message: string }
   | { status: 404; code: "TASK_NOT_FOUND"; message: string }
+  | { status: 409; code: "SUMMARY_CONFIRMED"; message: string }
   | { status: 422; code: "VALIDATION_FAILED"; message: string }
   | { status: 500; code: "INTERNAL_ERROR"; message: string };
 
@@ -36,6 +37,7 @@ export type AddManualInsightOutcome =
   | { status: 201; body: ManualInsightResponse }
   | { status: 403; code: "FORBIDDEN"; message: string }
   | { status: 404; code: "TASK_NOT_FOUND"; message: string }
+  | { status: 409; code: "SUMMARY_CONFIRMED"; message: string }
   | { status: 422; code: "VALIDATION_FAILED"; message: string }
   | { status: 500; code: "INTERNAL_ERROR"; message: string };
 
@@ -44,9 +46,19 @@ export type RequestSummaryDraftOutcome =
   | { status: 201; body: SummaryDraftResponse }
   | { status: 403; code: "FORBIDDEN"; message: string }
   | { status: 404; code: "TASK_NOT_FOUND"; message: string }
+  | { status: 409; code: "SUMMARY_CONFIRMED"; message: string }
   | { status: 422; code: "VALIDATION_FAILED"; message: string }
   | { status: 500; code: "INTERNAL_ERROR"; message: string }
   | { status: 502; code: "AI_UNAVAILABLE"; message: string };
+
+/** The documented outcomes of a summary confirmation; any other status or body throws `ApiRequestError`. */
+export type ConfirmSummaryOutcome =
+  | { status: 201; body: ConfirmedSummary }
+  | { status: 403; code: "FORBIDDEN"; message: string }
+  | { status: 404; code: "TASK_NOT_FOUND"; message: string }
+  | { status: 409; code: "SUMMARY_ALREADY_CONFIRMED"; message: string }
+  | { status: 422; code: "VALIDATION_FAILED"; message: string }
+  | { status: 500; code: "INTERNAL_ERROR"; message: string };
 
 export class ApiRequestError extends Error {
   constructor(
@@ -185,6 +197,7 @@ export function createApiClient({ baseUrl, fetch: fetcher = fetch, sessionToken:
         const { code, message } = error.data.error;
         if (status === 403 && code === "FORBIDDEN") return { status, code, message };
         if (status === 404 && code === "TASK_NOT_FOUND") return { status, code, message };
+        if (status === 409 && code === "SUMMARY_CONFIRMED") return { status, code, message };
         if (status === 422 && code === "VALIDATION_FAILED") return { status, code, message };
         if (status === 500 && code === "INTERNAL_ERROR") return { status, code, message };
       }
@@ -207,6 +220,7 @@ export function createApiClient({ baseUrl, fetch: fetcher = fetch, sessionToken:
         const { code, message } = error.data.error;
         if (status === 403 && code === "FORBIDDEN") return { status, code, message };
         if (status === 404 && code === "TASK_NOT_FOUND") return { status, code, message };
+        if (status === 409 && code === "SUMMARY_CONFIRMED") return { status, code, message };
         if (status === 422 && code === "VALIDATION_FAILED") return { status, code, message };
         if (status === 500 && code === "INTERNAL_ERROR") return { status, code, message };
       }
@@ -229,9 +243,33 @@ export function createApiClient({ baseUrl, fetch: fetcher = fetch, sessionToken:
         const { code, message } = error.data.error;
         if (status === 403 && code === "FORBIDDEN") return { status, code, message };
         if (status === 404 && code === "TASK_NOT_FOUND") return { status, code, message };
+        if (status === 409 && code === "SUMMARY_CONFIRMED") return { status, code, message };
         if (status === 422 && code === "VALIDATION_FAILED") return { status, code, message };
         if (status === 500 && code === "INTERNAL_ERROR") return { status, code, message };
         if (status === 502 && code === "AI_UNAVAILABLE") return { status, code, message };
+      }
+      throw toRequestError(status, payload.data);
+    },
+    /** Saves the final text and confirms the summary of an own-team accepted audit (Responsable only). */
+    async confirmSummary(taskId: string, input: SummaryConfirmationRequest): Promise<ConfirmSummaryOutcome> {
+      const payload = await request(`/tasks/${encodeURIComponent(taskId)}/summary-confirmation`, {
+        method: "POST", headers: { accept: "application/json", "content-type": "application/json", ...sessionHeaders() },
+        body: JSON.stringify(summaryConfirmationRequestSchema.parse(input)), cache: "no-store",
+      });
+      const status = payload.response.status;
+      if (status === 201) {
+        const parsed = confirmedSummarySchema.safeParse(payload.data);
+        if (parsed.success) return { status, body: parsed.data };
+        throw toRequestError(status, payload.data);
+      }
+      const error = apiErrorSchema.safeParse(payload.data);
+      if (error.success) {
+        const { code, message } = error.data.error;
+        if (status === 403 && code === "FORBIDDEN") return { status, code, message };
+        if (status === 404 && code === "TASK_NOT_FOUND") return { status, code, message };
+        if (status === 409 && code === "SUMMARY_ALREADY_CONFIRMED") return { status, code, message };
+        if (status === 422 && code === "VALIDATION_FAILED") return { status, code, message };
+        if (status === 500 && code === "INTERNAL_ERROR") return { status, code, message };
       }
       throw toRequestError(status, payload.data);
     },

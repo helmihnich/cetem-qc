@@ -1,7 +1,7 @@
 import express from "express";
 import type { Server } from "node:http";
 import type { Pool } from "pg";
-import { acceptedEvidenceResponseSchema, apiErrorSchema, insightDecisionRequestSchema, insightDecisionResponseSchema, manualInsightRequestSchema, manualInsightResponseSchema, summaryDraftRequestSchema, summaryDraftResponseSchema, authenticationRequestSchema, authenticationResponseSchema, createDeactivatedAssigneeRecoveryRequestSchema, createEmployeeRequestSchema, createTaskRequestSchema, deactivatedAssigneeRecoveryResponseSchema, employeeCredentialResponseSchema, employeeListResponseSchema, employeeTaskAuditVersionSchema, employeeTaskRecoverySeedResponseSchema, employeeTaskListQuerySchema, employeeTaskListResponseSchema, employeeTaskResponseSchema, healthQuerySchema, passwordReplacementRequestSchema, reassignUnstartedTaskRequestSchema, reassignUnstartedTaskResponseSchema, replacementTaskResponseSchema, sessionResponseSchema, syncOperationRequestSchema, taskAssigneeListResponseSchema, taskListQuerySchema, taskListResponseSchema, taskResponseSchema, updateEmployeeStatusRequestSchema, updateEmployeeStatusResponseSchema } from "@cetem-qc/schemas/api/v1";
+import { acceptedEvidenceResponseSchema, apiErrorSchema, insightDecisionRequestSchema, insightDecisionResponseSchema, manualInsightRequestSchema, manualInsightResponseSchema, summaryConfirmationRequestSchema, confirmedSummarySchema, summaryDraftRequestSchema, summaryDraftResponseSchema, authenticationRequestSchema, authenticationResponseSchema, createDeactivatedAssigneeRecoveryRequestSchema, createEmployeeRequestSchema, createTaskRequestSchema, deactivatedAssigneeRecoveryResponseSchema, employeeCredentialResponseSchema, employeeListResponseSchema, employeeTaskAuditVersionSchema, employeeTaskRecoverySeedResponseSchema, employeeTaskListQuerySchema, employeeTaskListResponseSchema, employeeTaskResponseSchema, healthQuerySchema, passwordReplacementRequestSchema, reassignUnstartedTaskRequestSchema, reassignUnstartedTaskResponseSchema, replacementTaskResponseSchema, sessionResponseSchema, syncOperationRequestSchema, taskAssigneeListResponseSchema, taskListQuerySchema, taskListResponseSchema, taskResponseSchema, updateEmployeeStatusRequestSchema, updateEmployeeStatusResponseSchema } from "@cetem-qc/schemas/api/v1";
 import { getHealth } from "./modules/health/health-query.js";
 import {
   authenticateWithPassword,
@@ -21,6 +21,8 @@ import { recordInsightDecision } from "./modules/audits/commands/record-insight-
 import { addManualInsight } from "./modules/audits/commands/add-manual-insight.js";
 import { createSummaryDraftProvider } from "./modules/ai/index.js";
 import { requestSummaryDraft, summaryCommandTestSeams } from "./modules/summaries/commands/request-summary-draft.js";
+import { confirmSummary } from "./modules/summaries/commands/confirm-summary.js";
+import { getConfirmedSummary } from "./modules/summaries/queries/confirmed-summary.js";
 import { getAcceptedSubmissionForReview } from "./modules/audits/queries/accepted-submission.js";
 import { createReplacementControl } from "./modules/audits/commands/create-replacement-control.js";
 import { createDeactivatedAssigneeRecovery } from "./modules/audits/commands/create-deactivated-assignee-recovery.js";
@@ -488,6 +490,7 @@ export function createApp(pool?: Pool) {
         insights,
         insightDecisions: outcome.insightDecisions,
         manualInsights: outcome.manualInsights,
+        summary: await getConfirmedSummary(getPool(), evidence.submissionId),
         lineage: { replacementOf: lineage.replacementOf, replacedBy: lineage.replacedBy, recoverySource: lineage.recoverySource, recoverySuccessorTaskId: lineage.recoverySuccessorTaskId },
       }));
     } catch {
@@ -500,7 +503,7 @@ export function createApp(pool?: Pool) {
     response.set("Cache-Control", "no-store");
     const session = response.locals.session as NonNullable<Awaited<ReturnType<typeof findActiveSession>>>;
     // Refusal lines carry the actor and a fixed class only: never the task ID, proposal ID or statement.
-    const refuse = (refusalClass: "forbidden-role" | "not-found" | "validation") => console.info(JSON.stringify({ event: "audit.insight_decision_refused", class: refusalClass, actorId: session.id }));
+    const refuse = (refusalClass: "forbidden-role" | "not-found" | "validation" | "locked") => console.info(JSON.stringify({ event: "audit.insight_decision_refused", class: refusalClass, actorId: session.id }));
     if (session.role !== "responsable") {
       refuse("forbidden-role");
       response.status(403).json(apiErrorSchema.parse({ error: { code: "FORBIDDEN", message: "Accès réservé au Responsable de l’équipe." } }));
@@ -536,6 +539,10 @@ export function createApp(pool?: Pool) {
         case "not-found":
           notFound();
           return;
+        case "summary-confirmed":
+          refuse("locked");
+          response.status(409).json(apiErrorSchema.parse({ error: { code: "SUMMARY_CONFIRMED", message: "La synthèse est confirmée : cette action n’est plus possible." } }));
+          return;
         case "unknown-proposal":
           invalid();
           return;
@@ -554,7 +561,7 @@ export function createApp(pool?: Pool) {
     response.set("Cache-Control", "no-store");
     const session = response.locals.session as NonNullable<Awaited<ReturnType<typeof findActiveSession>>>;
     // Refusal lines carry the actor and a fixed class only: never the task ID, text or justification.
-    const refuse = (refusalClass: "forbidden-role" | "not-found" | "validation") => console.info(JSON.stringify({ event: "audit.manual_insight_refused", class: refusalClass, actorId: session.id }));
+    const refuse = (refusalClass: "forbidden-role" | "not-found" | "validation" | "locked") => console.info(JSON.stringify({ event: "audit.manual_insight_refused", class: refusalClass, actorId: session.id }));
     if (session.role !== "responsable") {
       refuse("forbidden-role");
       response.status(403).json(apiErrorSchema.parse({ error: { code: "FORBIDDEN", message: "Accès réservé au Responsable de l’équipe." } }));
@@ -590,6 +597,10 @@ export function createApp(pool?: Pool) {
         case "not-found":
           notFound();
           return;
+        case "summary-confirmed":
+          refuse("locked");
+          response.status(409).json(apiErrorSchema.parse({ error: { code: "SUMMARY_CONFIRMED", message: "La synthèse est confirmée : cette action n’est plus possible." } }));
+          return;
         case "inconsistent":
           console.info(JSON.stringify({ event: "audit.manual_insight_inconsistent", actorId: session.id }));
           response.status(500).json(apiErrorSchema.parse({ error: { code: "INTERNAL_ERROR", message: "L’insight manuel n’a pas pu être enregistré." } }));
@@ -605,7 +616,7 @@ export function createApp(pool?: Pool) {
     response.set("Cache-Control", "no-store");
     const session = response.locals.session as NonNullable<Awaited<ReturnType<typeof findActiveSession>>>;
     // Log lines carry the actor and fixed classes only: never the task ID, prompt, input values, draft text or key.
-    const refuse = (refusalClass: "forbidden-role" | "not-found" | "validation") => console.info(JSON.stringify({ event: "summary.ai_draft_refused", class: refusalClass, actorId: session.id }));
+    const refuse = (refusalClass: "forbidden-role" | "not-found" | "validation" | "locked") => console.info(JSON.stringify({ event: "summary.ai_draft_refused", class: refusalClass, actorId: session.id }));
     if (session.role !== "responsable") {
       refuse("forbidden-role");
       response.status(403).json(apiErrorSchema.parse({ error: { code: "FORBIDDEN", message: "Accès réservé au Responsable de l’équipe." } }));
@@ -647,6 +658,10 @@ export function createApp(pool?: Pool) {
         case "not-found":
           notFound();
           return;
+        case "summary-confirmed":
+          refuse("locked");
+          response.status(409).json(apiErrorSchema.parse({ error: { code: "SUMMARY_CONFIRMED", message: "La synthèse est confirmée : cette action n’est plus possible." } }));
+          return;
         case "inconsistent":
           console.info(JSON.stringify({ event: "summary.ai_draft_inconsistent", actorId: session.id }));
           response.status(500).json(apiErrorSchema.parse({ error: { code: "INTERNAL_ERROR", message: "Le brouillon n’a pas pu être enregistré." } }));
@@ -655,6 +670,65 @@ export function createApp(pool?: Pool) {
     } catch {
       // Never log the error: it may carry request values.
       response.status(500).json(apiErrorSchema.parse({ error: { code: "INTERNAL_ERROR", message: "Le brouillon n’a pas pu être enregistré." } }));
+    }
+  });
+
+  v1.post("/tasks/:taskId/summary-confirmation", async (request, response) => {
+    response.set("Cache-Control", "no-store");
+    const session = response.locals.session as NonNullable<Awaited<ReturnType<typeof findActiveSession>>>;
+    // Log lines carry the actor and fixed classes only: never the task ID, summary text, draft text or input values.
+    const refuse = (refusalClass: "forbidden-role" | "not-found" | "validation" | "already-confirmed") => console.info(JSON.stringify({ event: "summary.confirm_refused", class: refusalClass, actorId: session.id }));
+    if (session.role !== "responsable") {
+      refuse("forbidden-role");
+      response.status(403).json(apiErrorSchema.parse({ error: { code: "FORBIDDEN", message: "Accès réservé au Responsable de l’équipe." } }));
+      return;
+    }
+    const notFound = () => {
+      refuse("not-found");
+      response.status(404).json(apiErrorSchema.parse({ error: { code: "TASK_NOT_FOUND", message: "Tâche introuvable." } }));
+    };
+    const invalid = () => {
+      refuse("validation");
+      response.status(422).json(apiErrorSchema.parse({ error: { code: "VALIDATION_FAILED", message: "Cette synthèse est invalide." } }));
+    };
+    const taskId = String(request.params.taskId ?? "");
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(taskId)) {
+      notFound();
+      return;
+    }
+    const parsed = summaryConfirmationRequestSchema.safeParse(request.body);
+    try {
+      if (!parsed.success) {
+        // A syntactically valid but unknown or other team's task must stay indistinguishable: check the task first.
+        const probe = await getAcceptedSubmissionForReview(getPool(), session.id, taskId.toLowerCase());
+        if (!probe) notFound();
+        else invalid();
+        return;
+      }
+      const outcome = await confirmSummary(getPool(), session.id, taskId.toLowerCase(), parsed.data);
+      switch (outcome.type) {
+        case "confirmed":
+          console.info(JSON.stringify({ event: "summary.confirmed", actorId: session.id }));
+          response.status(201).json(confirmedSummarySchema.parse(outcome.summary));
+          return;
+        case "not-found":
+          notFound();
+          return;
+        case "invalid-draft":
+          invalid();
+          return;
+        case "already-confirmed":
+          refuse("already-confirmed");
+          response.status(409).json(apiErrorSchema.parse({ error: { code: "SUMMARY_ALREADY_CONFIRMED", message: "La synthèse est déjà confirmée." } }));
+          return;
+        case "inconsistent":
+          console.info(JSON.stringify({ event: "summary.confirm_inconsistent", actorId: session.id }));
+          response.status(500).json(apiErrorSchema.parse({ error: { code: "INTERNAL_ERROR", message: "La synthèse n’a pas pu être confirmée." } }));
+          return;
+      }
+    } catch {
+      // Never log the error: it may carry request values.
+      response.status(500).json(apiErrorSchema.parse({ error: { code: "INTERNAL_ERROR", message: "La synthèse n’a pas pu être confirmée." } }));
     }
   });
 

@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { acceptedEvidenceResponseSchema, insightDecisionResponseSchema, manualInsightResponseSchema } from "@cetem-qc/api-client/v1";
-import type { AcceptedEvidenceResponse, InsightDecisionResponse, ManualInsightResponse } from "@cetem-qc/api-client/v1";
+import type { AcceptedEvidenceResponse, ConfirmedSummary, InsightDecisionResponse, ManualInsightResponse } from "@cetem-qc/api-client/v1";
 import { GRAPHIE_CALCULATION_FIELD_ID_LIST, GRAPHIE_MOBILE_POV_CATALOGUE } from "@cetem-qc/domain";
 import type { CatalogueField, CatalogueSection, GraphieCalculationResults } from "@cetem-qc/domain";
 import { fr } from "@cetem-qc/i18n";
@@ -128,10 +128,12 @@ export type InsightProposalsSectionProps = {
   onDecide?: (proposalId: string, decision: InsightDecisionValue) => void;
   /** Manual insights count as retained: « Aucun insight retenu » shows only when there are none. */
   manualInsightCount?: number;
+  /** Once the summary is confirmed the decision controls are disabled. */
+  locked?: boolean;
 };
 
 /** W5 slot: renders the proposal set exactly as received, with retain/discard controls. It never evaluates. */
-export function InsightProposalsSection({ insights, decisions = [], pendingProposalId = null, failed = false, onDecide, manualInsightCount = 0 }: InsightProposalsSectionProps) {
+export function InsightProposalsSection({ insights, decisions = [], pendingProposalId = null, failed = false, onDecide, manualInsightCount = 0, locked = false }: InsightProposalsSectionProps) {
   const currentOf = (proposalId: string) => decisions.find((decision) => decision.proposalId === proposalId);
   let content: React.ReactNode;
   if (insights.status === "unavailable") content = <p className="state-message">{fr.insights.unavailable}</p>;
@@ -139,7 +141,7 @@ export function InsightProposalsSection({ insights, decisions = [], pendingPropo
   else content = <>
     <ul className="insight-list">{insights.proposals.map((proposal) => {
       const current = currentOf(proposal.proposalId);
-      const pending = pendingProposalId === proposal.proposalId;
+      const pending = locked || pendingProposalId === proposal.proposalId;
       const state = current ? (current.decision === "retained" ? fr.insights.retained : fr.insights.discarded) : fr.insights.undecided;
       return <li className="insight-item" key={proposal.proposalId}>
         <p>{proposal.statement}</p>
@@ -188,15 +190,17 @@ export type ManualInsightsSectionProps = {
   failed?: boolean;
   /** Returns true when the insight was added, so the form can be cleared. */
   onAdd?: (text: string, justification: string) => Promise<boolean> | boolean;
+  /** Once the summary is confirmed the form is disabled. */
+  locked?: boolean;
 };
 
 /** Manual insights of the accepted audit and the add form. Plain text only; no edit or delete control. */
-export function ManualInsightsSection({ insights, pending = false, failed = false, onAdd }: ManualInsightsSectionProps) {
+export function ManualInsightsSection({ insights, pending = false, failed = false, onAdd, locked = false }: ManualInsightsSectionProps) {
   const [text, setText] = useState("");
   const [justification, setJustification] = useState("");
   const submit = (event: React.FormEvent) => {
     event.preventDefault();
-    if (pending || text.trim() === "" || !onAdd) return;
+    if (pending || locked || text.trim() === "" || !onAdd) return;
     void Promise.resolve(onAdd(text, justification)).then((added) => {
       if (added) { setText(""); setJustification(""); }
     });
@@ -213,22 +217,23 @@ export function ManualInsightsSection({ insights, pending = false, failed = fals
       <h5>{fr.insights.manualFormHeading}</h5>
       <p className="field-hint">{fr.insights.manualHint}</p>
       <label htmlFor="manual-insight-text">{fr.insights.manualTextLabel}</label>
-      <textarea id="manual-insight-text" required maxLength={1000} value={text} onChange={(event) => setText(event.target.value)} />
+      <textarea id="manual-insight-text" required disabled={locked} maxLength={1000} value={text} onChange={(event) => setText(event.target.value)} />
       <label htmlFor="manual-insight-justification">{fr.insights.manualJustificationLabel}</label>
-      <textarea id="manual-insight-justification" maxLength={1000} value={justification} onChange={(event) => setJustification(event.target.value)} />
+      <textarea id="manual-insight-justification" disabled={locked} maxLength={1000} value={justification} onChange={(event) => setJustification(event.target.value)} />
       {failed && <p className="field-error" role="alert">{fr.insights.manualFailed}</p>}
-      <button className="secondary-button" type="submit" disabled={pending}>{pending ? fr.insights.manualSubmitting : fr.insights.manualSubmit}</button>
+      <button className="secondary-button" type="submit" disabled={pending || locked}>{pending ? fr.insights.manualSubmitting : fr.insights.manualSubmit}</button>
     </form>
   </section>;
 }
 
 /** Holds the local decision state: it changes only from a server response, never from a client calculation. */
-export function InsightProposalsPanel({ taskId, insights, initialDecisions, initialManualInsights = [] }: { taskId: string; insights: AcceptedEvidenceResponse["insights"]; initialDecisions: InsightDecisions; initialManualInsights?: ManualInsightItem[] }) {
+export function InsightProposalsPanel({ taskId, insights, initialDecisions, initialManualInsights = [], initialSummary = null }: { taskId: string; insights: AcceptedEvidenceResponse["insights"]; initialDecisions: InsightDecisions; initialManualInsights?: ManualInsightItem[]; initialSummary?: ConfirmedSummary | null }) {
+  const [summary, setSummary] = useState<ConfirmedSummary | null>(initialSummary);
   const [manualInsights, setManualInsights] = useState<ManualInsightItem[]>(initialManualInsights);
   const [manualPending, setManualPending] = useState(false);
   const [manualFailed, setManualFailed] = useState(false);
   const onAddManual = async (text: string, justification: string) => {
-    if (manualPending) return false;
+    if (manualPending || summary) return false;
     setManualPending(true);
     setManualFailed(false);
     const result = await submitManualInsight(taskId, text, justification);
@@ -241,7 +246,7 @@ export function InsightProposalsPanel({ taskId, insights, initialDecisions, init
   const [pendingProposalId, setPendingProposalId] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
   const onDecide = (proposalId: string, decision: InsightDecisionValue) => {
-    if (pendingProposalId !== null) return;
+    if (pendingProposalId !== null || summary) return;
     setPendingProposalId(proposalId);
     setFailed(false);
     void submitInsightDecision(taskId, proposalId, decision).then((result) => {
@@ -250,10 +255,15 @@ export function InsightProposalsPanel({ taskId, insights, initialDecisions, init
       setPendingProposalId(null);
     });
   };
+  // After a 409 the confirmed state is read back from the server: nothing is shown as confirmed otherwise.
+  const reloadSummary = async () => {
+    const reloaded = await loadAcceptedEvidence(taskId);
+    return reloaded.kind === "ready" ? reloaded.evidence.summary : null;
+  };
   return <>
-    <InsightProposalsSection insights={insights} decisions={decisions} pendingProposalId={pendingProposalId} failed={failed} onDecide={onDecide} manualInsightCount={manualInsights.length} />
-    <ManualInsightsSection insights={manualInsights} pending={manualPending} failed={manualFailed} onAdd={onAddManual} />
-    <SummaryDraftPanel taskId={taskId} />
+    <InsightProposalsSection insights={insights} decisions={decisions} pendingProposalId={pendingProposalId} failed={failed} onDecide={onDecide} manualInsightCount={manualInsights.length} locked={summary !== null} />
+    <ManualInsightsSection insights={manualInsights} pending={manualPending} failed={manualFailed} onAdd={onAddManual} locked={summary !== null} />
+    <SummaryDraftPanel taskId={taskId} summary={summary} onConfirmed={setSummary} onReloadEvidence={reloadSummary} />
   </>;
 }
 
@@ -297,7 +307,7 @@ export function AcceptedEvidenceView({ taskId, load, onBack, onRetry, headingRef
       <EvidenceLineage lineage={evidence.lineage} />
       <EvidenceInputSections values={evidence.values} />
       <GraphieCalculationReview evidence={{ identity: evidence.identity, values: evidence.values, results: evidence.results as unknown as GraphieCalculationResults }} />
-      <InsightProposalsPanel taskId={evidence.task.id} insights={evidence.insights} initialDecisions={evidence.insightDecisions} initialManualInsights={evidence.manualInsights} />
+      <InsightProposalsPanel taskId={evidence.task.id} insights={evidence.insights} initialDecisions={evidence.insightDecisions} initialManualInsights={evidence.manualInsights} initialSummary={evidence.summary} />
     </>;
   } else if (load.kind === "not-found") {
     content = <div className="state-message error-state" role="alert">{fr.evidence.unavailable}</div>;

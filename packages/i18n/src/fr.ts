@@ -162,6 +162,18 @@ export const fr = {
     apiUnavailable: "Le brouillon IA n’est pas disponible. Réessayez ou rédigez la synthèse manuellement.",
     invalidRequest: "Cette demande est invalide.",
     notRecorded: "Le brouillon n’a pas pu être enregistré.",
+    // Story 10.2 — explicit confirmation of the final summary.
+    confirm: "Confirmer la synthèse",
+    confirming: "Confirmation en cours…",
+    confirmPrompt: "Confirmer cette synthèse ? Elle ne pourra plus être modifiée sans la rouvrir.",
+    confirmYes: "Confirmer",
+    confirmCancel: "Annuler",
+    confirmFailed: "La synthèse n’a pas pu être confirmée. Votre texte est conservé.",
+    conformityUnavailable: "Tant que la synthèse n’est pas confirmée, la décision de conformité et le rapport restent indisponibles.",
+    confirmedHeading: "Synthèse confirmée",
+    confirmedBy: "Confirmée par {name} le {date}",
+    initialDraftLabel: "Brouillon IA initial — non confirmé",
+    locked: "La synthèse est confirmée : cette action n’est plus possible.",
     mockDraft: "Brouillon de démonstration : synthèse générée sans fournisseur externe. Relisez et corrigez ce texte avant toute utilisation ; il doit être confirmé par le Responsable.",
   },
   employeeTasks: {

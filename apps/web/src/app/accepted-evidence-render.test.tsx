@@ -7,7 +7,7 @@ import type { CalculationContext } from "@cetem-qc/domain";
 import type { AcceptedEvidenceResponse } from "@cetem-qc/api-client/v1";
 import { fr } from "@cetem-qc/i18n";
 import { AcceptedEvidenceView, InsightProposalsSection, ManualInsightsSection, loadAcceptedEvidence, submitInsightDecision, submitManualInsight } from "./accepted-evidence";
-import { SummaryDraftSection, applyDraft, requestSummaryDraftFromServer } from "./summary-draft";
+import { SummaryDraftSection, applyDraft, confirmSummaryOnServer, requestSummaryDraftFromServer } from "./summary-draft";
 import type { EvidenceLoad } from "./accepted-evidence";
 import { TaskListView } from "./task-list";
 import type { TaskListViewProps } from "./task-list";
@@ -39,6 +39,7 @@ const evidenceFor = (identity: CalculationContext = GRAPHIE_CALCULATION_IDENTITY
   insights: { status: "unavailable", reason: "no-approved-rules", registryVersion: "insight-registry-1", proposals: [] },
   insightDecisions: [],
   manualInsights: [],
+  summary: null,
   ...overrides,
 });
 
@@ -417,7 +418,8 @@ test("W25 pending shows the loading text, disables the button and sets aria-busy
   assert.match(pending, /<button[^>]*aria-busy="true"[^>]*>/);
   assert.match(pending, /<button[^>]*disabled=""[^>]*>/);
   const idle = summaryBlock(renderToStaticMarkup(<SummaryDraftSection text="" onRequest={noop} />));
-  assert.ok(!/disabled=""/.test(idle) && !decode(idle).includes(fr.summary.pending));
+  // The confirm button is disabled for empty text; only the request button is checked here.
+  assert.ok(!/disabled=""/.test(idle.replace(/<button[^>]*primary-button[^>]*>[\s\S]*?<\/button>/, "")) && !decode(idle).includes(fr.summary.pending));
   const draft = summaryDraft();
   const filled = decode(summaryBlock(renderToStaticMarkup(<SummaryDraftSection text={draft.text} filled={draft} onRequest={noop} />)));
   assert.ok(filled.includes(fr.summary.draftLabel) && filled.includes("Fournisseur mock, modèle mock-fixed-text"));
@@ -451,15 +453,99 @@ test("W27 a failure shows the French alert, keeps the typed text and leaves the 
   assert.deepEqual(await requestSummaryDraftFromServer(TASK, stubFetch(201, { ...created, status: "confirmed" })), { kind: "failed" });
 });
 
-test("W28 the block has no save, confirm, conformity or approval control or wording, no English text, and draft markup is shown as text", () => {
+test("W28 the block has no save, conformity or approval control or wording (Story 10.2 adds only the confirm control), no English text, and draft markup is shown as text", () => {
   const draft = summaryDraft("<b>gras</b> & <script>x</script>");
   const markup = summaryBlock(renderToStaticMarkup(<SummaryDraftSection text="Mon texte." filled={draft} offered={draft} onRequest={noop} onReplace={noop} />));
   assert.ok(!markup.includes("<b>gras") && !markup.includes("<script>"));
   const text = decode(markup);
   assert.ok(text.includes("<b>gras</b>"));
-  const withoutNote = text.replace(fr.summary.note, "");
+  const withoutNote = text.replace(fr.summary.note, "").replace(fr.summary.conformityUnavailable, "").replace(fr.summary.confirm, "");
   assert.ok(!/enregistrer|confirmer|confirmation|approuv|conforme|valider|verrouill/i.test(withoutNote), withoutNote);
   assert.ok(!/\b(save|approve|conformity|draft|summary|request|loading)\b/i.test(text.replace(draft.text, "")));
-  assert.deepEqual([...markup.matchAll(/<button[^>]*>([^<]*)<\/button>/g)].map((match) => match[1]), [fr.summary.request, fr.summary.replace]);
+  assert.deepEqual([...markup.matchAll(/<button[^>]*>([^<]*)<\/button>/g)].map((match) => match[1]), [fr.summary.request, fr.summary.replace, fr.summary.confirm]);
   assert.equal(decode(view(ready())).split("la conformité finale de l'appareil est décidée par le Responsable").length - 1, 1);
+});
+
+// Story 10.2 (W30–W35): explicit confirmation and the confirmed read-only state.
+const SUMMARY_ID = "00000000-0000-4000-8000-000000000204";
+const confirmed = (overrides: Partial<NonNullable<AcceptedEvidenceResponse["summary"]>> = {}): NonNullable<AcceptedEvidenceResponse["summary"]> => ({
+  id: SUMMARY_ID, text: "Synthèse finale.", confirmedAt: "2026-10-08T10:00:00.000Z", confirmedBy: { id: OTHER, displayName: "Responsable Test" },
+  summaryInputSetId: "b".repeat(64), initialDraft: null, ...overrides,
+});
+const initialDraft = () => ({ id: DRAFT, text: "Brouillon initial.", provider: "mock", model: "mock-fixed-text", requestedAt: "2026-10-08T09:00:00.000Z", summaryInputSetId: "a".repeat(64) });
+const section = (props: Partial<React.ComponentProps<typeof SummaryDraftSection>>) => renderToStaticMarkup(<SummaryDraftSection text="" {...props} />);
+const confirmButton = (markup: string) => new RegExp(`<button[^>]*class="primary-button"[^>]*>${fr.summary.confirm}</button>`).exec(markup)?.[0] ?? "";
+
+test("W30 « Confirmer la synthèse » is disabled for empty or whitespace text and while pending, enabled otherwise", () => {
+  for (const text of ["", "  \n "]) assert.match(confirmButton(section({ text })), /disabled=""/);
+  assert.match(confirmButton(section({ text: "Texte.", pending: true })), /disabled=""/);
+  assert.match(confirmButton(section({ text: "Texte.", confirmPending: true })), /disabled=""/);
+  const enabled = confirmButton(section({ text: "Texte." }));
+  assert.ok(enabled !== "" && !/disabled=""/.test(enabled));
+  assert.ok(confirmButton(section({ text: "Brouillon.", filled: summaryDraft() })) !== "");
+});
+
+test("W31 the prompt offers « Confirmer » and « Annuler » with the French question; the confirm button is replaced by it", () => {
+  const markup = section({ text: "Texte.", confirming: true });
+  const text = decode(markup);
+  assert.ok(text.includes(fr.summary.confirmPrompt) && text.includes(fr.summary.confirmYes) && text.includes(fr.summary.confirmCancel));
+  assert.equal(confirmButton(markup), "");
+  assert.ok(!decode(section({ text: "Texte." })).includes(fr.summary.confirmPrompt));
+});
+
+test("W31 the confirmation request sends the draft link only for AI-started text", async () => {
+  const bodies: unknown[] = [];
+  const fetcher = (async (_url: string | URL | Request, init?: RequestInit) => { bodies.push(JSON.parse(String(init?.body))); return new Response(JSON.stringify(confirmed()), { status: 201 }); }) as typeof fetch;
+  assert.deepEqual(await confirmSummaryOnServer(TASK, "Texte.", DRAFT, fetcher), { kind: "confirmed", summary: confirmed() });
+  assert.deepEqual(await confirmSummaryOnServer(TASK, "Texte.", null, fetcher), { kind: "confirmed", summary: confirmed() });
+  assert.deepEqual(bodies, [{ text: "Texte.", draftId: DRAFT }, { text: "Texte." }]);
+});
+
+test("W32 the confirmed state is read only with the confirmer, the date and the initial draft block only when present", () => {
+  const manual = section({ summary: confirmed() });
+  const text = decode(manual);
+  assert.ok(text.includes(fr.summary.confirmedHeading) && text.includes("Confirmée par Responsable Test le "));
+  assert.match(manual, /<textarea[^>]*readOnly=""[^>]*>Synthèse finale\.<\/textarea>/i);
+  assert.ok(!text.includes(fr.summary.initialDraftLabel) && !/mock/.test(text));
+  assert.equal(confirmButton(manual), "");
+  const withDraft = decode(section({ summary: confirmed({ initialDraft: initialDraft() }) }));
+  assert.ok(withDraft.includes(fr.summary.initialDraftLabel) && withDraft.includes("Brouillon initial.") && withDraft.includes("Fournisseur mock, modèle mock-fixed-text"));
+  assert.ok(!withDraft.includes(fr.summary.conformityUnavailable));
+});
+
+test("W33 a failed confirmation shows the French failure, keeps the text and no confirmed state; a 409 is reported for reload", async () => {
+  const markup = section({ text: "Mon texte.", confirmFailed: true });
+  assert.ok(decode(markup).includes(fr.summary.confirmFailed) && !decode(markup).includes(fr.summary.confirmedHeading));
+  assert.match(markup, /<textarea[^>]*>Mon texte\.<\/textarea>/);
+  assert.ok(confirmButton(markup) !== "" && !/disabled=""/.test(confirmButton(markup)));
+  for (const status of [200, 403, 404, 422, 500, 503]) assert.deepEqual(await confirmSummaryOnServer(TASK, "T", null, stubFetch(status, {})), { kind: "failed" });
+  assert.deepEqual(await confirmSummaryOnServer(TASK, "T", null, (async () => { throw new Error("offline"); }) as typeof fetch), { kind: "failed" });
+  assert.deepEqual(await confirmSummaryOnServer(TASK, "T", null, stubFetch(201, { ...confirmed(), summaryInputSetId: "x" })), { kind: "failed" });
+  for (const code of ["SUMMARY_ALREADY_CONFIRMED", "SUMMARY_CONFIRMED"]) assert.deepEqual(await confirmSummaryOnServer(TASK, "T", null, stubFetch(409, { error: { code, message: "m" } })), { kind: "already-confirmed" });
+  assert.deepEqual(await confirmSummaryOnServer(TASK, "T", null, stubFetch(409, { error: { code: "OTHER", message: "m" } })), { kind: "failed" });
+});
+
+test("W34 a confirmed evidence disables the request, manual-insight and decision controls; the conformity note shows only before confirmation", () => {
+  const available = { status: "available" as const, registryVersion: "insight-registry-1", proposals: [proposalA()] };
+  const before = view(ready(evidenceFor(GRAPHIE_CALCULATION_IDENTITY, { insights: available })));
+  assert.ok(decode(before).includes(fr.summary.conformityUnavailable));
+  const after = view(ready(evidenceFor(GRAPHIE_CALCULATION_IDENTITY, { insights: available, summary: confirmed() })));
+  assert.ok(!decode(after).includes(fr.summary.conformityUnavailable) && decode(after).includes(fr.summary.confirmedHeading));
+  const labels: string[] = [fr.insights.retain, fr.insights.discard, fr.insights.manualSubmit, fr.summary.request];
+  const buttons = [...after.matchAll(/<button([^>]*)>([\s\S]*?)<\/button>/g)].filter((match) => labels.includes(decode(match[2]!).trim()));
+  assert.equal(buttons.length, 4);
+  for (const match of buttons) assert.match(match[1]!, /disabled=""/);
+  assert.match(after, /<textarea id="manual-insight-text"[^>]*disabled=""/);
+  assert.ok(!/<button[^>]*>[^<]*Confirmer[^<]*<\/button>/.test(after));
+});
+
+test("W35 no conformity or report control or wording, no English text, and the text is shown as text", () => {
+  const raw = "<b>gras</b> & <script>x</script>";
+  const markup = section({ summary: confirmed({ text: raw }) });
+  assert.ok(!markup.includes("<b>gras") && !markup.includes("<script>"));
+  const unconfirmed = decode(section({ text: "Texte.", confirming: true }));
+  assert.ok(!/Machine conforme|Rapport|Word|PDF/.test(unconfirmed), unconfirmed);
+  const english = /(?<!\p{L})(save|approve|conformity|draft|summary|request|loading|confirm|report)(?!\p{L})/iu;
+  assert.ok(!english.test(unconfirmed.replace(raw, "")));
+  assert.ok(!english.test(decode(markup).replace(raw, "")));
 });
