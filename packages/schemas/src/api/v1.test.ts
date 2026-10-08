@@ -4,7 +4,7 @@ import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import type { apiV1Components, apiV1Operations } from "@cetem-qc/types";
-import { confirmedSummarySchema, summaryConfirmationRequestSchema, summaryDraftRequestSchema, summaryDraftResponseSchema, acceptedEvidenceResponseSchema, insightDecisionRequestSchema, insightDecisionResponseSchema, manualInsightRequestSchema, manualInsightResponseSchema, apiErrorSchema, createEmployeeRequestSchema, createTaskRequestSchema, employeeCredentialResponseSchema, employeeListResponseSchema, employeeTaskListQuerySchema, employeeTaskListResponseSchema, employeeTaskAuditVersionSchema, employeeTaskResponseSchema, graphieDraftPayloadSchema, healthQuerySchema, healthResponseSchema, replacementTaskResponseSchema, syncOperationAcceptedSchema, syncOperationConflictSchema, syncOperationRejectedSchema, syncOperationRequestSchema, taskListQuerySchema, taskListResponseSchema, updateEmployeeStatusRequestSchema, updateEmployeeStatusResponseSchema } from "./v1.js";
+import { summaryReopeningRequestSchema, summaryReopeningSchema, summaryHistoryItemSchema, confirmedSummarySchema,summaryConfirmationRequestSchema, summaryDraftRequestSchema, summaryDraftResponseSchema, acceptedEvidenceResponseSchema, insightDecisionRequestSchema, insightDecisionResponseSchema, manualInsightRequestSchema, manualInsightResponseSchema, apiErrorSchema, createEmployeeRequestSchema, createTaskRequestSchema, employeeCredentialResponseSchema, employeeListResponseSchema, employeeTaskListQuerySchema, employeeTaskListResponseSchema, employeeTaskAuditVersionSchema, employeeTaskResponseSchema, graphieDraftPayloadSchema, healthQuerySchema, healthResponseSchema, replacementTaskResponseSchema, syncOperationAcceptedSchema, syncOperationConflictSchema, syncOperationRejectedSchema, syncOperationRequestSchema, taskListQuerySchema, taskListResponseSchema, updateEmployeeStatusRequestSchema, updateEmployeeStatusResponseSchema } from "./v1.js";
 
 const contractPath = fileURLToPath(new URL("../../../types/openapi/cetem-qc-v1.yaml", import.meta.url));
 
@@ -320,6 +320,8 @@ test("K7 accepted evidence response schema parses a full body and refuses extras
     insightDecisions: [],
     manualInsights: [],
     summary: null,
+    summaryHistory: [],
+    summaryVersion: { number: 1, state: "open" },
   };
   assert.deepEqual(acceptedEvidenceResponseSchema.parse(body), body);
   assert.equal(acceptedEvidenceResponseSchema.safeParse({ ...body, extra: true }).success, false);
@@ -349,6 +351,8 @@ test("K9 accepted evidence insights are required, parse both statuses and refuse
     insightDecisions: [],
     manualInsights: [],
     summary: null,
+    summaryHistory: [],
+    summaryVersion: { number: 1, state: "open" },
   };
   assert.deepEqual(acceptedEvidenceResponseSchema.parse(body), body);
   assert.equal(acceptedEvidenceResponseSchema.safeParse({ ...body, insights: { ...body.insights, proposals: [] } }).success, true);
@@ -383,6 +387,8 @@ test("K11 insightDecisions is required, parses empty and populated, and refuses 
     insightDecisions: [decision],
     manualInsights: [],
     summary: null,
+    summaryHistory: [],
+    summaryVersion: { number: 1, state: "open" },
   };
   assert.deepEqual(acceptedEvidenceResponseSchema.parse(body), body);
   assert.equal(acceptedEvidenceResponseSchema.safeParse({ ...body, insightDecisions: [] }).success, true);
@@ -414,6 +420,8 @@ test("K13 manualInsights is required, parses empty and populated, and refuses ex
     insightDecisions: [],
     manualInsights: [insight],
     summary: null,
+    summaryHistory: [],
+    summaryVersion: { number: 1, state: "open" },
   };
   assert.deepEqual(acceptedEvidenceResponseSchema.parse(body), body);
   assert.equal(acceptedEvidenceResponseSchema.safeParse({ ...body, manualInsights: [] }).success, true);
@@ -442,10 +450,35 @@ test("K16 summaryDraftResponseSchema is strict, needs a 64-hex input set identit
   for (const invalid of [{ text: "x" }, { input: {} }, null, [], "x"]) assert.equal(summaryDraftRequestSchema.safeParse(invalid).success, false);
 });
 
+test("K23 summaryReopeningSchema and summaryHistoryItemSchema are strict; the reopened version is at least 2 and ConfirmedSummary needs a version", () => {
+  const id = "00000000-0000-4000-8000-000000000041";
+  const actor = { id, displayName: "Responsable Test" };
+  const previous = { id, version: 1, text: "Synthèse.", confirmedAt: "2026-10-08T10:00:00.000Z", confirmedBy: actor, summaryInputSetId: "b".repeat(64), initialDraft: null };
+  const reopening = { version: 2, reopenedAt: "2026-10-08T11:00:00.000Z", reopenedBy: actor, previous };
+  assert.deepEqual(summaryReopeningSchema.parse(reopening), reopening);
+  for (const bad of [{ ...reopening, version: 1 }, { ...reopening, extra: 1 }, { ...reopening, previous: { ...previous, version: undefined } }, { ...reopening, previous: { ...previous, version: 0 } }, { ...reopening, reopenedAt: "hier" }]) {
+    assert.equal(summaryReopeningSchema.safeParse(bad).success, false, JSON.stringify(bad));
+  }
+  assert.equal(summaryReopeningRequestSchema.safeParse({}).success, true);
+  for (const bad of [{ reason: "x" }, null, [], "x"]) assert.equal(summaryReopeningRequestSchema.safeParse(bad).success, false);
+  const item = { version: 1, text: "Synthèse.", confirmedAt: previous.confirmedAt, confirmedBy: actor, reopenedAt: reopening.reopenedAt, reopenedBy: actor, initialDraft: null };
+  assert.deepEqual(summaryHistoryItemSchema.parse(item), item);
+  for (const bad of [{ ...item, extra: 1 }, { ...item, initialDraft: undefined }, { ...item, text: "" }, { ...item, version: 0 }]) {
+    assert.equal(summaryHistoryItemSchema.safeParse(bad).success, false, JSON.stringify(bad));
+  }
+});
+
+test("K24 acceptedEvidenceResponseSchema requires summaryHistory and summaryVersion", () => {
+  const parsed = acceptedEvidenceResponseSchema.safeParse({});
+  assert.equal(parsed.success, false);
+  const paths = new Set(parsed.success ? [] : parsed.error.issues.map((issue) => String(issue.path[0])));
+  assert.ok(paths.has("summaryHistory") && paths.has("summaryVersion"));
+});
+
 test("K19 confirmedSummarySchema is strict with a 64-hex identity and a nullable initial draft; the request schema trims and bounds the text", () => {
   const id = "00000000-0000-4000-8000-000000000041";
   const draft = { id, text: "Brouillon.", provider: "mock", model: "mock-fixed-text", requestedAt: "2026-10-08T09:00:00.000Z", summaryInputSetId: "a".repeat(64) };
-  const summary = { id, text: "Synthèse.", confirmedAt: "2026-10-08T10:00:00.000Z", confirmedBy: { id, displayName: "Responsable Test" }, summaryInputSetId: "b".repeat(64), initialDraft: null };
+  const summary = { id, version: 1, text: "Synthèse.", confirmedAt: "2026-10-08T10:00:00.000Z", confirmedBy: { id, displayName: "Responsable Test" }, summaryInputSetId: "b".repeat(64), initialDraft: null };
   assert.deepEqual(confirmedSummarySchema.parse(summary), summary);
   assert.deepEqual(confirmedSummarySchema.parse({ ...summary, initialDraft: draft }), { ...summary, initialDraft: draft });
   for (const bad of [{ ...summary, extra: 1 }, { ...summary, summaryInputSetId: "B".repeat(64) }, { ...summary, summaryInputSetId: "b" }, { ...summary, initialDraft: { ...draft, extra: 1 } }, { ...summary, initialDraft: undefined }, { ...summary, text: "" }, { ...summary, confirmedAt: "hier" }]) {

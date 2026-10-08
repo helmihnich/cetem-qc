@@ -460,6 +460,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/tasks/{taskId}/summary-reopening": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reopen the confirmed summary of an own-team accepted audit before official designation
+         * @description Responsable only. Inserts one insert-only reopening record; the confirmed summary row is never modified and stays in the history. After reopening there is no current confirmed summary until the Responsable confirms again, and a new version number is expected. The body carries nothing. Refused when the summary is not confirmed, and when a registered module reports an official designation. A malformed, unknown or another team's task, and an own-team task without accepted submission, all get the same 404.
+         */
+        post: operations["reopenSummary"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -649,6 +669,13 @@ export interface components {
             replacedBy: string | null;
         };
         AcceptedEvidenceResponse: {
+            /** @description Earlier reopened versions of the summary, newest first. */
+            summaryHistory: components["schemas"]["SummaryHistoryItem"][];
+            summaryVersion: {
+                number: number;
+                /** @enum {string} */
+                state: "confirmed" | "open";
+            };
             manualInsights: components["schemas"]["ManualInsight"][];
             summary: null | components["schemas"]["ConfirmedSummary"];
             insights: components["schemas"]["InsightProposalSet"];
@@ -763,6 +790,7 @@ export interface components {
         ConfirmedSummary: {
             /** Format: uuid */
             id: string;
+            version: number;
             text: string;
             /** Format: date-time */
             confirmedAt: string;
@@ -771,6 +799,42 @@ export interface components {
                 displayName: string;
             };
             summaryInputSetId: string;
+            initialDraft: null | {
+                /** Format: uuid */
+                id: string;
+                text: string;
+                provider: string;
+                model: string;
+                /** Format: date-time */
+                requestedAt: string;
+                summaryInputSetId: string;
+            };
+        };
+        SummaryReopening: {
+            version: number;
+            /** Format: date-time */
+            reopenedAt: string;
+            reopenedBy: {
+                id: string;
+                displayName: string;
+            };
+            previous: components["schemas"]["ConfirmedSummary"];
+        };
+        SummaryHistoryItem: {
+            version: number;
+            text: string;
+            /** Format: date-time */
+            confirmedAt: string;
+            confirmedBy: {
+                id: string;
+                displayName: string;
+            };
+            /** Format: date-time */
+            reopenedAt: string;
+            reopenedBy: {
+                id: string;
+                displayName: string;
+            };
             initialDraft: null | {
                 /** Format: uuid */
                 id: string;
@@ -1001,7 +1065,7 @@ export interface components {
             /** @constant */
             version: "v1";
         };
-        /** @description Error envelope. Codes include VALIDATION_ERROR, AUTHENTICATION_FAILED, FORBIDDEN, TASK_NOT_FOUND, PAYLOAD_TOO_LARGE, IDEMPOTENCY_KEY_REUSED, AUDIT_NOT_ACCEPTED, REPLACEMENT_ALREADY_EXISTS, TASK_ASSIGNEE_UNAVAILABLE, AI_UNAVAILABLE, SUMMARY_ALREADY_CONFIRMED, SUMMARY_CONFIRMED and INTERNAL_ERROR. */
+        /** @description Error envelope. Codes include VALIDATION_ERROR, AUTHENTICATION_FAILED, FORBIDDEN, TASK_NOT_FOUND, PAYLOAD_TOO_LARGE, IDEMPOTENCY_KEY_REUSED, AUDIT_NOT_ACCEPTED, REPLACEMENT_ALREADY_EXISTS, TASK_ASSIGNEE_UNAVAILABLE, AI_UNAVAILABLE, SUMMARY_ALREADY_CONFIRMED, SUMMARY_CONFIRMED, SUMMARY_NOT_CONFIRMED, SUMMARY_DESIGNATED and INTERNAL_ERROR. */
         ApiError: {
             error: {
                 code: string;
@@ -2784,6 +2848,86 @@ export interface operations {
                 };
             };
             /** @description Evidence inconsistent or summary not recorded (INTERNAL_ERROR) */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    reopenSummary: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                taskId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": Record<string, never>;
+            };
+        };
+        responses: {
+            /** @description Reopening record (Cache-Control no-store) */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SummaryReopening"];
+                };
+            };
+            /** @description Session rejected */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Responsable role required (FORBIDDEN) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Malformed */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description The summary is not confirmed (SUMMARY_NOT_CONFIRMED) or an official report is designated (SUMMARY_DESIGNATED) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Non-empty body (VALIDATION_FAILED) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Evidence inconsistent or reopening not recorded (INTERNAL_ERROR) */
             500: {
                 headers: {
                     [name: string]: unknown;

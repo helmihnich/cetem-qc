@@ -4,7 +4,7 @@ import { withTransaction } from "../../../db/transaction.js";
 import { isConsistentSnapshot, reviewCommandTestSeams } from "../../audits/commands/record-review-access.js";
 import { getAcceptedSubmissionForReview } from "../../audits/queries/accepted-submission.js";
 import { buildInputSetForSnapshot } from "../input-set.js";
-import { confirmedSummaryJoins, confirmedSummarySelect, isSummaryConfirmed, lockTaskSummary, toConfirmedSummary } from "../queries/confirmed-summary.js";
+import { confirmedSummaryJoins, confirmedSummarySelect, getSummaryState, lockTaskSummary, toConfirmedSummary } from "../queries/confirmed-summary.js";
 import type { ConfirmedSummary, ConfirmedSummaryRow } from "../queries/confirmed-summary.js";
 
 export type ConfirmSummaryOutcome =
@@ -31,7 +31,8 @@ export async function confirmSummary(
     if (!stored) return { type: "not-found" };
     const evidence = reviewCommandTestSeams.snapshot ? reviewCommandTestSeams.snapshot(stored) : stored;
     if (!isConsistentSnapshot(evidence.identity, evidence.results)) return { type: "inconsistent" };
-    if (await isSummaryConfirmed(transaction, evidence.submissionId)) return { type: "already-confirmed" };
+    const state = await getSummaryState(transaction, evidence.submissionId);
+    if (state.state === "confirmed") return { type: "already-confirmed" };
     if (input.draftId) {
       const draft = await transaction.query(
         "SELECT 1 FROM summary_ai_drafts WHERE id = $1 AND task_id = $2 AND submission_id = $3 AND status = 'generated'",
@@ -43,14 +44,15 @@ export async function confirmSummary(
     await confirmSummaryTestSeams.beforeInsert?.();
     const result = await transaction.query<ConfirmedSummaryRow>(
       `WITH inserted AS (
-         INSERT INTO confirmed_summaries (confirmed_by, task_id, audit_id, submission_id, revision, revision_identity, initial_draft_id, final_text, summary_input_set_id, input_set)
-         VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10::jsonb)
+         INSERT INTO confirmed_summaries (confirmed_by, task_id, audit_id, submission_id, revision, revision_identity, initial_draft_id, final_text, summary_input_set_id, input_set, version)
+         VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10::jsonb, $11)
          RETURNING *
        )
        SELECT ${confirmedSummarySelect} FROM inserted summary ${confirmedSummaryJoins}`,
       [
         responsableId, evidence.taskId, evidence.auditId, evidence.submissionId, evidence.revision, JSON.stringify(evidence.identity),
         input.draftId ?? null, input.text, summaryInputSetId, JSON.stringify(summaryInputSetPlainObject(inputSet)),
+        state.nextVersion,
       ],
     );
     return { type: "confirmed", summary: toConfirmedSummary(result.rows[0]!) };

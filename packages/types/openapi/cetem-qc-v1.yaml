@@ -1128,6 +1128,43 @@ paths:
         '409': { description: A summary is already confirmed for this audit (SUMMARY_ALREADY_CONFIRMED), content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
         '422': { description: Invalid text or unusable draftId (VALIDATION_FAILED), content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
         '500': { description: Evidence inconsistent or summary not recorded (INTERNAL_ERROR), content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+  /tasks/{taskId}/summary-reopening:
+    post:
+      operationId: reopenSummary
+      summary: Reopen the confirmed summary of an own-team accepted audit before official designation
+      description: >-
+        Responsable only. Inserts one insert-only reopening record; the confirmed summary row is never modified and stays
+        in the history. After reopening there is no current confirmed summary until the Responsable confirms again, and a
+        new version number is expected. The body carries nothing. Refused when the summary is not confirmed, and when a
+        registered module reports an official designation. A malformed, unknown or another team's task, and an own-team
+        task without accepted submission, all get the same 404.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: taskId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+      responses:
+        '201':
+          description: Reopening record (Cache-Control no-store)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SummaryReopening'
+        '401': { description: Session rejected, content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+        '403': { description: Responsable role required (FORBIDDEN), content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+        '404': { description: Malformed, unknown or another team's task, or no accepted submission (TASK_NOT_FOUND), content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+        '409': { description: The summary is not confirmed (SUMMARY_NOT_CONFIRMED) or an official report is designated (SUMMARY_DESIGNATED), content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+        '422': { description: Non-empty body (VALIDATION_FAILED), content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+        '500': { description: Evidence inconsistent or reopening not recorded (INTERNAL_ERROR), content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
 components:
   securitySchemes:
     bearerAuth:
@@ -1399,8 +1436,20 @@ components:
     AcceptedEvidenceResponse:
       type: object
       additionalProperties: false
-      required: [task, submission, identity, values, results, lineage, insights, insightDecisions, manualInsights, summary]
+      required: [task, submission, identity, values, results, lineage, insights, insightDecisions, manualInsights, summary, summaryHistory, summaryVersion]
       properties:
+        summaryHistory:
+          type: array
+          description: Earlier reopened versions of the summary, newest first.
+          items:
+            $ref: '#/components/schemas/SummaryHistoryItem'
+        summaryVersion:
+          type: object
+          additionalProperties: false
+          required: [number, state]
+          properties:
+            number: { type: integer, minimum: 1 }
+            state: { type: string, enum: [confirmed, open] }
         manualInsights:
           type: array
           items:
@@ -1542,9 +1591,10 @@ components:
     ConfirmedSummary:
       type: object
       additionalProperties: false
-      required: [id, text, confirmedAt, confirmedBy, summaryInputSetId, initialDraft]
+      required: [id, version, text, confirmedAt, confirmedBy, summaryInputSetId, initialDraft]
       properties:
         id: { type: string, format: uuid }
+        version: { type: integer, minimum: 1 }
         text: { type: string, minLength: 1, maxLength: 5000 }
         confirmedAt: { type: string, format: date-time }
         confirmedBy:
@@ -1555,6 +1605,58 @@ components:
             id: { type: string }
             displayName: { type: string }
         summaryInputSetId: { type: string, pattern: '^[0-9a-f]{64}$' }
+        initialDraft:
+          oneOf:
+            - type: 'null'
+            - type: object
+              additionalProperties: false
+              required: [id, text, provider, model, requestedAt, summaryInputSetId]
+              properties:
+                id: { type: string, format: uuid }
+                text: { type: string, minLength: 1 }
+                provider: { type: string, minLength: 1 }
+                model: { type: string, minLength: 1 }
+                requestedAt: { type: string, format: date-time }
+                summaryInputSetId: { type: string, pattern: '^[0-9a-f]{64}$' }
+    SummaryReopening:
+      type: object
+      additionalProperties: false
+      required: [version, reopenedAt, reopenedBy, previous]
+      properties:
+        version: { type: integer, minimum: 2 }
+        reopenedAt: { type: string, format: date-time }
+        reopenedBy:
+          type: object
+          additionalProperties: false
+          required: [id, displayName]
+          properties:
+            id: { type: string }
+            displayName: { type: string }
+        previous:
+          $ref: '#/components/schemas/ConfirmedSummary'
+    SummaryHistoryItem:
+      type: object
+      additionalProperties: false
+      required: [version, text, confirmedAt, confirmedBy, reopenedAt, reopenedBy, initialDraft]
+      properties:
+        version: { type: integer, minimum: 1 }
+        text: { type: string, minLength: 1, maxLength: 5000 }
+        confirmedAt: { type: string, format: date-time }
+        confirmedBy:
+          type: object
+          additionalProperties: false
+          required: [id, displayName]
+          properties:
+            id: { type: string }
+            displayName: { type: string }
+        reopenedAt: { type: string, format: date-time }
+        reopenedBy:
+          type: object
+          additionalProperties: false
+          required: [id, displayName]
+          properties:
+            id: { type: string }
+            displayName: { type: string }
         initialDraft:
           oneOf:
             - type: 'null'
@@ -1896,7 +1998,7 @@ components:
       description: >-
         Error envelope. Codes include VALIDATION_ERROR, AUTHENTICATION_FAILED, FORBIDDEN, TASK_NOT_FOUND,
         PAYLOAD_TOO_LARGE, IDEMPOTENCY_KEY_REUSED, AUDIT_NOT_ACCEPTED, REPLACEMENT_ALREADY_EXISTS,
-        TASK_ASSIGNEE_UNAVAILABLE, AI_UNAVAILABLE, SUMMARY_ALREADY_CONFIRMED, SUMMARY_CONFIRMED and INTERNAL_ERROR.
+        TASK_ASSIGNEE_UNAVAILABLE, AI_UNAVAILABLE, SUMMARY_ALREADY_CONFIRMED, SUMMARY_CONFIRMED, SUMMARY_NOT_CONFIRMED, SUMMARY_DESIGNATED and INTERNAL_ERROR.
       required: [error]
       properties:
         error:

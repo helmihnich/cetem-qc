@@ -40,6 +40,8 @@ const evidenceFor = (identity: CalculationContext = GRAPHIE_CALCULATION_IDENTITY
   insightDecisions: [],
   manualInsights: [],
   summary: null,
+  summaryHistory: [],
+  summaryVersion: { number: 1, state: "open" },
   ...overrides,
 });
 
@@ -469,7 +471,7 @@ test("W28 the block has no save, conformity or approval control or wording (Stor
 // Story 10.2 (W30–W35): explicit confirmation and the confirmed read-only state.
 const SUMMARY_ID = "00000000-0000-4000-8000-000000000204";
 const confirmed = (overrides: Partial<NonNullable<AcceptedEvidenceResponse["summary"]>> = {}): NonNullable<AcceptedEvidenceResponse["summary"]> => ({
-  id: SUMMARY_ID, text: "Synthèse finale.", confirmedAt: "2026-10-08T10:00:00.000Z", confirmedBy: { id: OTHER, displayName: "Responsable Test" },
+  id: SUMMARY_ID, version: 1, text: "Synthèse finale.", confirmedAt: "2026-10-08T10:00:00.000Z", confirmedBy: { id: OTHER, displayName: "Responsable Test" },
   summaryInputSetId: "b".repeat(64), initialDraft: null, ...overrides,
 });
 const initialDraft = () => ({ id: DRAFT, text: "Brouillon initial.", provider: "mock", model: "mock-fixed-text", requestedAt: "2026-10-08T09:00:00.000Z", summaryInputSetId: "a".repeat(64) });

@@ -307,6 +307,8 @@ test("K8 getAcceptedEvidence returns typed outcomes for 200, 403, 404 and 500 an
     insightDecisions: [],
     manualInsights: [],
     summary: null,
+    summaryHistory: [],
+    summaryVersion: { number: 1, state: "open" },
   };
   const ok = clientFor(body);
   assert.deepEqual(await ok.client.getAcceptedEvidence(id), { status: 200, body });
@@ -388,9 +390,35 @@ test("K17 requestSummaryDraft sends an empty body and returns typed outcomes for
   await assert.rejects(clientFor({ ...response, status: "confirmed" }, 201).client.requestSummaryDraft(id), ApiRequestError);
 });
 
+test("K25 reopenSummary sends an empty object and returns typed outcomes; the two 409 codes are typed", async () => {
+  const id = "00000000-0000-4000-8000-000000000041";
+  const actor = { id, displayName: "Responsable Test" };
+  const previous = { id, version: 1, text: "Synthèse.", confirmedAt: "2026-10-08T10:00:00.000Z", confirmedBy: actor, summaryInputSetId: "b".repeat(64), initialDraft: null };
+  const response = { version: 2, reopenedAt: "2026-10-08T11:00:00.000Z", reopenedBy: actor, previous };
+  const ok = clientFor(response, 201);
+  assert.deepEqual(await ok.client.reopenSummary(id), { status: 201, body: response });
+  assert.equal(ok.calls[0]!.url, `https://cetem-qc.example.test/api/v1/tasks/${id}/summary-reopening`);
+  assert.equal(ok.calls[0]!.init?.method, "POST");
+  assert.deepEqual(JSON.parse(String(ok.calls[0]!.init?.body)), {});
+  const outcomes: Array<[number, string, string]> = [
+    [403, "FORBIDDEN", "Accès réservé au Responsable de l’équipe."],
+    [404, "TASK_NOT_FOUND", "Tâche introuvable."],
+    [409, "SUMMARY_NOT_CONFIRMED", "La synthèse n’est pas confirmée : elle ne peut pas être rouverte."],
+    [409, "SUMMARY_DESIGNATED", "Un rapport officiel est désigné : la synthèse ne peut plus être rouverte."],
+    [422, "VALIDATION_FAILED", "Cette demande est invalide."],
+    [500, "INTERNAL_ERROR", "La synthèse n’a pas pu être rouverte."],
+  ];
+  for (const [status, code, message] of outcomes) {
+    assert.deepEqual(await clientFor({ error: { code, message } }, status).client.reopenSummary(id), { status, code, message });
+  }
+  await assert.rejects(clientFor({ error: { code: "AUTHENTICATION_FAILED", message: "x" } }, 401).client.reopenSummary(id), ApiRequestError);
+  await assert.rejects(clientFor({ error: { code: "SUMMARY_CONFIRMED", message: "x" } }, 409).client.reopenSummary(id), ApiRequestError);
+  await assert.rejects(clientFor({ ...response, version: 1 }, 201).client.reopenSummary(id), ApiRequestError);
+});
+
 test("K21 confirmSummary sends the text and optional draft and returns typed outcomes; 409 is typed on the three locked operations", async () => {
   const id = "00000000-0000-4000-8000-000000000041";
-  const response = { id, text: "Synthèse.", confirmedAt: "2026-10-08T10:00:00.000Z", confirmedBy: { id, displayName: "Responsable Test" }, summaryInputSetId: "b".repeat(64), initialDraft: null };
+  const response = { id, version: 1, text: "Synthèse.", confirmedAt: "2026-10-08T10:00:00.000Z", confirmedBy: { id, displayName: "Responsable Test" }, summaryInputSetId: "b".repeat(64), initialDraft: null };
   const ok = clientFor(response, 201);
   assert.deepEqual(await ok.client.confirmSummary(id, { text: "Synthèse.", draftId: id }), { status: 201, body: response });
   assert.equal(ok.calls[0]!.url, `https://cetem-qc.example.test/api/v1/tasks/${id}/summary-confirmation`);

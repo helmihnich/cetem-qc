@@ -1,8 +1,8 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { confirmedSummarySchema, summaryDraftResponseSchema } from "@cetem-qc/api-client/v1";
-import type { ConfirmedSummary, SummaryDraftResponse } from "@cetem-qc/api-client/v1";
+import { confirmedSummarySchema, summaryDraftResponseSchema, summaryReopeningSchema } from "@cetem-qc/api-client/v1";
+import type { ConfirmedSummary, SummaryDraftResponse, SummaryHistoryItem, SummaryReopening } from "@cetem-qc/api-client/v1";
 import { fr } from "@cetem-qc/i18n";
 
 const dateTimeFormatter = new Intl.DateTimeFormat("fr-FR", { dateStyle: "medium", timeStyle: "short" });
@@ -44,6 +44,31 @@ export async function confirmSummaryOnServer(taskId: string, text: string, draft
   }
 }
 
+export type SummaryReopenResult =
+  | { kind: "reopened"; reopening: SummaryReopening }
+  | { kind: "not-confirmed" }
+  | { kind: "designated" }
+  | { kind: "failed" };
+
+/** Asks the web route handler to reopen the confirmed summary. Only a valid 201 counts as reopened. */
+export async function reopenSummaryOnServer(taskId: string, fetcher: typeof fetch = fetch): Promise<SummaryReopenResult> {
+  try {
+    const response = await fetcher(`/api/tasks/${encodeURIComponent(taskId)}/summary-reopening`, {
+      method: "POST", headers: { "content-type": "application/json", accept: "application/json" }, body: "{}", cache: "no-store",
+    });
+    if (response.status === 409) {
+      const code = ((await response.json()) as { error?: { code?: unknown } } | null)?.error?.code;
+      if (code === "SUMMARY_NOT_CONFIRMED") return { kind: "not-confirmed" };
+      return code === "SUMMARY_DESIGNATED" ? { kind: "designated" } : { kind: "failed" };
+    }
+    if (response.status !== 201) return { kind: "failed" };
+    const parsed = summaryReopeningSchema.safeParse(await response.json());
+    return parsed.success ? { kind: "reopened", reopening: parsed.data } : { kind: "failed" };
+  } catch {
+    return { kind: "failed" };
+  }
+}
+
 /** A draft fills an empty text area; over typed text it is only offered, never applied silently. */
 export function applyDraft(text: string, draft: SummaryDraftResponse): { text: string; offered: SummaryDraftResponse | null } {
   return text.trim() === "" ? { text: draft.text, offered: null } : { text, offered: draft };
@@ -69,7 +94,36 @@ export type SummaryDraftSectionProps = {
   onConfirmStart?: () => void;
   onConfirmCancel?: () => void;
   onConfirmYes?: () => void;
+  /** Story 10.3: the version being worked on; the note shows only while a reopened version awaits confirmation. */
+  version?: { number: number; state: "confirmed" | "open" } | null;
+  /** Earlier reopened versions, newest first; shown read only. */
+  history?: SummaryHistoryItem[];
+  /** True while the « Rouvrir cette synthèse ? » prompt is open. */
+  reopenPrompt?: boolean;
+  reopenPending?: boolean;
+  /** French message of the last failed reopening, or null. */
+  reopenMessage?: string | null;
+  onReopenStart?: () => void;
+  onReopenCancel?: () => void;
+  onReopenYes?: () => void;
+  onResumeText?: () => void;
 };
+
+const fillDate = (template: string, name: string, date: string) => template.replace("{name}", name).replace("{date}", dateTimeFormatter.format(new Date(date)));
+
+/** Read-only list of the earlier versions of the summary; absent when there are none. */
+function SummaryHistory({ history }: { history: SummaryHistoryItem[] }) {
+  if (history.length === 0) return null;
+  return <section className="summary-history" aria-labelledby="summary-history-heading">
+    <h4 id="summary-history-heading">{fr.summary.historyHeading}</h4>
+    {history.map((item) => <div className="insight-item summary-history-item" key={item.version}>
+      <p className="insight-state">{fr.summary.historyVersion.replace("{n}", String(item.version))}</p>
+      <p>{fillDate(fr.summary.historyBy, item.confirmedBy.displayName, item.confirmedAt)}</p>
+      <p>{fillDate(fr.summary.historyReopenedBy, item.reopenedBy.displayName, item.reopenedAt)}</p>
+      <p>{item.text}</p>
+    </div>)}
+  </section>;
+}
 
 const sourceLine = (draft: { provider: string; model: string; requestedAt: string }) =>
   fr.summary.draftSource.replace("{provider}", draft.provider).replace("{model}", draft.model).replace("{date}", dateTimeFormatter.format(new Date(draft.requestedAt)));
@@ -78,6 +132,7 @@ const sourceLine = (draft: { provider: string; model: string; requestedAt: strin
 export function SummaryDraftSection({
   text, onTextChange, pending = false, failed = false, filled = null, offered = null, onRequest, onReplace,
   summary = null, confirming = false, confirmPending = false, confirmFailed = false, onConfirmStart, onConfirmCancel, onConfirmYes,
+  version = null, history = [], reopenPrompt = false, reopenPending = false, reopenMessage = null, onReopenStart, onReopenCancel, onReopenYes, onResumeText,
 }: SummaryDraftSectionProps) {
   if (summary) {
     return <section className="evidence-summary" aria-labelledby="evidence-summary-heading">
@@ -91,6 +146,15 @@ export function SummaryDraftSection({
         <p>{summary.initialDraft.text}</p>
         <p>{sourceLine(summary.initialDraft)}</p>
       </div>}
+      {reopenMessage && <p className="field-error" role="alert">{reopenMessage}</p>}
+      {reopenPrompt
+        ? <div className="summary-confirm-prompt" role="alertdialog" aria-labelledby="summary-reopen-prompt-text">
+          <p id="summary-reopen-prompt-text">{fr.summary.reopenPrompt}</p>
+          <button className="primary-button" type="button" disabled={reopenPending} aria-busy={reopenPending} onClick={onReopenYes}>{reopenPending ? fr.summary.reopening : fr.summary.reopenYes}</button>
+          <button className="secondary-button" type="button" disabled={reopenPending} onClick={onReopenCancel}>{fr.summary.reopenCancel}</button>
+        </div>
+        : <button className="secondary-button" type="button" onClick={onReopenStart}>{fr.summary.reopen}</button>}
+      <SummaryHistory history={history} />
     </section>;
   }
   const canConfirm = text.trim() !== "" && !confirmPending && !pending;
@@ -98,6 +162,9 @@ export function SummaryDraftSection({
     <h3 id="evidence-summary-heading">{fr.summary.heading}</h3>
     <p className="field-hint">{fr.summary.note}</p>
     <p className="field-hint">{fr.summary.conformityUnavailable}</p>
+    {version?.state === "open" && version.number >= 2 && <p className="field-hint summary-version-note">{fr.summary.versionNote.replace("{n}", String(version.number)).replace("{previous}", String(version.number - 1))}</p>}
+    {version?.state === "open" && history[0] && <button className="secondary-button" type="button" onClick={onResumeText}>{fr.summary.resumeText.replace("{n}", String(history[0].version))}</button>}
+    {reopenMessage && <p className="field-error" role="alert">{reopenMessage}</p>}
     <button className="secondary-button" type="button" disabled={pending} aria-busy={pending} onClick={onRequest}>{fr.summary.request}</button>
     {pending && <p className="state-message" role="status">{fr.summary.pending}</p>}
     {failed && <p className="field-error" role="alert">{fr.summary.unavailable}</p>}
@@ -119,6 +186,7 @@ export function SummaryDraftSection({
         <button className="secondary-button" type="button" disabled={confirmPending} onClick={onConfirmCancel}>{fr.summary.confirmCancel}</button>
       </div>
       : <button className="primary-button" type="button" disabled={!canConfirm} onClick={onConfirmStart}>{fr.summary.confirm}</button>}
+    <SummaryHistory history={history} />
   </section>;
 }
 
@@ -126,10 +194,16 @@ export function SummaryDraftSection({
  * Holds the local text and draft state; the text is never overwritten without the user choosing to replace it.
  * The confirmed state comes only from a valid server response (or the evidence reloaded after a 409).
  */
-export function SummaryDraftPanel({ taskId, summary = null, onConfirmed, onReloadEvidence }: {
+export function SummaryDraftPanel({ taskId, summary = null, onConfirmed, onReloadEvidence, version = null, history = [], onReopened, onReloadState }: {
   taskId: string;
   summary?: ConfirmedSummary | null;
   onConfirmed?: (summary: ConfirmedSummary) => void;
+  version?: { number: number; state: "confirmed" | "open" } | null;
+  history?: SummaryHistoryItem[];
+  /** Reports a valid reopening; the parent then stops treating the summary as confirmed. */
+  onReopened?: (reopening: SummaryReopening) => void;
+  /** Reloads the whole summary state after a refused reopening (409). */
+  onReloadState?: () => Promise<void>;
   /** Reloads the evidence after a 409 and reports the confirmed summary found there, if any. */
   onReloadEvidence?: () => Promise<ConfirmedSummary | null>;
 }) {
@@ -186,7 +260,40 @@ export function SummaryDraftPanel({ taskId, summary = null, onConfirmed, onReloa
       setConfirmPending(false);
     });
   };
+  const [reopenPrompt, setReopenPrompt] = useState(false);
+  const [reopenPending, setReopenPending] = useState(false);
+  const [reopenMessage, setReopenMessage] = useState<string | null>(null);
+  const onReopenYes = () => {
+    if (reopenPending) return;
+    setReopenPending(true);
+    setReopenMessage(null);
+    void reopenSummaryOnServer(taskId).then(async (result) => {
+      if (result.kind === "reopened") {
+        // The previous text starts the revised version; it is not persisted until the Responsable confirms it.
+        setText(result.reopening.previous.text);
+        setFilled(null);
+        setOffered(null);
+        onReopened?.(result.reopening);
+      } else if (result.kind === "failed") {
+        setReopenMessage(fr.summary.reopenFailed);
+      } else {
+        await onReloadState?.();
+        setReopenMessage(result.kind === "designated" ? fr.summary.reopenDesignated : fr.summary.reopenNotConfirmed);
+      }
+      setReopenPrompt(false);
+      setReopenPending(false);
+    });
+  };
+  const onResumeText = () => {
+    const previous = history[0];
+    if (!previous) return;
+    setText(previous.text);
+    setFilled(null);
+    setOffered(null);
+  };
   return <SummaryDraftSection
+    version={version} history={history} reopenPrompt={reopenPrompt} reopenPending={reopenPending} reopenMessage={reopenMessage}
+    onReopenStart={() => { setReopenMessage(null); setReopenPrompt(true); }} onReopenCancel={() => setReopenPrompt(false)} onReopenYes={onReopenYes} onResumeText={onResumeText}
     text={text} onTextChange={setText} pending={pending} failed={failed} filled={filled} offered={offered} onRequest={onRequest} onReplace={onReplace}
     summary={summary} confirming={confirming} confirmPending={confirmPending} confirmFailed={confirmFailed}
     onConfirmStart={() => { setConfirmFailed(false); setConfirming(true); }} onConfirmCancel={() => setConfirming(false)} onConfirmYes={onConfirmYes}

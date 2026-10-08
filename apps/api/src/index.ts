@@ -1,7 +1,7 @@
 import express from "express";
 import type { Server } from "node:http";
 import type { Pool } from "pg";
-import { acceptedEvidenceResponseSchema, apiErrorSchema, insightDecisionRequestSchema, insightDecisionResponseSchema, manualInsightRequestSchema, manualInsightResponseSchema, summaryConfirmationRequestSchema, confirmedSummarySchema, summaryDraftRequestSchema, summaryDraftResponseSchema, authenticationRequestSchema, authenticationResponseSchema, createDeactivatedAssigneeRecoveryRequestSchema, createEmployeeRequestSchema, createTaskRequestSchema, deactivatedAssigneeRecoveryResponseSchema, employeeCredentialResponseSchema, employeeListResponseSchema, employeeTaskAuditVersionSchema, employeeTaskRecoverySeedResponseSchema, employeeTaskListQuerySchema, employeeTaskListResponseSchema, employeeTaskResponseSchema, healthQuerySchema, passwordReplacementRequestSchema, reassignUnstartedTaskRequestSchema, reassignUnstartedTaskResponseSchema, replacementTaskResponseSchema, sessionResponseSchema, syncOperationRequestSchema, taskAssigneeListResponseSchema, taskListQuerySchema, taskListResponseSchema, taskResponseSchema, updateEmployeeStatusRequestSchema, updateEmployeeStatusResponseSchema } from "@cetem-qc/schemas/api/v1";
+import { acceptedEvidenceResponseSchema, apiErrorSchema, insightDecisionRequestSchema, insightDecisionResponseSchema, manualInsightRequestSchema, manualInsightResponseSchema, summaryConfirmationRequestSchema, summaryReopeningRequestSchema, summaryReopeningSchema, confirmedSummarySchema, summaryDraftRequestSchema, summaryDraftResponseSchema, authenticationRequestSchema, authenticationResponseSchema, createDeactivatedAssigneeRecoveryRequestSchema, createEmployeeRequestSchema, createTaskRequestSchema, deactivatedAssigneeRecoveryResponseSchema, employeeCredentialResponseSchema, employeeListResponseSchema, employeeTaskAuditVersionSchema, employeeTaskRecoverySeedResponseSchema, employeeTaskListQuerySchema, employeeTaskListResponseSchema, employeeTaskResponseSchema, healthQuerySchema, passwordReplacementRequestSchema, reassignUnstartedTaskRequestSchema, reassignUnstartedTaskResponseSchema, replacementTaskResponseSchema, sessionResponseSchema, syncOperationRequestSchema, taskAssigneeListResponseSchema, taskListQuerySchema, taskListResponseSchema, taskResponseSchema, updateEmployeeStatusRequestSchema, updateEmployeeStatusResponseSchema } from "@cetem-qc/schemas/api/v1";
 import { getHealth } from "./modules/health/health-query.js";
 import {
   authenticateWithPassword,
@@ -22,7 +22,8 @@ import { addManualInsight } from "./modules/audits/commands/add-manual-insight.j
 import { createSummaryDraftProvider } from "./modules/ai/index.js";
 import { requestSummaryDraft, summaryCommandTestSeams } from "./modules/summaries/commands/request-summary-draft.js";
 import { confirmSummary } from "./modules/summaries/commands/confirm-summary.js";
-import { getConfirmedSummary } from "./modules/summaries/queries/confirmed-summary.js";
+import { reopenSummary } from "./modules/summaries/commands/reopen-summary.js";
+import { getSummaryHistory, getSummaryState } from "./modules/summaries/queries/confirmed-summary.js";
 import { getAcceptedSubmissionForReview } from "./modules/audits/queries/accepted-submission.js";
 import { createReplacementControl } from "./modules/audits/commands/create-replacement-control.js";
 import { createDeactivatedAssigneeRecovery } from "./modules/audits/commands/create-deactivated-assignee-recovery.js";
@@ -481,6 +482,7 @@ export function createApp(pool?: Pool) {
       }
       const { evidence, task, insights } = outcome;
       const lineage = (await readTaskAcceptanceAndLineage(getPool(), [evidence.taskId])).get(evidence.taskId)!;
+      const summaryState = await getSummaryState(getPool(), evidence.submissionId);
       response.status(200).json(acceptedEvidenceResponseSchema.parse({
         task,
         submission: { submissionId: evidence.submissionId, auditId: evidence.auditId, revision: evidence.revision, submittedBy: evidence.submittedBy, acceptedAt: evidence.acceptedAt },
@@ -490,7 +492,9 @@ export function createApp(pool?: Pool) {
         insights,
         insightDecisions: outcome.insightDecisions,
         manualInsights: outcome.manualInsights,
-        summary: await getConfirmedSummary(getPool(), evidence.submissionId),
+        summary: summaryState.state === "confirmed" ? summaryState.summary : null,
+        summaryVersion: { number: summaryState.state === "confirmed" ? summaryState.summary.version : summaryState.nextVersion, state: summaryState.state },
+        summaryHistory: await getSummaryHistory(getPool(), evidence.submissionId),
         lineage: { replacementOf: lineage.replacementOf, replacedBy: lineage.replacedBy, recoverySource: lineage.recoverySource, recoverySuccessorTaskId: lineage.recoverySuccessorTaskId },
       }));
     } catch {
@@ -729,6 +733,62 @@ export function createApp(pool?: Pool) {
     } catch {
       // Never log the error: it may carry request values.
       response.status(500).json(apiErrorSchema.parse({ error: { code: "INTERNAL_ERROR", message: "La synthèse n’a pas pu être confirmée." } }));
+    }
+  });
+
+  v1.post("/tasks/:taskId/summary-reopening", async (request, response) => {
+    response.set("Cache-Control", "no-store");
+    const session = response.locals.session as NonNullable<Awaited<ReturnType<typeof findActiveSession>>>;
+    // Log lines carry the actor and fixed classes only: never the task ID, summary text or input values.
+    const refuse = (refusalClass: "forbidden-role" | "not-found" | "not-confirmed" | "designated") => console.info(JSON.stringify({ event: "summary.reopen_refused", class: refusalClass, actorId: session.id }));
+    if (session.role !== "responsable") {
+      refuse("forbidden-role");
+      response.status(403).json(apiErrorSchema.parse({ error: { code: "FORBIDDEN", message: "Accès réservé au Responsable de l’équipe." } }));
+      return;
+    }
+    const notFound = () => {
+      refuse("not-found");
+      response.status(404).json(apiErrorSchema.parse({ error: { code: "TASK_NOT_FOUND", message: "Tâche introuvable." } }));
+    };
+    const taskId = String(request.params.taskId ?? "");
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(taskId)) {
+      notFound();
+      return;
+    }
+    const parsed = summaryReopeningRequestSchema.safeParse(request.body);
+    try {
+      if (!parsed.success) {
+        // A syntactically valid but unknown or other team's task must stay indistinguishable: check the task first.
+        const probe = await getAcceptedSubmissionForReview(getPool(), session.id, taskId.toLowerCase());
+        if (!probe) notFound();
+        else response.status(422).json(apiErrorSchema.parse({ error: { code: "VALIDATION_FAILED", message: "Cette demande est invalide." } }));
+        return;
+      }
+      const outcome = await reopenSummary(getPool(), session.id, taskId.toLowerCase());
+      switch (outcome.type) {
+        case "reopened":
+          console.info(JSON.stringify({ event: "summary.reopened", actorId: session.id }));
+          response.status(201).json(summaryReopeningSchema.parse(outcome.reopening));
+          return;
+        case "not-found":
+          notFound();
+          return;
+        case "not-confirmed":
+          refuse("not-confirmed");
+          response.status(409).json(apiErrorSchema.parse({ error: { code: "SUMMARY_NOT_CONFIRMED", message: "La synthèse n’est pas confirmée : elle ne peut pas être rouverte." } }));
+          return;
+        case "designated":
+          refuse("designated");
+          response.status(409).json(apiErrorSchema.parse({ error: { code: "SUMMARY_DESIGNATED", message: "Un rapport officiel est désigné : la synthèse ne peut plus être rouverte." } }));
+          return;
+        case "inconsistent":
+          console.info(JSON.stringify({ event: "summary.reopen_inconsistent", actorId: session.id }));
+          response.status(500).json(apiErrorSchema.parse({ error: { code: "INTERNAL_ERROR", message: "La synthèse n’a pas pu être rouverte." } }));
+          return;
+      }
+    } catch {
+      // Never log the error: it may carry stored values.
+      response.status(500).json(apiErrorSchema.parse({ error: { code: "INTERNAL_ERROR", message: "La synthèse n’a pas pu être rouverte." } }));
     }
   });
 

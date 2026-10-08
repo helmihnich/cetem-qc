@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { acceptedEvidenceResponseSchema, insightDecisionResponseSchema, manualInsightResponseSchema } from "@cetem-qc/api-client/v1";
-import type { AcceptedEvidenceResponse, ConfirmedSummary, InsightDecisionResponse, ManualInsightResponse } from "@cetem-qc/api-client/v1";
+import type { AcceptedEvidenceResponse, ConfirmedSummary, InsightDecisionResponse, ManualInsightResponse, SummaryHistoryItem, SummaryReopening } from "@cetem-qc/api-client/v1";
 import { GRAPHIE_CALCULATION_FIELD_ID_LIST, GRAPHIE_MOBILE_POV_CATALOGUE } from "@cetem-qc/domain";
 import type { CatalogueField, CatalogueSection, GraphieCalculationResults } from "@cetem-qc/domain";
 import { fr } from "@cetem-qc/i18n";
@@ -227,8 +227,24 @@ export function ManualInsightsSection({ insights, pending = false, failed = fals
 }
 
 /** Holds the local decision state: it changes only from a server response, never from a client calculation. */
-export function InsightProposalsPanel({ taskId, insights, initialDecisions, initialManualInsights = [], initialSummary = null }: { taskId: string; insights: AcceptedEvidenceResponse["insights"]; initialDecisions: InsightDecisions; initialManualInsights?: ManualInsightItem[]; initialSummary?: ConfirmedSummary | null }) {
-  const [summary, setSummary] = useState<ConfirmedSummary | null>(initialSummary);
+export function InsightProposalsPanel({ taskId, insights, initialDecisions, initialManualInsights = [], initialSummary = null, initialSummaryHistory = [], initialSummaryVersion = null }: { taskId: string; insights: AcceptedEvidenceResponse["insights"]; initialDecisions: InsightDecisions; initialManualInsights?: ManualInsightItem[]; initialSummary?: ConfirmedSummary | null; initialSummaryHistory?: SummaryHistoryItem[]; initialSummaryVersion?: AcceptedEvidenceResponse["summaryVersion"] | null }) {
+  const [summary, setSummaryState] = useState<ConfirmedSummary | null>(initialSummary);
+  const [summaryHistory, setSummaryHistory] = useState<SummaryHistoryItem[]>(initialSummaryHistory);
+  const [summaryVersion, setSummaryVersion] = useState<AcceptedEvidenceResponse["summaryVersion"] | null>(initialSummaryVersion ?? (initialSummary ? { number: initialSummary.version, state: "confirmed" } : null));
+  const setSummary = (next: ConfirmedSummary) => {
+    setSummaryState(next);
+    setSummaryVersion({ number: next.version, state: "confirmed" });
+  };
+  // A reopening is the only way back to the unconfirmed state; the old version moves to the history and the 10.2 lock lifts.
+  const onReopened = (reopening: SummaryReopening) => {
+    setSummaryState(null);
+    setSummaryVersion({ number: reopening.version, state: "open" });
+    setSummaryHistory((previous) => [{
+      version: reopening.previous.version, text: reopening.previous.text, confirmedAt: reopening.previous.confirmedAt,
+      confirmedBy: reopening.previous.confirmedBy, reopenedAt: reopening.reopenedAt, reopenedBy: reopening.reopenedBy,
+      initialDraft: reopening.previous.initialDraft,
+    }, ...previous]);
+  };
   const [manualInsights, setManualInsights] = useState<ManualInsightItem[]>(initialManualInsights);
   const [manualPending, setManualPending] = useState(false);
   const [manualFailed, setManualFailed] = useState(false);
@@ -260,10 +276,18 @@ export function InsightProposalsPanel({ taskId, insights, initialDecisions, init
     const reloaded = await loadAcceptedEvidence(taskId);
     return reloaded.kind === "ready" ? reloaded.evidence.summary : null;
   };
+  // After a refused reopening (409) the whole summary state comes back from the server.
+  const reloadState = async () => {
+    const reloaded = await loadAcceptedEvidence(taskId);
+    if (reloaded.kind !== "ready") return;
+    setSummaryState(reloaded.evidence.summary);
+    setSummaryVersion(reloaded.evidence.summaryVersion);
+    setSummaryHistory(reloaded.evidence.summaryHistory);
+  };
   return <>
     <InsightProposalsSection insights={insights} decisions={decisions} pendingProposalId={pendingProposalId} failed={failed} onDecide={onDecide} manualInsightCount={manualInsights.length} locked={summary !== null} />
     <ManualInsightsSection insights={manualInsights} pending={manualPending} failed={manualFailed} onAdd={onAddManual} locked={summary !== null} />
-    <SummaryDraftPanel taskId={taskId} summary={summary} onConfirmed={setSummary} onReloadEvidence={reloadSummary} />
+    <SummaryDraftPanel taskId={taskId} summary={summary} onConfirmed={setSummary} onReloadEvidence={reloadSummary} version={summaryVersion} history={summaryHistory} onReopened={onReopened} onReloadState={reloadState} />
   </>;
 }
 
@@ -307,7 +331,7 @@ export function AcceptedEvidenceView({ taskId, load, onBack, onRetry, headingRef
       <EvidenceLineage lineage={evidence.lineage} />
       <EvidenceInputSections values={evidence.values} />
       <GraphieCalculationReview evidence={{ identity: evidence.identity, values: evidence.values, results: evidence.results as unknown as GraphieCalculationResults }} />
-      <InsightProposalsPanel taskId={evidence.task.id} insights={evidence.insights} initialDecisions={evidence.insightDecisions} initialManualInsights={evidence.manualInsights} initialSummary={evidence.summary} />
+      <InsightProposalsPanel taskId={evidence.task.id} insights={evidence.insights} initialDecisions={evidence.insightDecisions} initialManualInsights={evidence.manualInsights} initialSummary={evidence.summary} initialSummaryHistory={evidence.summaryHistory} initialSummaryVersion={evidence.summaryVersion} />
     </>;
   } else if (load.kind === "not-found") {
     content = <div className="state-message error-state" role="alert">{fr.evidence.unavailable}</div>;

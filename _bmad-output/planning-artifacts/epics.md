@@ -849,7 +849,7 @@ So that corrections preserve history and invalidate decisions/reports based on o
 **And** the revised summary must be confirmed again, a new human conformity decision recorded, and current report candidates generated before designation; after official designation reopening is unavailable.
 **And** summaries, conformity and reports exchange the reopen/invalidation outcome through their public module contracts; none reaches into another module's tables or repositories.
 
-**Traceability:** FR-033, FR-035, FR-038, DR-005, DR-009, AD-8, UX-DR8, UX-DR10, OD-10.
+**Traceability:** spec `_bmad-output/specs/spec-10-3-reopen-a-confirmed-summary-before-official-designation/SPEC.md`; FR-033, FR-035, FR-038, DR-005, DR-009, AD-8, UX-DR8, UX-DR10, OD-10. **Dependency:** Stories 10.1, 10.2 (done); conformity (10.4) and reports (11.x) plug in through the public reopen-participant contract, none exists yet.
 
 ### Story 10.4: Record the explicit human machine-conformity decision
 

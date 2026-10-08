@@ -35,6 +35,9 @@ type SummaryDraftRequestContract = apiV1Operations["requestSummaryDraft"]["reque
 type SummaryDraftResponseContract = apiV1Operations["requestSummaryDraft"]["responses"][201]["content"]["application/json"];
 type SummaryConfirmationRequestContract = apiV1Operations["confirmSummary"]["requestBody"]["content"]["application/json"];
 type ConfirmedSummaryContract = apiV1Operations["confirmSummary"]["responses"][201]["content"]["application/json"];
+type SummaryReopeningRequestContract = apiV1Operations["reopenSummary"]["requestBody"]["content"]["application/json"];
+type SummaryReopeningContract = apiV1Operations["reopenSummary"]["responses"][201]["content"]["application/json"];
+type SummaryHistoryItemContract = apiV1Components["schemas"]["SummaryHistoryItem"];
 type EmployeeTaskListResponseContract = apiV1Operations["listAssignedEmployeeTasks"]["responses"][200]["content"]["application/json"];
 type EmployeeTaskResponseContract = apiV1Operations["getAssignedEmployeeTask"]["responses"][200]["content"]["application/json"];
 
@@ -190,22 +193,44 @@ export const summaryConfirmationRequestSchema: z.ZodType<SummaryConfirmationRequ
   text: z.string().trim().min(1).max(SUMMARY_TEXT_MAX).refine((value) => !value.includes(" ")),
   draftId: z.string().uuid().optional(),
 }).strict();
+const summaryInitialDraftSchema = z.object({
+  id: z.string().uuid(),
+  text: z.string().min(1),
+  provider: z.string().min(1),
+  model: z.string().min(1),
+  requestedAt: z.string().datetime(),
+  summaryInputSetId: z.string().regex(/^[0-9a-f]{64}$/),
+}).strict().nullable();
 export const confirmedSummarySchema: z.ZodType<ConfirmedSummaryContract> = z.object({
   id: z.string().uuid(),
+  version: z.number().int().min(1),
   text: z.string().min(1).max(SUMMARY_TEXT_MAX),
   confirmedAt: z.string().datetime(),
   confirmedBy: z.object({ id: z.string(), displayName: z.string() }).strict(),
   summaryInputSetId: z.string().regex(/^[0-9a-f]{64}$/),
-  initialDraft: z.object({
-    id: z.string().uuid(),
-    text: z.string().min(1),
-    provider: z.string().min(1),
-    model: z.string().min(1),
-    requestedAt: z.string().datetime(),
-    summaryInputSetId: z.string().regex(/^[0-9a-f]{64}$/),
-  }).strict().nullable(),
+  initialDraft: summaryInitialDraftSchema,
+}).strict();
+const summaryActorSchema = z.object({ id: z.string(), displayName: z.string() }).strict();
+/** Story 10.3: reopening carries nothing; the server supplies actor and date. */
+export const summaryReopeningRequestSchema: z.ZodType<SummaryReopeningRequestContract> = z.object({}).strict();
+export const summaryReopeningSchema: z.ZodType<SummaryReopeningContract> = z.object({
+  version: z.number().int().min(2),
+  reopenedAt: z.string().datetime(),
+  reopenedBy: summaryActorSchema,
+  previous: confirmedSummarySchema,
+}).strict();
+export const summaryHistoryItemSchema: z.ZodType<SummaryHistoryItemContract> = z.object({
+  version: z.number().int().min(1),
+  text: z.string().min(1).max(SUMMARY_TEXT_MAX),
+  confirmedAt: z.string().datetime(),
+  confirmedBy: summaryActorSchema,
+  reopenedAt: z.string().datetime(),
+  reopenedBy: summaryActorSchema,
+  initialDraft: summaryInitialDraftSchema,
 }).strict();
 export const acceptedEvidenceResponseSchema: z.ZodType<AcceptedEvidenceResponseContract> = z.object({
+  summaryHistory: z.array(summaryHistoryItemSchema),
+  summaryVersion: z.object({ number: z.number().int().min(1), state: z.enum(["confirmed", "open"]) }).strict(),
   manualInsights: z.array(manualInsightSchema),
   summary: confirmedSummarySchema.nullable(),
   insights: insightProposalSetSchema,
@@ -331,6 +356,9 @@ export type ManualInsightRequest = z.infer<typeof manualInsightRequestSchema>;
 export type ManualInsightResponse = z.infer<typeof manualInsightResponseSchema>;
 export type SummaryConfirmationRequest = z.infer<typeof summaryConfirmationRequestSchema>;
 export type ConfirmedSummary = z.infer<typeof confirmedSummarySchema>;
+export type SummaryReopeningRequest = z.infer<typeof summaryReopeningRequestSchema>;
+export type SummaryReopening = z.infer<typeof summaryReopeningSchema>;
+export type SummaryHistoryItem = z.infer<typeof summaryHistoryItemSchema>;
 export type SummaryDraftRequest = z.infer<typeof summaryDraftRequestSchema>;
 export type SummaryDraftResponse = z.infer<typeof summaryDraftResponseSchema>;
 export type EmployeeTaskListResponse = z.infer<typeof employeeTaskListResponseSchema>;

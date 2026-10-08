@@ -2,6 +2,7 @@ import type { Pool, PoolClient, QueryResultRow } from "pg";
 
 export interface ConfirmedSummary {
   id: string;
+  version: number;
   text: string;
   confirmedAt: string;
   confirmedBy: { id: string; displayName: string };
@@ -11,6 +12,7 @@ export interface ConfirmedSummary {
 
 export interface ConfirmedSummaryRow extends QueryResultRow {
   id: string;
+  version: number;
   final_text: string;
   confirmed_at: Date;
   confirmed_by: string;
@@ -26,6 +28,7 @@ export interface ConfirmedSummaryRow extends QueryResultRow {
 
 export const toConfirmedSummary = (row: ConfirmedSummaryRow): ConfirmedSummary => ({
   id: row.id,
+  version: row.version,
   text: row.final_text,
   confirmedAt: row.confirmed_at.toISOString(),
   confirmedBy: { id: row.confirmed_by, displayName: row.display_name },
@@ -40,7 +43,7 @@ export const toConfirmedSummary = (row: ConfirmedSummaryRow): ConfirmedSummary =
 
 /** Columns shared by every read of a confirmed summary row joined with its confirmer and optional initial draft. */
 export const confirmedSummarySelect = `
-  summary.id, summary.final_text, summary.confirmed_at, summary.confirmed_by, account.display_name, summary.summary_input_set_id,
+  summary.id, summary.version, summary.final_text, summary.confirmed_at, summary.confirmed_by, account.display_name, summary.summary_input_set_id,
   draft.id AS draft_id, draft.draft_text AS draft_text, draft.provider AS draft_provider, draft.model AS draft_model,
   draft.requested_at AS draft_requested_at, draft.summary_input_set_id AS draft_summary_input_set_id`;
 
@@ -48,22 +51,71 @@ export const confirmedSummaryJoins = `
   JOIN identity_accounts account ON account.id = summary.confirmed_by
   LEFT JOIN summary_ai_drafts draft ON draft.id = summary.initial_draft_id`;
 
+export type SummaryState =
+  | { state: "confirmed"; summary: ConfirmedSummary }
+  | { state: "open"; nextVersion: number };
+
 /**
- * The confirmed summary of a submission, or null. This is the only gate Stories 10.4 and 11.x may use to treat a
- * summary as approved. Read only.
+ * The current state of the summary of a submission: the highest-version confirmed row is current while it has no
+ * reopening row; otherwise the summary is open and the next confirmation takes `nextVersion`. Read only.
  */
-export async function getConfirmedSummary(client: Pool | PoolClient, submissionId: string): Promise<ConfirmedSummary | null> {
-  const result = await client.query<ConfirmedSummaryRow>(
-    `SELECT ${confirmedSummarySelect} FROM confirmed_summaries summary ${confirmedSummaryJoins} WHERE summary.submission_id = $1`,
+export async function getSummaryState(client: Pool | PoolClient, submissionId: string): Promise<SummaryState> {
+  const result = await client.query<ConfirmedSummaryRow & { reopened: boolean }>(
+    `SELECT ${confirmedSummarySelect},
+            EXISTS (SELECT 1 FROM summary_reopenings reopening WHERE reopening.confirmed_summary_id = summary.id) AS reopened
+     FROM confirmed_summaries summary ${confirmedSummaryJoins}
+     WHERE summary.submission_id = $1 ORDER BY summary.version DESC LIMIT 1`,
     [submissionId],
   );
-  return result.rows[0] ? toConfirmedSummary(result.rows[0]) : null;
+  const row = result.rows[0];
+  if (!row) return { state: "open", nextVersion: 1 };
+  if (row.reopened) return { state: "open", nextVersion: row.version + 1 };
+  return { state: "confirmed", summary: toConfirmedSummary(row) };
 }
 
-/** True when a confirmed summary exists for the submission. Used by the lock on insight, decision and draft changes. */
+/**
+ * The current confirmed summary of a submission, or null (never confirmed, or reopened and not yet confirmed again).
+ * This is the only gate Stories 10.4 and 11.x may use to treat a summary as approved: their records bind to its `id`
+ * and are current only while it equals this value. Read only.
+ */
+export async function getConfirmedSummary(client: Pool | PoolClient, submissionId: string): Promise<ConfirmedSummary | null> {
+  const state = await getSummaryState(client, submissionId);
+  return state.state === "confirmed" ? state.summary : null;
+}
+
+/** True when the submission has a current confirmed summary. Used by the lock on insight, decision and draft changes. */
 export async function isSummaryConfirmed(client: Pool | PoolClient, submissionId: string): Promise<boolean> {
-  const result = await client.query("SELECT 1 FROM confirmed_summaries WHERE submission_id = $1", [submissionId]);
-  return result.rows.length > 0;
+  return (await getSummaryState(client, submissionId)).state === "confirmed";
+}
+
+export interface SummaryHistoryEntry {
+  version: number;
+  text: string;
+  confirmedAt: string;
+  confirmedBy: { id: string; displayName: string };
+  reopenedAt: string;
+  reopenedBy: { id: string; displayName: string };
+  initialDraft: ConfirmedSummary["initialDraft"];
+}
+
+/** Earlier versions that were reopened, newest first. Read only. */
+export async function getSummaryHistory(client: Pool | PoolClient, submissionId: string): Promise<SummaryHistoryEntry[]> {
+  const result = await client.query<ConfirmedSummaryRow & { reopened_at: Date; reopened_by: string; reopener_name: string }>(
+    `SELECT ${confirmedSummarySelect}, reopening.reopened_at, reopening.reopened_by, reopener.display_name AS reopener_name
+     FROM confirmed_summaries summary ${confirmedSummaryJoins}
+     JOIN summary_reopenings reopening ON reopening.confirmed_summary_id = summary.id
+     JOIN identity_accounts reopener ON reopener.id = reopening.reopened_by
+     WHERE summary.submission_id = $1 ORDER BY summary.version DESC`,
+    [submissionId],
+  );
+  return result.rows.map((row) => {
+    const summary = toConfirmedSummary(row);
+    return {
+      version: summary.version, text: summary.text, confirmedAt: summary.confirmedAt, confirmedBy: summary.confirmedBy,
+      reopenedAt: row.reopened_at.toISOString(), reopenedBy: { id: row.reopened_by, displayName: row.reopener_name },
+      initialDraft: summary.initialDraft,
+    };
+  });
 }
 
 /**

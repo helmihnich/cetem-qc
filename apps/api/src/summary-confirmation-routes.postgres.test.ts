@@ -103,7 +103,7 @@ test("R41 a manual-only confirmation returns 201 and inserts one row with every 
     assert.deepEqual(row.revision_identity, { catalogueId: "graphie-mobile-pov", catalogueVersion: "2.0.0", schemaVersion: 3, ruleId: "cetem-paper-form", ruleVersion: "2.0.0" });
     assert.ok(Math.abs(row.confirmed_at.getTime() - before) < 60_000, "the date is the server date");
     assert.equal(row.summary_input_set_id, createHash("sha256").update(canonicalJson(row.input_set)).digest("hex"));
-    assert.deepEqual(body, { id: row.id, text: row.final_text, confirmedAt: row.confirmed_at.toISOString(), confirmedBy: { id: owner, displayName: "Responsable Test" }, summaryInputSetId: row.summary_input_set_id, initialDraft: null });
+    assert.deepEqual(body, { id: row.id, version: 1, text: row.final_text, confirmedAt: row.confirmed_at.toISOString(), confirmedBy: { id: owner, displayName: "Responsable Test" }, summaryInputSetId: row.summary_input_set_id, initialDraft: null });
     assert.equal((await pool.query("SELECT 1 FROM summary_ai_drafts")).rows.length, 0, "no AI metadata is created");
   });
 });
@@ -284,7 +284,7 @@ test("R48 UPDATE, DELETE and TRUNCATE on confirmed_summaries are refused", async
   });
 });
 
-test("K22 the migration checks match the schema bounds and one summary per submission", async () => {
+test("K22 the migration checks match the schema bounds and one summary per submission and version", async () => {
   await withSyncFixture(async (fixture) => {
     const { taskId, submissionId } = await acceptedTask(fixture);
     const audit = (await fixture.pool.query<{ id: string }>("SELECT id FROM audits WHERE task_id = $1", [taskId])).rows[0]!.id;
@@ -295,7 +295,8 @@ test("K22 the migration checks match the schema bounds and one summary per submi
     for (const bad of ["", "a".repeat(5001)]) await assert.rejects(insert(bad), /confirmed_summaries/, String(bad.length));
     await assert.rejects(insert("ok", "xyz"));
     await insert("ok");
-    await assert.rejects(insert("again"), /confirmed_summaries_submission_idx/);
+    // Story 10.3: one row per submission and version.
+    await assert.rejects(insert("again"), /confirmed_summaries_submission_version_idx/);
   });
 });
 
