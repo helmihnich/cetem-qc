@@ -1,0 +1,75 @@
+# Local demo: web + API + PostgreSQL (+ optional ClamAV with `--profile scan`). Values come from deploy/env/compose.env.
+#   docker compose --env-file deploy/env/compose.env up --build
+name: cetem-qc
+
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in deploy/env/compose.env}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks: [internal]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  migrate:
+    build: { context: ., dockerfile: apps/api/Dockerfile }
+    command: ["pnpm", "--filter", "@cetem-qc/api", "db:migrate"]
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+    depends_on:
+      postgres: { condition: service_healthy }
+    networks: [internal]
+    restart: "no"
+
+  api:
+    build: { context: ., dockerfile: apps/api/Dockerfile }
+    environment:
+      HOST: 0.0.0.0
+      PORT: "3001"
+      APP_ENV: local
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      FILE_STORAGE: local
+      FILE_STORAGE_DIR: /var/data/files
+      ANTIVIRUS: ${ANTIVIRUS:-none}
+      CLAMAV_HOST: ${CLAMAV_HOST:-}
+      AI_PROVIDER: ${AI_PROVIDER:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+    volumes:
+      - files:/var/data/files
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+    networks: [internal]
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3001/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  web:
+    build: { context: ., dockerfile: apps/web/Dockerfile }
+    environment:
+      CETEM_QC_API_URL: http://api:3001
+    depends_on:
+      api: { condition: service_healthy }
+    ports:
+      - "${WEB_PORT:-3000}:3000"
+    networks: [internal]
+
+  clamav:
+    image: clamav/clamav:stable
+    profiles: [scan]
+    networks: [internal]
+
+networks:
+  internal: {}
+
+volumes:
+  pgdata: {}
+  files: {}

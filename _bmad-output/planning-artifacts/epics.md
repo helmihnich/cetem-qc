@@ -983,7 +983,7 @@ So that the end-to-end demonstration can run with protected dependencies.
 **And** object storage, malware scanning, AI assistance and document generation remain behind replaceable provider interfaces; no concrete vendor is selected by this story
 **And** backups have documented restore capability; production is not created without approval and no microservices, Kubernetes, HA, multi-region or autoscaling are added without a direct need.
 
-**Traceability:** AD-9, AD-11, SEC-005, SEC-009, NFR-007.
+**Traceability:** spec `_bmad-output/specs/spec-12-1-configure-a-controlled-pov-deployment-environment/SPEC.md`; AD-9, AD-11, SEC-005, SEC-009, NFR-007. **Scope:** repository artifacts only (compose/Dockerfiles, env templates, `/ready`, bind/HTTPS/database-URL config, French deployment guide for Vercel/Render/Neon); nothing is deployed.
 
 ### Story 12.2: Emit useful security and workflow diagnostics
 

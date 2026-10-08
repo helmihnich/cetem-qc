@@ -2,6 +2,9 @@ import express from "express";
 import type { Server } from "node:http";
 import type { Pool } from "pg";
 import { apiErrorSchema } from "@cetem-qc/schemas/api/v1";
+import { enforceHttps } from "./config/https-enforcement.js";
+import { resolveDatabaseUrl, resolveRuntimeConfig } from "./config/runtime-config.js";
+import type { RuntimeConfig } from "./config/runtime-config.js";
 import { findActiveSession } from "./modules/identity-auth/sessions.js";
 import { registerDefaultSummaryReopenParticipants } from "./register-participants.js";
 import type { RouteDeps } from "./routes/route-deps.js";
@@ -20,12 +23,31 @@ import type { ObjectStorage } from "./modules/files/index.js";
 import { reportCommandTestSeams } from "./modules/reports/index.js";
 import { registerFileRoutes } from "./routes/register-file-routes.js";
 
-export function createApp(pool?: Pool) {
+export interface AppOptions {
+  /** Defaults to the process environment (TRUST_PROXY, FORCE_HTTPS); tests pass explicit values. */
+  runtime?: Pick<RuntimeConfig, "trustProxy" | "forceHttps">;
+}
+
+export function createApp(pool?: Pool, options: AppOptions = {}) {
   registerDefaultSummaryReopenParticipants();
+  const runtime = options.runtime ?? resolveRuntimeConfig(process.env);
   const app = express();
+  app.set("trust proxy", runtime.trustProxy);
+  if (runtime.forceHttps) app.use(enforceHttps);
   let sharedPool = pool;
   const getPool = () => sharedPool ??= createDatabasePool();
   app.locals.closeDatabase = async () => { if (sharedPool && sharedPool !== pool) await sharedPool.end(); };
+
+  // Readiness (unlike /api/v1/health liveness) proves the database answers. Public, no secrets, outside the contract.
+  app.get("/ready", async (_request, response) => {
+    try {
+      await getPool().query("SELECT 1");
+      response.status(200).json({ status: "ready" });
+    } catch {
+      console.error("readiness_check_failed", "database_unavailable");
+      response.status(503).json({ status: "unavailable" });
+    }
+  });
 
   // Synchronization operations carry a whole form snapshot; only their two routes accept up to 256 kB.
   const defaultJson = express.json({ limit: "32kb" });
@@ -105,8 +127,7 @@ export function createApp(pool?: Pool) {
 }
 
 function createDatabasePool(): Pool {
-  const connectionString = process.env.DATABASE_URL;
-  if (!connectionString) throw new Error("DATABASE_URL must be set before handling authentication requests.");
+  const connectionString = resolveDatabaseUrl(process.env);
   // Loaded lazily so health checks and isolated route construction do not require database configuration.
   const { Pool: PgPool } = require("pg") as typeof import("pg");
   const pool = new PgPool({ connectionString });
@@ -152,11 +173,11 @@ function reportShutdownError(message: string, error: unknown): void {
   }
 }
 
-const port = Number(process.env.PORT ?? 3001);
 if (typeof require !== "undefined" && require.main === module) {
-  const app = createApp();
-  const server = app.listen(port, "127.0.0.1", () => {
-    console.log(`CETEM-QC API listening on http://127.0.0.1:${port}/api/v1`);
+  const config = resolveRuntimeConfig(process.env);
+  const app = createApp(undefined, { runtime: config });
+  const server = app.listen(config.port, config.host, () => {
+    console.log(`CETEM-QC API listening on ${config.host}:${config.port}`);
   });
   const shutdown = () => {
     void shutdownApplication(server, app.locals.closeDatabase).then(handleShutdownFailures);

@@ -1,12 +1,7 @@
 import { Pool } from "pg";
+import { resolveDatabaseUrl } from "../config/runtime-config.js";
 
-const connectionString = process.env.DATABASE_URL;
-
-if (!connectionString) {
-  throw new Error("DATABASE_URL must be set before initializing the database pool.");
-}
-
-export const databasePool = new Pool({ connectionString });
+export const databasePool = new Pool({ connectionString: resolveDatabaseUrl(process.env) });
 
 databasePool.on("error", (error) => {
   console.error("Unexpected PostgreSQL pool error", error);

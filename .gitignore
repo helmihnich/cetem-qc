@@ -8,6 +8,8 @@ coverage/
 *.tsbuildinfo
 .env*
 !.env.example
+# Filled local demo values (templates are the *.env.example files).
+deploy/env/*.env
 .automation/
 # Private object storage of the local file adapter (Story 11.1); never served.
 .data/

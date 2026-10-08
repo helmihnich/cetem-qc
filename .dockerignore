@@ -1,0 +1,10 @@
+.git
+.env*
+!.env.example
+deploy/env/*.env
+.data
+**/.data
+**/node_modules
+**/.next
+.automation
+_bmad-output
