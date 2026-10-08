@@ -1247,7 +1247,7 @@ paths:
         '502': { description: Generation or storage failed; the attempt can be retried with a new attemptId (REPORT_GENERATION_FAILED), content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
     get:
       operationId: listReportCandidates
-      summary: List the Word report candidates of a task, newest first
+      summary: List the Word and PDF report candidates of a task, newest first
       description: >-
         Responsable only. The status of each candidate is derived on every read: a ready candidate whose bound summary
         or conformity decision is no longer current reads as outdated. A malformed, unknown or another team's task, and
@@ -1270,10 +1270,56 @@ paths:
         '403': { description: Responsable role required (FORBIDDEN), content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
         '404': { description: Malformed, unknown or another team's task, or no accepted submission (TASK_NOT_FOUND), content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
         '500': { description: Candidates could not be loaded (INTERNAL_ERROR), content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+  /tasks/{taskId}/pdf-files/{fileId}/report-candidate:
+    post:
+      operationId: createReportCandidateFromPdf
+      summary: Create a report candidate from a ready manual PDF
+      description: >-
+        Responsable only. The body carries a client-generated attemptId only. Attaches a ready (validated, scanned) stored
+        PDF of an eligible task as a report candidate bound immutably to the audit revision, the confirmed summary and the
+        conformity decision. The candidate is never official and the PDF content is not inspected. The same attemptId for
+        the same task and file replays the stored candidate (200). A malformed, unknown or another team's task or file all
+        get the same 404.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: taskId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: fileId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReportFromPdfRequest'
+      responses:
+        '200':
+          description: Replay of an attempt that already attached this file (Cache-Control no-store)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReportCandidate'
+        '201':
+          description: Attached candidate (Cache-Control no-store)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReportCandidate'
+        '401': { description: Session rejected, content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+        '403': { description: Responsable role required (FORBIDDEN), content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+        '404': { description: Malformed, unknown or another team's task or file (TASK_NOT_FOUND), content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+        '409': { description: Summary not confirmed (SUMMARY_NOT_CONFIRMED), no current conformity decision (CONFORMITY_NOT_DECIDED), file not ready (REPORT_FILE_NOT_READY), file already a candidate for the current data (REPORT_FILE_ALREADY_ATTACHED) or attempt used elsewhere (REPORT_ATTEMPT_CONFLICT), content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+        '422': { description: Missing or invalid attemptId, or extra property (VALIDATION_FAILED), content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+        '500': { description: Evidence inconsistent or candidate not recorded (INTERNAL_ERROR), content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
   /tasks/{taskId}/report-candidates/{candidateId}/file:
     get:
       operationId: downloadReportCandidateFile
-      summary: Download the stored Word file of a candidate for inspection
+      summary: Download the stored Word or PDF file of a candidate for inspection
       description: >-
         Responsable only, owning team only. Available for a candidate whose outcome retained a file (ready or outdated).
         The response is an attachment with Cache-Control no-store and X-Content-Type-Options nosniff. Any other case,
@@ -1291,9 +1337,11 @@ paths:
           schema: { type: string, format: uuid }
       responses:
         '200':
-          description: The Word document (Content-Disposition attachment, Cache-Control no-store, X-Content-Type-Options nosniff)
+          description: The Word document or the uploaded PDF (Content-Disposition attachment, Cache-Control no-store, X-Content-Type-Options nosniff)
           content:
             application/vnd.openxmlformats-officedocument.wordprocessingml.document:
+              schema: { type: string, format: binary }
+            application/pdf:
               schema: { type: string, format: binary }
         '401': { description: Session rejected, content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
         '403': { description: Responsable role required (FORBIDDEN), content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
@@ -1968,21 +2016,27 @@ components:
       required: [attemptId]
       properties:
         attemptId: { type: string, format: uuid }
+    ReportFromPdfRequest:
+      type: object
+      additionalProperties: false
+      required: [attemptId]
+      properties:
+        attemptId: { type: string, format: uuid }
     ReportCandidateStatus:
       type: string
       enum: [generating, ready, failed, outdated]
     ReportCandidate:
       type: object
       description: >-
-        A Word report candidate. It is never official in this story, and no official designation property exists.
+        A report candidate, generated Word (template set, source null) or uploaded PDF (template null, source set). It is never official in this story, and no official designation property exists.
       additionalProperties: false
-      required: [id, attemptId, origin, status, requestedAt, requestedBy, bindings, template, file, failureClass]
+      required: [id, attemptId, origin, status, requestedAt, requestedBy, bindings, template, source, file, failureClass]
       properties:
         id: { type: string, format: uuid }
         attemptId: { type: string, format: uuid }
         origin:
           type: string
-          const: generated-word
+          enum: [generated-word, uploaded-pdf]
         status:
           $ref: '#/components/schemas/ReportCandidateStatus'
         requestedAt: { type: string, format: date-time }
@@ -2005,12 +2059,25 @@ components:
             conformityOutcome:
               $ref: '#/components/schemas/ConformityOutcome'
         template:
-          type: object
-          additionalProperties: false
-          required: [id, version]
-          properties:
-            id: { type: string }
-            version: { type: string }
+          oneOf:
+            - type: 'null'
+            - type: object
+              additionalProperties: false
+              required: [id, version]
+              properties:
+                id: { type: string }
+                version: { type: string }
+        source:
+          oneOf:
+            - type: 'null'
+            - type: object
+              additionalProperties: false
+              required: [fileId, scanResult]
+              properties:
+                fileId: { type: string, format: uuid }
+                scanResult:
+                  type: string
+                  enum: [clean, not-performed]
         file:
           oneOf:
             - type: 'null'
@@ -2465,7 +2532,7 @@ components:
         Error envelope. Codes include VALIDATION_ERROR, AUTHENTICATION_FAILED, FORBIDDEN, TASK_NOT_FOUND,
         PAYLOAD_TOO_LARGE, IDEMPOTENCY_KEY_REUSED, AUDIT_NOT_ACCEPTED, REPLACEMENT_ALREADY_EXISTS,
         TASK_ASSIGNEE_UNAVAILABLE, AI_UNAVAILABLE, SUMMARY_ALREADY_CONFIRMED, SUMMARY_CONFIRMED, SUMMARY_NOT_CONFIRMED, SUMMARY_DESIGNATED, CONFORMITY_ALREADY_DECIDED, CONFORMITY_NOT_DECIDED, REPORT_GENERATION_FAILED,
-        REPORT_INPUTS_CHANGED, REPORT_ATTEMPT_CONFLICT, FILE_TOO_LARGE, UNSUPPORTED_FILE_TYPE, FILE_STORAGE_FAILED,
+        REPORT_INPUTS_CHANGED, REPORT_ATTEMPT_CONFLICT, REPORT_FILE_NOT_READY, REPORT_FILE_ALREADY_ATTACHED, FILE_TOO_LARGE, UNSUPPORTED_FILE_TYPE, FILE_STORAGE_FAILED,
         FILE_ATTEMPT_CONFLICT, FILE_NOT_RESCANNABLE and INTERNAL_ERROR.
       required: [error]
       properties:

@@ -4,7 +4,7 @@ import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import type { apiV1Components, apiV1Operations } from "@cetem-qc/types";
-import { conformityDecisionRequestSchema, conformityDecisionSchema, conformityHistoryItemSchema, summaryReopeningRequestSchema, summaryReopeningSchema, summaryHistoryItemSchema, confirmedSummarySchema,summaryConfirmationRequestSchema, summaryDraftRequestSchema, summaryDraftResponseSchema, acceptedEvidenceResponseSchema, insightDecisionRequestSchema, insightDecisionResponseSchema, manualInsightRequestSchema, manualInsightResponseSchema, apiErrorSchema, createEmployeeRequestSchema, createTaskRequestSchema, employeeCredentialResponseSchema, employeeListResponseSchema, employeeTaskListQuerySchema, employeeTaskListResponseSchema, employeeTaskAuditVersionSchema, employeeTaskResponseSchema, graphieDraftPayloadSchema, healthQuerySchema, healthResponseSchema, replacementTaskResponseSchema, syncOperationAcceptedSchema, syncOperationConflictSchema, syncOperationRejectedSchema, syncOperationRequestSchema, taskListQuerySchema, taskListResponseSchema, updateEmployeeStatusRequestSchema, updateEmployeeStatusResponseSchema } from "./v1.js";
+import { reportCandidateSchema, reportFromPdfRequestSchema, conformityDecisionRequestSchema, conformityDecisionSchema, conformityHistoryItemSchema, summaryReopeningRequestSchema, summaryReopeningSchema, summaryHistoryItemSchema, confirmedSummarySchema,summaryConfirmationRequestSchema, summaryDraftRequestSchema, summaryDraftResponseSchema, acceptedEvidenceResponseSchema, insightDecisionRequestSchema, insightDecisionResponseSchema, manualInsightRequestSchema, manualInsightResponseSchema, apiErrorSchema, createEmployeeRequestSchema, createTaskRequestSchema, employeeCredentialResponseSchema, employeeListResponseSchema, employeeTaskListQuerySchema, employeeTaskListResponseSchema, employeeTaskAuditVersionSchema, employeeTaskResponseSchema, graphieDraftPayloadSchema, healthQuerySchema, healthResponseSchema, replacementTaskResponseSchema, syncOperationAcceptedSchema, syncOperationConflictSchema, syncOperationRejectedSchema, syncOperationRequestSchema, taskListQuerySchema, taskListResponseSchema, updateEmployeeStatusRequestSchema, updateEmployeeStatusResponseSchema } from "./v1.js";
 
 const contractPath = fileURLToPath(new URL("../../../types/openapi/cetem-qc-v1.yaml", import.meta.url));
 
@@ -522,5 +522,21 @@ test("K19 confirmedSummarySchema is strict with a 64-hex identity and a nullable
   assert.equal(summaryConfirmationRequestSchema.safeParse({ text: "a".repeat(5000) }).success, true);
   for (const bad of [{}, { text: "" }, { text: "  \n" }, { text: "a".repeat(5001) }, { text: "a\u0000b" }, { text: "T", extra: 1 }, { text: "T", draftId: "x" }, { text: "T", actor: id }]) {
     assert.equal(summaryConfirmationRequestSchema.safeParse(bad).success, false, JSON.stringify(bad));
+  }
+});
+
+test("Story 11.3 the PDF report candidate contract: strict request, nullable template, source for PDF, no official property", () => {
+  const uuid = "00000000-0000-4000-8000-000000000001";
+  assert.equal(reportFromPdfRequestSchema.safeParse({ attemptId: uuid }).success, true);
+  for (const bad of [{}, { attemptId: "x" }, { attemptId: uuid, extra: 1 }]) assert.equal(reportFromPdfRequestSchema.safeParse(bad).success, false, JSON.stringify(bad));
+  const candidate = {
+    id: uuid, attemptId: uuid, origin: "uploaded-pdf", status: "ready", requestedAt: "2026-10-08T12:00:00.000Z", requestedBy: { id: "a", displayName: "Responsable Test" },
+    bindings: { auditRevision: 1, summaryId: uuid, summaryVersion: 1, conformityDecisionId: uuid, conformityOutcome: "machine-conforme" },
+    template: null, source: { fileId: uuid, scanResult: "not-performed" }, file: { name: "r.pdf", byteSize: 1, sha256: "a".repeat(64) }, failureClass: null,
+  };
+  assert.equal(reportCandidateSchema.safeParse(candidate).success, true);
+  assert.equal(reportCandidateSchema.safeParse({ ...candidate, origin: "generated-word", template: { id: "t", version: "1" }, source: null }).success, true);
+  for (const bad of [{ ...candidate, origin: "official" }, { ...candidate, official: true }, { ...candidate, storageRef: "files/x" }, { ...candidate, source: { fileId: uuid, scanResult: "threat" } }, { ...candidate, source: undefined }]) {
+    assert.equal(reportCandidateSchema.safeParse(bad).success, false, JSON.stringify(bad));
   }
 });

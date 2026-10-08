@@ -2,21 +2,24 @@ import type { Pool, PoolClient } from "pg";
 import { getAcceptedSubmissionForReview } from "../../audits/queries/accepted-submission.js";
 import { getConformityOutcomes, getCurrentConformityDecision } from "../../conformity/index.js";
 import type { ConformityOutcome } from "../../conformity/index.js";
+import { getFileScanResults } from "../../files/index.js";
 import { getConfirmedSummary } from "../../summaries/index.js";
 
 export type ReportCandidateStatus = "generating" | "ready" | "failed" | "outdated";
 export type ReportFailureClass = "generation-failed" | "storage-failed";
+export type ReportOrigin = "generated-word" | "uploaded-pdf";
 export type StoredOutcome = "ready" | "failed" | "outdated";
 
 export interface ReportCandidate {
   id: string;
   attemptId: string;
-  origin: "generated-word";
+  origin: ReportOrigin;
   status: ReportCandidateStatus;
   requestedAt: string;
   requestedBy: { id: string; displayName: string };
   bindings: { auditRevision: number; summaryId: string; summaryVersion: number; conformityDecisionId: string; conformityOutcome: ConformityOutcome };
-  template: { id: string; version: string };
+  template: { id: string; version: string } | null;
+  source: { fileId: string; scanResult: "clean" | "not-performed" } | null;
   file: { name: string; byteSize: number; sha256: string } | null;
   failureClass: ReportFailureClass | null;
 }
@@ -30,8 +33,10 @@ export interface CandidateRow {
   confirmed_summary_id: string;
   summary_version: number;
   conformity_decision_id: string;
-  template_id: string;
-  template_version: string;
+  origin: ReportOrigin;
+  stored_file_id: string | null;
+  template_id: string | null;
+  template_version: string | null;
   requested_by: string;
   display_name: string;
   requested_at: Date;
@@ -45,7 +50,7 @@ export interface CandidateRow {
 export const candidateSelect = `
   SELECT candidate.id, candidate.attempt_id, candidate.task_id, candidate.submission_id, candidate.audit_revision,
          candidate.confirmed_summary_id, candidate.summary_version, candidate.conformity_decision_id,
-         candidate.template_id, candidate.template_version, candidate.requested_by, account.display_name, candidate.requested_at,
+         candidate.origin, candidate.stored_file_id, candidate.template_id, candidate.template_version, candidate.requested_by, account.display_name, candidate.requested_at,
          outcome.outcome, outcome.file_name, outcome.byte_size, outcome.sha256, outcome.failure_class
   FROM report_candidates candidate
   JOIN identity_accounts account ON account.id = candidate.requested_by
@@ -63,11 +68,13 @@ export function deriveStatus(row: Pick<CandidateRow, "outcome" | "confirmed_summ
   return "outdated";
 }
 
-export function toReportCandidate(row: CandidateRow, status: ReportCandidateStatus, conformityOutcome: ConformityOutcome): ReportCandidate {
+export function toReportCandidate(
+  row: CandidateRow, status: ReportCandidateStatus, conformityOutcome: ConformityOutcome, scanResult: "clean" | "not-performed" | null = null,
+): ReportCandidate {
   return {
     id: row.id,
     attemptId: row.attempt_id,
-    origin: "generated-word",
+    origin: row.origin,
     status,
     requestedAt: row.requested_at.toISOString(),
     requestedBy: { id: row.requested_by, displayName: row.display_name },
@@ -75,7 +82,8 @@ export function toReportCandidate(row: CandidateRow, status: ReportCandidateStat
       auditRevision: row.audit_revision, summaryId: row.confirmed_summary_id, summaryVersion: row.summary_version,
       conformityDecisionId: row.conformity_decision_id, conformityOutcome,
     },
-    template: { id: row.template_id, version: row.template_version },
+    template: row.template_id !== null ? { id: row.template_id, version: row.template_version! } : null,
+    source: row.stored_file_id !== null ? { fileId: row.stored_file_id, scanResult: scanResult ?? "not-performed" } : null,
     file: row.file_name !== null ? { name: row.file_name, byteSize: row.byte_size!, sha256: row.sha256! } : null,
     failureClass: row.failure_class,
   };
@@ -92,11 +100,12 @@ export async function getCurrentBindings(client: Pool | PoolClient, submissionId
 export async function presentCandidateRows(client: Pool | PoolClient, rows: readonly CandidateRow[], currentSubmissionId: string): Promise<ReportCandidate[]> {
   const current = await getCurrentBindings(client, currentSubmissionId);
   const outcomes = await getConformityOutcomes(client, [...new Set(rows.map((row) => row.conformity_decision_id))]);
+  const scans = await getFileScanResults(client, [...new Set(rows.flatMap((row) => (row.stored_file_id ? [row.stored_file_id] : [])))]);
   return rows.map((row) => {
     const derived = deriveStatus(row, current);
     // A candidate of another submission can never be current.
     const status = derived === "ready" && row.submission_id !== currentSubmissionId ? "outdated" : derived;
-    return toReportCandidate(row, status, outcomes.get(row.conformity_decision_id)!);
+    return toReportCandidate(row, status, outcomes.get(row.conformity_decision_id)!, row.stored_file_id ? scans.get(row.stored_file_id) ?? null : null);
   });
 }
 
@@ -112,8 +121,12 @@ export async function listReportCandidates(client: Pool | PoolClient, responsabl
 }
 
 export interface ReportCandidateFile {
+  origin: ReportOrigin;
   fileName: string;
-  storageRef: string;
+  /** The Word object key; null for a PDF candidate, whose bytes stay behind the files module. */
+  storageRef: string | null;
+  storedFileId: string | null;
+  requestedAt: Date;
   byteSize: number;
   sha256: string;
 }
@@ -125,13 +138,15 @@ export interface ReportCandidateFile {
 export async function getReportCandidateFile(client: Pool | PoolClient, responsableId: string, taskId: string, candidateId: string): Promise<ReportCandidateFile | undefined> {
   const snapshot = await getAcceptedSubmissionForReview(client, responsableId, taskId);
   if (!snapshot) return undefined;
-  const result = await client.query<{ storage_ref: string; file_name: string; byte_size: number; sha256: string }>(
-    `SELECT outcome.storage_ref, outcome.file_name, outcome.byte_size, outcome.sha256
+  const result = await client.query<{ origin: ReportOrigin; requested_at: Date; stored_file_id: string | null; storage_ref: string | null; file_name: string; byte_size: number; sha256: string }>(
+    `SELECT candidate.origin, candidate.stored_file_id, candidate.requested_at, outcome.storage_ref, outcome.file_name, outcome.byte_size, outcome.sha256
      FROM report_candidates candidate
      JOIN report_candidate_outcomes outcome ON outcome.candidate_id = candidate.id
      WHERE candidate.id = $1 AND candidate.task_id = $2 AND outcome.outcome IN ('ready', 'outdated')`,
     [candidateId, snapshot.taskId],
   );
   const row = result.rows[0];
-  return row ? { fileName: row.file_name, storageRef: row.storage_ref, byteSize: row.byte_size, sha256: row.sha256 } : undefined;
+  return row
+    ? { origin: row.origin, fileName: row.file_name, storageRef: row.storage_ref, storedFileId: row.stored_file_id, requestedAt: row.requested_at, byteSize: row.byte_size, sha256: row.sha256 }
+    : undefined;
 }

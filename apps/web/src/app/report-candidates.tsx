@@ -83,6 +83,8 @@ export type ReportCandidatesSectionProps = {
 function CandidateItem({ taskId, candidate }: { taskId: string; candidate: ReportCandidate }) {
   return <li className="insight-item report-candidate" data-status={candidate.status}>
     <strong>{fr.report.candidateBadge}</strong>
+    {" · "}
+    <span>{candidate.origin === "uploaded-pdf" ? fr.report.origin.uploadedPdf : fr.report.origin.generatedWord}</span>
     {" — "}
     <span>{fr.report.status[candidate.status]}</span>
     {" · "}
@@ -93,6 +95,7 @@ function CandidateItem({ taskId, candidate }: { taskId: string; candidate: Repor
     <span>{fill(fr.report.summaryVersion, { n: String(candidate.bindings.summaryVersion) })}</span>
     {" · "}
     <span>{fill(fr.report.decision, { label: decisionLabel(candidate.bindings.conformityOutcome) })}</span>
+    {candidate.source?.scanResult === "not-performed" && <>{" · "}<span className="field-hint">{fr.pdfFile.scanNote}</span></>}
     {candidate.file && (candidate.status === "ready" || candidate.status === "outdated")
       ? <>{" · "}<a href={reportDownloadUrl(taskId, candidate.id)} download>{fr.report.download}</a></>
       : null}

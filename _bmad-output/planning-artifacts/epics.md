@@ -916,7 +916,7 @@ So that report lifecycle rules can use a safe file without taking ownership of f
 **And** a file that is still uploading, invalid, quarantined, scan-pending or scan-failed cannot become Ready or eligible for designation
 **And** report metadata and official status remain owned by reports while file binary operations remain behind the files interface.
 
-**Traceability:** FR-034, FR-035, AD-8, AD-9, UX-DR2 (report-panel), UX-DR10. **Dependency:** DEP-03 for report-content acceptance.
+**Traceability:** spec `_bmad-output/specs/spec-11-3-create-a-report-candidate-from-a-ready-pdf/SPEC.md`; FR-034, FR-035, AD-8, AD-9, UX-DR2 (report-panel), UX-DR10. **Dependency:** Stories 11.1–11.2 (done); DEP-03 for report-content acceptance.
 
 ### Story 11.4: Designate exactly one current report official
 

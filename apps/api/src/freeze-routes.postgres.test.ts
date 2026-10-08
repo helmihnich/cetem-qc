@@ -96,6 +96,7 @@ const OTHER_MUTATING_ROUTES = [
   "POST /tasks/:taskId/conformity-decision",
   "POST /tasks/:taskId/report-candidates",
   "POST /tasks/:taskId/pdf-files",
+  "POST /tasks/:taskId/pdf-files/:fileId/report-candidate",
   "POST /tasks/:taskId/pdf-files/:fileId/scan-retries",
   "POST /employees",
   "POST /employees/:employeeId/credential",
@@ -205,6 +206,8 @@ test("F5 every other mutating route, called by both roles, leaves the accepted e
       ["POST", () => `/tasks/${taskId}/report-candidates`, { attemptId: randomUUID() }],
       // Story 11.2: a PDF upload (a JSON body is refused with 415) and a rescan of an unknown file write nothing; the accepted evidence stays unchanged.
       ["POST", () => `/tasks/${taskId}/pdf-files`, { attemptId: randomUUID() }],
+      // Story 11.3: attaching an unknown file as a report candidate writes nothing; the accepted evidence stays unchanged.
+      ["POST", () => `/tasks/${taskId}/pdf-files/${randomUUID()}/report-candidate`, { attemptId: randomUUID() }],
       ["POST", () => `/tasks/${taskId}/pdf-files/${randomUUID()}/scan-retries`, undefined],
       ["POST", () => `/tasks/${taskId}/deactivated-assignee-reassignment`, { successorId: employee, expectedAssignmentVersion: 1 }],
       ["POST", () => `/tasks/${taskId}/deactivated-assignee-recovery`, { sourceRevision: 1, successorId: employee, establishment: "Établissement B", service: "Radiologie", type: "graphie_mobile" }],

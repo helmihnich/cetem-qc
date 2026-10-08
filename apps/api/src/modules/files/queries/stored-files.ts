@@ -149,6 +149,29 @@ export async function getReadyFile(client: Executor, ownerScope: { taskId: strin
   };
 }
 
+/** The derived status of a file of a task, or undefined for an unknown file or a file of another task. Never exposes the storage reference. */
+export async function getStoredFileStatus(client: Executor, ownerScope: { taskId: string; fileId: string }): Promise<StoredFileStatus | undefined> {
+  const row = await getStoredFileRow(client, ownerScope.taskId, ownerScope.fileId);
+  if (!row) return undefined;
+  const checks = await readChecks(client, [row.id]);
+  return deriveStatus(checks.get(row.id) ?? []);
+}
+
+/** The scan note of each given file: `clean`, `not-performed`, or null for a file that is not `ready`. Files not found are absent. */
+export async function getFileScanResults(client: Executor, fileIds: readonly string[]): Promise<Map<string, "clean" | "not-performed" | null>> {
+  const results = new Map<string, "clean" | "not-performed" | null>();
+  if (fileIds.length === 0) return results;
+  const checks = await readChecks(client, fileIds);
+  const known = await client.query<{ id: string }>("SELECT id FROM stored_files WHERE id = ANY($1::uuid[])", [fileIds]);
+  for (const { id } of known.rows) {
+    const own = checks.get(id) ?? [];
+    if (deriveStatus(own) !== "ready") { results.set(id, null); continue; }
+    const scans = own.filter((check) => check.stage === "scan");
+    results.set(id, scans[scans.length - 1]?.result === "clean" ? "clean" : "not-performed");
+  }
+  return results;
+}
+
 /** The bytes of a `ready` file, or undefined when the file is not ready or the object is missing. */
 export async function readStoredFile(client: Executor, storage: ObjectStorage, ownerScope: { taskId: string; fileId: string }): Promise<{ file: StoredFile; bytes: Uint8Array } | undefined> {
   const ready = await getReadyPdfFile(client, ownerScope.taskId, ownerScope.fileId);

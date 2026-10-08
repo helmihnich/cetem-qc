@@ -2,7 +2,7 @@
 // It imports no business module and owns no report meaning.
 export { storePdfFile, rescanPdfFile, fileCommandTestSeams } from "./commands/store-pdf-file.js";
 export type { FileCommandDeps, StorePdfFileOutcome, RescanPdfFileOutcome } from "./commands/store-pdf-file.js";
-export { listStoredFiles, getReadyFile, readStoredFile, getReadyPdfFile } from "./queries/stored-files.js";
+export { listStoredFiles, getReadyFile, readStoredFile, getReadyPdfFile, getStoredFileStatus, getFileScanResults } from "./queries/stored-files.js";
 export type { StoredFile, StoredFileStatus, ReadyFile } from "./queries/stored-files.js";
 export type { PdfScanner, ScanResult } from "./ports/pdf-scanner.js";
 export { createPdfScanner, resolvePdfMaxBytes } from "./config.js";

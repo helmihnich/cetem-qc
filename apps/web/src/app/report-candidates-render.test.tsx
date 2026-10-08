@@ -20,7 +20,7 @@ const candidate = (overrides: Partial<ReportCandidate> = {}): ReportCandidate =>
   id: ID, attemptId: ATTEMPT, origin: "generated-word", status: "ready", requestedAt: "2026-10-08T12:00:00.000Z",
   requestedBy: { id: USER, displayName: "Responsable Test" },
   bindings: { auditRevision: 1, summaryId: ID, summaryVersion: 2, conformityDecisionId: ID, conformityOutcome: "machine-conforme" },
-  template: { id: "cetem-paper-report", version: "1.0.0" },
+  template: { id: "cetem-paper-report", version: "1.0.0" }, source: null,
   file: { name: "Rapport-LCQ-candidat-20261008-00000000.docx", byteSize: 1234, sha256: "a".repeat(64) },
   failureClass: null, ...overrides,
 });

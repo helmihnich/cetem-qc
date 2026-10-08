@@ -43,6 +43,7 @@ type ConformityDecisionContract = apiV1Operations["recordConformityDecision"]["r
 type ConformityHistoryItemContract = apiV1Components["schemas"]["ConformityHistoryItem"];
 type ReportCandidateRequestContract = apiV1Operations["generateReportCandidate"]["requestBody"]["content"]["application/json"];
 type ReportCandidateContract = apiV1Operations["generateReportCandidate"]["responses"][201]["content"]["application/json"];
+type ReportFromPdfRequestContract = apiV1Operations["createReportCandidateFromPdf"]["requestBody"]["content"]["application/json"];
 type ReportCandidateListContract = apiV1Operations["listReportCandidates"]["responses"][200]["content"]["application/json"];
 type StoredFileContract = apiV1Operations["uploadManualPdfFile"]["responses"][201]["content"]["application/json"];
 type StoredFileListContract = apiV1Operations["listManualPdfFiles"]["responses"][200]["content"]["application/json"];
@@ -262,11 +263,14 @@ export const conformityHistoryItemSchema: z.ZodType<ConformityHistoryItemContrac
 export const reportCandidateRequestSchema: z.ZodType<ReportCandidateRequestContract> = z.object({
   attemptId: z.string().uuid(),
 }).strict();
+export const reportFromPdfRequestSchema: z.ZodType<ReportFromPdfRequestContract> = z.object({
+  attemptId: z.string().uuid(),
+}).strict();
 export const reportCandidateStatusSchema = z.enum(["generating", "ready", "failed", "outdated"]);
 export const reportCandidateSchema: z.ZodType<ReportCandidateContract> = z.object({
   id: z.string().uuid(),
   attemptId: z.string().uuid(),
-  origin: z.literal("generated-word"),
+  origin: z.enum(["generated-word", "uploaded-pdf"]),
   status: reportCandidateStatusSchema,
   requestedAt: z.string().datetime(),
   requestedBy: summaryActorSchema,
@@ -277,7 +281,8 @@ export const reportCandidateSchema: z.ZodType<ReportCandidateContract> = z.objec
     conformityDecisionId: z.string().uuid(),
     conformityOutcome: conformityOutcomeSchema,
   }).strict(),
-  template: z.object({ id: z.string(), version: z.string() }).strict(),
+  template: z.object({ id: z.string(), version: z.string() }).strict().nullable(),
+  source: z.object({ fileId: z.string().uuid(), scanResult: z.enum(["clean", "not-performed"]) }).strict().nullable(),
   file: z.object({ name: z.string(), byteSize: z.number().int().min(0), sha256: z.string().regex(/^[0-9a-f]{64}$/) }).strict().nullable(),
   failureClass: z.enum(["generation-failed", "storage-failed"]).nullable(),
 }).strict();
@@ -443,6 +448,7 @@ export type ConformityDecisionRequest = z.infer<typeof conformityDecisionRequest
 export type ConformityDecision = z.infer<typeof conformityDecisionSchema>;
 export type ConformityHistoryItem = z.infer<typeof conformityHistoryItemSchema>;
 export type ReportCandidateRequest = z.infer<typeof reportCandidateRequestSchema>;
+export type ReportFromPdfRequest = z.infer<typeof reportFromPdfRequestSchema>;
 export type ReportCandidateStatus = z.infer<typeof reportCandidateStatusSchema>;
 export type ReportCandidate = z.infer<typeof reportCandidateSchema>;
 export type ReportCandidateList = z.infer<typeof reportCandidateListSchema>;

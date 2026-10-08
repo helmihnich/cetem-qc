@@ -1,11 +1,11 @@
 import { acceptedEvidenceResponseSchema, apiErrorSchema, conformityDecisionRequestSchema, conformityDecisionSchema, conformityHistoryItemSchema, authenticationRequestSchema, authenticationResponseSchema, confirmedSummarySchema, summaryReopeningRequestSchema, summaryReopeningSchema, summaryHistoryItemSchema, createDeactivatedAssigneeRecoveryRequestSchema, createEmployeeRequestSchema, createTaskRequestSchema, deactivatedAssigneeRecoveryResponseSchema, employeeCredentialResponseSchema, employeeListResponseSchema, employeeTaskAuditVersionSchema, employeeTaskRecoverySeedResponseSchema, employeeTaskListQuerySchema, employeeTaskListResponseSchema, employeeTaskResponseSchema, healthResponseSchema, insightDecisionRequestSchema, insightDecisionResponseSchema, manualInsightRequestSchema, manualInsightResponseSchema, passwordReplacementRequestSchema, reassignUnstartedTaskRequestSchema, reassignUnstartedTaskResponseSchema, replacementTaskResponseSchema, sessionResponseSchema, summaryConfirmationRequestSchema, summaryDraftRequestSchema, summaryDraftResponseSchema, syncOperationAcceptedSchema, syncOperationConflictSchema, syncOperationRejectedSchema, syncOperationRequestSchema, taskAssigneeListResponseSchema, taskListResponseSchema, taskResponseSchema } from "@cetem-qc/schemas/api/v1";
 import type { ConformityDecision, ConformityDecisionRequest, ConformityHistoryItem, ConformityOutcome, AcceptedEvidenceResponse, AuthenticationRequest, AuthenticationResponse, ConfirmedSummary, SummaryReopening, SummaryReopeningRequest, SummaryHistoryItem, CreateDeactivatedAssigneeRecoveryRequest, CreateEmployeeRequest, CreateTaskRequest, DeactivatedAssigneeRecoveryResponse, EmployeeCredentialResponse, EmployeeListResponse, EmployeeTaskAuditVersion, EmployeeTaskRecoverySeedResponse, EmployeeTaskListResponse, EmployeeTaskResponse, HealthResponse, InsightDecisionRequest, InsightDecisionResponse, ManualInsightRequest, ManualInsightResponse, PasswordReplacementRequest, ReassignUnstartedTaskRequest, ReassignUnstartedTaskResponse, ReplacementTaskResponse, SummaryConfirmationRequest, SummaryDraftResponse, SyncOperationAccepted, SyncOperationConflict, SyncOperationRejected, SyncOperationRequest, TaskListResponse, TaskResponse } from "@cetem-qc/schemas/api/v1";
 
-import { reportCandidateListSchema, reportCandidateRequestSchema, reportCandidateSchema, storedFileListSchema, storedFileSchema } from "@cetem-qc/schemas/api/v1";
-import type { ReportCandidate, ReportCandidateList, ReportCandidateRequest, StoredFile, StoredFileList } from "@cetem-qc/schemas/api/v1";
+import { reportCandidateListSchema, reportCandidateRequestSchema, reportCandidateSchema, reportFromPdfRequestSchema, storedFileListSchema, storedFileSchema } from "@cetem-qc/schemas/api/v1";
+import type { ReportCandidate, ReportCandidateList, ReportCandidateRequest, ReportFromPdfRequest, StoredFile, StoredFileList } from "@cetem-qc/schemas/api/v1";
 
 export { reportCandidateListSchema, reportCandidateSchema, storedFileListSchema, storedFileSchema };
-export type { ReportCandidate, ReportCandidateList, ReportCandidateRequest, StoredFile, StoredFileList };
+export type { ReportCandidate, ReportCandidateList, ReportCandidateRequest, ReportFromPdfRequest, StoredFile, StoredFileList };
 
 export { conformityDecisionSchema, conformityHistoryItemSchema,acceptedEvidenceResponseSchema, confirmedSummarySchema, summaryReopeningSchema, summaryHistoryItemSchema,insightDecisionResponseSchema, manualInsightResponseSchema, replacementTaskResponseSchema, summaryDraftResponseSchema, taskListResponseSchema };
 export type { ConformityDecision, ConformityDecisionRequest, ConformityHistoryItem, ConformityOutcome, ConfirmedSummary, SummaryReopening, SummaryHistoryItem,SummaryConfirmationRequest, SummaryDraftResponse, AcceptedEvidenceResponse, InsightDecisionRequest, InsightDecisionResponse, ManualInsightRequest, ManualInsightResponse, CreateDeactivatedAssigneeRecoveryRequest, CreateTaskRequest, DeactivatedAssigneeRecoveryResponse, EmployeeTaskAuditVersion, EmployeeTaskRecoverySeedResponse, EmployeeTaskListResponse, EmployeeTaskResponse, ReassignUnstartedTaskRequest, ReassignUnstartedTaskResponse, ReplacementTaskResponse, SyncOperationAccepted, SyncOperationConflict, SyncOperationRejected, SyncOperationRequest, TaskListResponse };
@@ -93,6 +93,15 @@ export type GenerateReportCandidateOutcome =
   | { status: 422; code: "VALIDATION_FAILED"; message: string }
   | { status: 500; code: "INTERNAL_ERROR"; message: string }
   | { status: 502; code: "REPORT_GENERATION_FAILED"; message: string };
+
+/** The documented outcomes of attaching a ready PDF as a report candidate; any other status or body throws `ApiRequestError`. */
+export type CreateReportCandidateFromPdfOutcome =
+  | { status: 200 | 201; body: ReportCandidate }
+  | { status: 403; code: "FORBIDDEN"; message: string }
+  | { status: 404; code: "TASK_NOT_FOUND"; message: string }
+  | { status: 409; code: "SUMMARY_NOT_CONFIRMED" | "CONFORMITY_NOT_DECIDED" | "REPORT_FILE_NOT_READY" | "REPORT_FILE_ALREADY_ATTACHED" | "REPORT_ATTEMPT_CONFLICT"; message: string }
+  | { status: 422; code: "VALIDATION_FAILED"; message: string }
+  | { status: 500; code: "INTERNAL_ERROR"; message: string };
 
 /** The documented outcomes of listing report candidates; any other status or body throws `ApiRequestError`. */
 export type ListReportCandidatesOutcome =
@@ -408,6 +417,29 @@ export function createApiClient({ baseUrl, fetch: fetcher = fetch, sessionToken:
         if (status === 422 && code === "VALIDATION_FAILED") return { status, code, message };
         if (status === 500 && code === "INTERNAL_ERROR") return { status, code, message };
         if (status === 502 && code === "REPORT_GENERATION_FAILED") return { status, code, message };
+      }
+      throw toRequestError(status, payload.data);
+    },
+    /** Attaches a ready PDF of the task as a report candidate (Responsable only). The candidate is never official. */
+    async createReportCandidateFromPdf(taskId: string, fileId: string, input: ReportFromPdfRequest): Promise<CreateReportCandidateFromPdfOutcome> {
+      const payload = await request(`/tasks/${encodeURIComponent(taskId)}/pdf-files/${encodeURIComponent(fileId)}/report-candidate`, {
+        method: "POST", headers: { accept: "application/json", "content-type": "application/json", ...sessionHeaders() },
+        body: JSON.stringify(reportFromPdfRequestSchema.parse(input)), cache: "no-store",
+      });
+      const status = payload.response.status;
+      if (status === 200 || status === 201) {
+        const parsed = reportCandidateSchema.safeParse(payload.data);
+        if (parsed.success) return { status, body: parsed.data };
+        throw toRequestError(status, payload.data);
+      }
+      const error = apiErrorSchema.safeParse(payload.data);
+      if (error.success) {
+        const { code, message } = error.data.error;
+        if (status === 403 && code === "FORBIDDEN") return { status, code, message };
+        if (status === 404 && code === "TASK_NOT_FOUND") return { status, code, message };
+        if (status === 409 && (code === "SUMMARY_NOT_CONFIRMED" || code === "CONFORMITY_NOT_DECIDED" || code === "REPORT_FILE_NOT_READY" || code === "REPORT_FILE_ALREADY_ATTACHED" || code === "REPORT_ATTEMPT_CONFLICT")) return { status, code, message };
+        if (status === 422 && code === "VALIDATION_FAILED") return { status, code, message };
+        if (status === 500 && code === "INTERNAL_ERROR") return { status, code, message };
       }
       throw toRequestError(status, payload.data);
     },

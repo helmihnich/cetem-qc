@@ -508,7 +508,7 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * List the Word report candidates of a task, newest first
+         * List the Word and PDF report candidates of a task, newest first
          * @description Responsable only. The status of each candidate is derived on every read: a ready candidate whose bound summary or conformity decision is no longer current reads as outdated. A malformed, unknown or another team's task, and an own-team task without accepted submission, all get the same 404.
          */
         get: operations["listReportCandidates"];
@@ -524,6 +524,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/tasks/{taskId}/pdf-files/{fileId}/report-candidate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create a report candidate from a ready manual PDF
+         * @description Responsable only. The body carries a client-generated attemptId only. Attaches a ready (validated, scanned) stored PDF of an eligible task as a report candidate bound immutably to the audit revision, the confirmed summary and the conformity decision. The candidate is never official and the PDF content is not inspected. The same attemptId for the same task and file replays the stored candidate (200). A malformed, unknown or another team's task or file all get the same 404.
+         */
+        post: operations["createReportCandidateFromPdf"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/tasks/{taskId}/report-candidates/{candidateId}/file": {
         parameters: {
             query?: never;
@@ -532,7 +552,7 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Download the stored Word file of a candidate for inspection
+         * Download the stored Word or PDF file of a candidate for inspection
          * @description Responsable only, owning team only. Available for a candidate whose outcome retained a file (ready or outdated). The response is an attachment with Cache-Control no-store and X-Content-Type-Options nosniff. Any other case, including a failed or generating candidate and another team's candidate, gets the same 404 as an unknown task.
          */
         get: operations["downloadReportCandidateFile"];
@@ -990,16 +1010,20 @@ export interface components {
             /** Format: uuid */
             attemptId: string;
         };
+        ReportFromPdfRequest: {
+            /** Format: uuid */
+            attemptId: string;
+        };
         /** @enum {string} */
         ReportCandidateStatus: "generating" | "ready" | "failed" | "outdated";
-        /** @description A Word report candidate. It is never official in this story, and no official designation property exists. */
+        /** @description A report candidate, generated Word (template set, source null) or uploaded PDF (template null, source set). It is never official in this story, and no official designation property exists. */
         ReportCandidate: {
             /** Format: uuid */
             id: string;
             /** Format: uuid */
             attemptId: string;
-            /** @constant */
-            origin: "generated-word";
+            /** @enum {string} */
+            origin: "generated-word" | "uploaded-pdf";
             status: components["schemas"]["ReportCandidateStatus"];
             /** Format: date-time */
             requestedAt: string;
@@ -1016,9 +1040,15 @@ export interface components {
                 conformityDecisionId: string;
                 conformityOutcome: components["schemas"]["ConformityOutcome"];
             };
-            template: {
+            template: null | {
                 id: string;
                 version: string;
+            };
+            source: null | {
+                /** Format: uuid */
+                fileId: string;
+                /** @enum {string} */
+                scanResult: "clean" | "not-performed";
             };
             file: null | {
                 name: string;
@@ -1308,7 +1338,7 @@ export interface components {
             /** @constant */
             version: "v1";
         };
-        /** @description Error envelope. Codes include VALIDATION_ERROR, AUTHENTICATION_FAILED, FORBIDDEN, TASK_NOT_FOUND, PAYLOAD_TOO_LARGE, IDEMPOTENCY_KEY_REUSED, AUDIT_NOT_ACCEPTED, REPLACEMENT_ALREADY_EXISTS, TASK_ASSIGNEE_UNAVAILABLE, AI_UNAVAILABLE, SUMMARY_ALREADY_CONFIRMED, SUMMARY_CONFIRMED, SUMMARY_NOT_CONFIRMED, SUMMARY_DESIGNATED, CONFORMITY_ALREADY_DECIDED, CONFORMITY_NOT_DECIDED, REPORT_GENERATION_FAILED, REPORT_INPUTS_CHANGED, REPORT_ATTEMPT_CONFLICT, FILE_TOO_LARGE, UNSUPPORTED_FILE_TYPE, FILE_STORAGE_FAILED, FILE_ATTEMPT_CONFLICT, FILE_NOT_RESCANNABLE and INTERNAL_ERROR. */
+        /** @description Error envelope. Codes include VALIDATION_ERROR, AUTHENTICATION_FAILED, FORBIDDEN, TASK_NOT_FOUND, PAYLOAD_TOO_LARGE, IDEMPOTENCY_KEY_REUSED, AUDIT_NOT_ACCEPTED, REPLACEMENT_ALREADY_EXISTS, TASK_ASSIGNEE_UNAVAILABLE, AI_UNAVAILABLE, SUMMARY_ALREADY_CONFIRMED, SUMMARY_CONFIRMED, SUMMARY_NOT_CONFIRMED, SUMMARY_DESIGNATED, CONFORMITY_ALREADY_DECIDED, CONFORMITY_NOT_DECIDED, REPORT_GENERATION_FAILED, REPORT_INPUTS_CHANGED, REPORT_ATTEMPT_CONFLICT, REPORT_FILE_NOT_READY, REPORT_FILE_ALREADY_ATTACHED, FILE_TOO_LARGE, UNSUPPORTED_FILE_TYPE, FILE_STORAGE_FAILED, FILE_ATTEMPT_CONFLICT, FILE_NOT_RESCANNABLE and INTERNAL_ERROR. */
         ApiError: {
             error: {
                 code: string;
@@ -3417,6 +3447,96 @@ export interface operations {
             };
         };
     };
+    createReportCandidateFromPdf: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                taskId: string;
+                fileId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReportFromPdfRequest"];
+            };
+        };
+        responses: {
+            /** @description Replay of an attempt that already attached this file (Cache-Control no-store) */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReportCandidate"];
+                };
+            };
+            /** @description Attached candidate (Cache-Control no-store) */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReportCandidate"];
+                };
+            };
+            /** @description Session rejected */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Responsable role required (FORBIDDEN) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Malformed */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Summary not confirmed (SUMMARY_NOT_CONFIRMED) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Missing or invalid attemptId */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Evidence inconsistent or candidate not recorded (INTERNAL_ERROR) */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
     downloadReportCandidateFile: {
         parameters: {
             query?: never;
@@ -3429,13 +3549,14 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description The Word document (Content-Disposition attachment, Cache-Control no-store, X-Content-Type-Options nosniff) */
+            /** @description The Word document or the uploaded PDF (Content-Disposition attachment, Cache-Control no-store, X-Content-Type-Options nosniff) */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
                     "application/vnd.openxmlformats-officedocument.wordprocessingml.document": string;
+                    "application/pdf": string;
                 };
             };
             /** @description Session rejected */

@@ -310,7 +310,7 @@ export function InsightProposalsPanel({ taskId, insights, initialDecisions, init
     <SummaryDraftPanel taskId={taskId} summary={summary} onConfirmed={setSummary} onReloadEvidence={reloadSummary} version={summaryVersion} history={summaryHistory} onReopened={onReopened} onReloadState={reloadState} />
     <ConformityDecisionPanel taskId={taskId} confirmedVersion={summary ? summary.version : null} decision={summary ? conformityDecision : null} history={conformityHistory} onRecorded={setConformityDecision} onReloadState={reloadState} />
     <ReportCandidatesPanel taskId={taskId} eligible={summary !== null && conformityDecision !== null} refreshKey={reportRefreshKey} onReloadState={reloadState} />
-    <PdfFilesPanel taskId={taskId} eligible={summary !== null && conformityDecision !== null} refreshKey={reportRefreshKey} onReloadState={reloadState} />
+    <PdfFilesPanel taskId={taskId} eligible={summary !== null && conformityDecision !== null} refreshKey={reportRefreshKey} onReloadState={reloadState} onCandidatesChanged={bumpReportRefresh} />
   </>;
 }
 
