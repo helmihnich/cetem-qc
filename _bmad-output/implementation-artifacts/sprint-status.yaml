@@ -29,7 +29,7 @@
 # - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
 # - Retrospective appends its action items to action_items; the status view surfaces open ones
 generated: 09-26-2026 18:00
-last_updated: 10-08-2026 12:00
+last_updated: 10-08-2026 23:31
 project: cetem-qc
 project_key: NOKEY
 tracking_system: file-system
@@ -107,14 +107,14 @@ development_status:
   10-4-record-the-explicit-human-machine-conformity-decision: done
   epic-10-retrospective: done
 
-  epic-11: in-progress
+  epic-11: done
   11-1-generate-an-inspectable-word-report-candidate: done
   11-2-validate-scan-and-store-a-manual-pdf-file: done
   11-3-create-a-report-candidate-from-a-ready-pdf: done
   11-4-designate-exactly-one-current-report-official: done
   11-5-view-and-download-authorized-completed-history: done
   11-6-keep-report-candidates-current-through-asynchronous-processi: done
-  epic-11-retrospective: optional
+  epic-11-retrospective: done
 
   epic-12: backlog
   12-1-configure-a-controlled-pov-deployment-environment: backlog
@@ -486,3 +486,67 @@ action_items:
     owner: "Calculation and mobile maintainers"
     status: open
     ref: "_bmad-output/implementation-artifacts/epic-10-retro-2026-10-08.md"
+  - id: "epic-11-retro-item-44-extend-the-catalogue-rule-version-bump-a"
+    epic: 11
+    action: "Extend the catalogue/rule version-bump action to cover stored report
+      candidates and official reports (migrations 0022-0025)"
+    owner: "Calculation and mobile maintainers"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-11-retro-2026-10-08.md"
+  - id: "epic-11-retro-item-45-epic-12-must-run-separate-owner-and-runt"
+    epic: 11
+    action: "Epic 12 must run separate owner and runtime database roles (or document
+      why not), covering official_reports and the accepted-evidence freeze triggers"
+    owner: "Epic 12 story authors"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-11-retro-2026-10-08.md"
+  - id: "epic-11-retro-item-46-epic-12-deployment-guide-keeps-ai_provid"
+    epic: 11
+    action: "Epic 12 deployment guide keeps AI_PROVIDER=mock and antivirus none as
+      defaults, gemini off until CETEM answers the free-text question, and documents
+      optional clamav"
+    owner: "Epic 12 story authors; Product Owner (Helmi)"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-11-retro-2026-10-08.md"
+  - id: "epic-11-retro-item-47-decide-whether-the-employe-needs-a-mobil"
+    epic: 11
+    action: "Decide whether the Employe needs a mobile history screen and on-device
+      official report saving for the PoV or web download suffices"
+    owner: "Product Owner (Helmi)"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-11-retro-2026-10-08.md"
+  - id: "epic-11-retro-item-48-add-an-epic-12-end-to-end-check-opening"
+    epic: 11
+    action: "Add an Epic 12 end-to-end check opening a generated docx in a Word-compatible
+      reader and, when available, a ClamAV clean and infected-test PDF upload"
+    owner: "Epic 12 story authors"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-11-retro-2026-10-08.md"
+  - id: "epic-11-retro-item-49-run-bmad-review-over-the-epic-11-diff-de"
+    epic: 11
+    action: "Run bmad-review over the Epic 11 diff (designation transaction, download
+      authorization, ZIP writer, ClamAV failure paths) and log findings in deferred-work.md"
+    owner: "Reviewer"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-11-retro-2026-10-08.md"
+  - id: "epic-11-retro-item-50-reconcile-spec-status-values-in-review-a"
+    epic: 11
+    action: "Reconcile SPEC status values (in-review, approved) to done for Epics
+      9, 10 and 11, or declare a final status by convention"
+    owner: "Story authors"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-11-retro-2026-10-08.md"
+  - id: "epic-11-retro-item-51-decide-pending-epic-10-questions-server"
+    epic: 11
+    action: "Decide pending Epic 10 questions: server-side unconfirmed summary persistence
+      and correcting a conformity decision without reopening"
+    owner: "Product Owner (Helmi)"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-11-retro-2026-10-08.md"
+  - id: "epic-11-retro-item-52-split-register-report-routes-ts-307-line"
+    epic: 11
+    action: "Split register-report-routes.ts (307 lines) by concern if Epic 12 adds
+      routes to it"
+    owner: "API maintainers"
+    status: open
+    ref: "_bmad-output/implementation-artifacts/epic-11-retro-2026-10-08.md"
