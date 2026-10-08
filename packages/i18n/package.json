@@ -9,7 +9,8 @@
   },
   "exports": {
     ".": "./src/fr.ts",
-    "./graphie-results": "./src/graphie-results.ts"
+    "./graphie-results": "./src/graphie-results.ts",
+    "./report-document": "./src/report-document.ts"
   },
   "dependencies": {
     "@cetem-qc/domain": "workspace:*"

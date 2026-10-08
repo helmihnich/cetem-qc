@@ -16,7 +16,7 @@ export const GRAPHIE_RESULT_ORDER: readonly GraphieResultName[] = [
 ];
 
 /** Display only: shortest round-trip number with a decimal comma. Never rounded. */
-const formatNumber = (value: number) => String(value).replace(".", ",");
+export const formatNumber = (value: number) => String(value).replace(".", ",");
 
 function formatValue(value: GraphieValue | undefined, unit: string): string {
   if (!value || value.status === "unavailable") return `${t.unavailable} — ${t.reasons[value?.reason ?? "missing-input"]}`;

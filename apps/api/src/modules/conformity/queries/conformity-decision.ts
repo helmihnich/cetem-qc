@@ -54,6 +54,15 @@ export async function getCurrentConformityDecision(client: Pool | PoolClient, su
   return row ? toDecision(row, summary.version) : null;
 }
 
+/** The outcome of each given decision, by decision id (current or historical). Read only. */
+export async function getConformityOutcomes(client: Pool | PoolClient, decisionIds: readonly string[]): Promise<Map<string, ConformityOutcome>> {
+  if (decisionIds.length === 0) return new Map();
+  const result = await client.query<{ id: string; outcome: ConformityOutcome }>(
+    "SELECT id, outcome FROM conformity_decisions WHERE id = ANY($1::uuid[])", [decisionIds],
+  );
+  return new Map(result.rows.map((row) => [row.id, row.outcome]));
+}
+
 /** Decisions that are not current (bound to a replaced summary), newest first. Read only. */
 export async function getConformityHistory(client: Pool | PoolClient, submissionId: string): Promise<ConformityHistoryItem[]> {
   const current = await getConfirmedSummary(client, submissionId);

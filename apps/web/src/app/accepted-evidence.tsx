@@ -8,6 +8,7 @@ import type { CatalogueField, CatalogueSection, GraphieCalculationResults } from
 import { fr } from "@cetem-qc/i18n";
 import { GraphieCalculationReview } from "./graphie-calculation-review";
 import { ConformityDecisionPanel } from "./conformity-decision";
+import { ReportCandidatesPanel } from "./report-candidates";
 import { SummaryDraftPanel } from "./summary-draft";
 
 const dateTimeFormatter = new Intl.DateTimeFormat("fr-FR", { dateStyle: "medium", timeStyle: "short" });
@@ -231,6 +232,9 @@ export function ManualInsightsSection({ insights, pending = false, failed = fals
 export function InsightProposalsPanel({ taskId, insights, initialDecisions, initialManualInsights = [], initialSummary = null, initialSummaryHistory = [], initialSummaryVersion = null, initialConformityDecision = null, initialConformityHistory = [] }: { taskId: string; insights: AcceptedEvidenceResponse["insights"]; initialDecisions: InsightDecisions; initialManualInsights?: ManualInsightItem[]; initialSummary?: ConfirmedSummary | null; initialSummaryHistory?: SummaryHistoryItem[]; initialSummaryVersion?: AcceptedEvidenceResponse["summaryVersion"] | null; initialConformityDecision?: ConformityDecision | null; initialConformityHistory?: ConformityHistoryItem[] }) {
   const [conformityDecision, setConformityDecision] = useState<ConformityDecision | null>(initialConformityDecision);
   const [conformityHistory, setConformityHistory] = useState<ConformityHistoryItem[]>(initialConformityHistory);
+  // Bumped whenever the summary or decision state is reloaded or reopened, so the derived candidate statuses are read again.
+  const [reportRefreshKey, setReportRefreshKey] = useState(0);
+  const bumpReportRefresh = () => setReportRefreshKey((key) => key + 1);
   const [summary, setSummaryState] = useState<ConfirmedSummary | null>(initialSummary);
   const [summaryHistory, setSummaryHistory] = useState<SummaryHistoryItem[]>(initialSummaryHistory);
   const [summaryVersion, setSummaryVersion] = useState<AcceptedEvidenceResponse["summaryVersion"] | null>(initialSummaryVersion ?? (initialSummary ? { number: initialSummary.version, state: "confirmed" } : null));
@@ -245,6 +249,7 @@ export function InsightProposalsPanel({ taskId, insights, initialDecisions, init
     // The decision bound to the reopened summary becomes historical; it is never carried over to the next version.
     setConformityDecision(null);
     setConformityHistory((previous) => conformityDecision ? [{ ...conformityDecision, invalidatedAt: reopening.reopenedAt }, ...previous] : previous);
+    bumpReportRefresh();
     setSummaryHistory((previous) => [{
       version: reopening.previous.version, text: reopening.previous.text, confirmedAt: reopening.previous.confirmedAt,
       confirmedBy: reopening.previous.confirmedBy, reopenedAt: reopening.reopenedAt, reopenedBy: reopening.reopenedBy,
@@ -283,6 +288,7 @@ export function InsightProposalsPanel({ taskId, insights, initialDecisions, init
     if (reloaded.kind === "ready") {
       setConformityDecision(reloaded.evidence.conformityDecision);
       setConformityHistory(reloaded.evidence.conformityHistory);
+      bumpReportRefresh();
     }
     return reloaded.kind === "ready" ? reloaded.evidence.summary : null;
   };
@@ -295,12 +301,14 @@ export function InsightProposalsPanel({ taskId, insights, initialDecisions, init
     setSummaryHistory(reloaded.evidence.summaryHistory);
     setConformityDecision(reloaded.evidence.conformityDecision);
     setConformityHistory(reloaded.evidence.conformityHistory);
+    bumpReportRefresh();
   };
   return <>
     <InsightProposalsSection insights={insights} decisions={decisions} pendingProposalId={pendingProposalId} failed={failed} onDecide={onDecide} manualInsightCount={manualInsights.length} locked={summary !== null} />
     <ManualInsightsSection insights={manualInsights} pending={manualPending} failed={manualFailed} onAdd={onAddManual} locked={summary !== null} />
     <SummaryDraftPanel taskId={taskId} summary={summary} onConfirmed={setSummary} onReloadEvidence={reloadSummary} version={summaryVersion} history={summaryHistory} onReopened={onReopened} onReloadState={reloadState} />
     <ConformityDecisionPanel taskId={taskId} confirmedVersion={summary ? summary.version : null} decision={summary ? conformityDecision : null} history={conformityHistory} onRecorded={setConformityDecision} onReloadState={reloadState} />
+    <ReportCandidatesPanel taskId={taskId} eligible={summary !== null && conformityDecision !== null} refreshKey={reportRefreshKey} onReloadState={reloadState} />
   </>;
 }
 

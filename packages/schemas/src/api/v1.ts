@@ -41,7 +41,10 @@ type SummaryHistoryItemContract = apiV1Components["schemas"]["SummaryHistoryItem
 type ConformityDecisionRequestContract = apiV1Operations["recordConformityDecision"]["requestBody"]["content"]["application/json"];
 type ConformityDecisionContract = apiV1Operations["recordConformityDecision"]["responses"][201]["content"]["application/json"];
 type ConformityHistoryItemContract = apiV1Components["schemas"]["ConformityHistoryItem"];
-type EmployeeTaskListResponseContract = apiV1Operations["listAssignedEmployeeTasks"]["responses"][200]["content"]["application/json"];
+type ReportCandidateRequestContract = apiV1Operations["generateReportCandidate"]["requestBody"]["content"]["application/json"];
+type ReportCandidateContract = apiV1Operations["generateReportCandidate"]["responses"][201]["content"]["application/json"];
+type ReportCandidateListContract = apiV1Operations["listReportCandidates"]["responses"][200]["content"]["application/json"];
+type EmployeeTaskListResponseContract =apiV1Operations["listAssignedEmployeeTasks"]["responses"][200]["content"]["application/json"];
 type EmployeeTaskResponseContract = apiV1Operations["getAssignedEmployeeTask"]["responses"][200]["content"]["application/json"];
 
 // Keep the runtime parser tied to the generated wire representation.
@@ -253,6 +256,32 @@ export const conformityHistoryItemSchema: z.ZodType<ConformityHistoryItemContrac
   summaryVersion: z.number().int().min(1),
   invalidatedAt: z.string().datetime().nullable(),
 }).strict();
+/** Story 11.1: a Word report candidate. It is never official: no official property exists. */
+export const reportCandidateRequestSchema: z.ZodType<ReportCandidateRequestContract> = z.object({
+  attemptId: z.string().uuid(),
+}).strict();
+export const reportCandidateStatusSchema = z.enum(["generating", "ready", "failed", "outdated"]);
+export const reportCandidateSchema: z.ZodType<ReportCandidateContract> = z.object({
+  id: z.string().uuid(),
+  attemptId: z.string().uuid(),
+  origin: z.literal("generated-word"),
+  status: reportCandidateStatusSchema,
+  requestedAt: z.string().datetime(),
+  requestedBy: summaryActorSchema,
+  bindings: z.object({
+    auditRevision: z.number().int().min(1),
+    summaryId: z.string().uuid(),
+    summaryVersion: z.number().int().min(1),
+    conformityDecisionId: z.string().uuid(),
+    conformityOutcome: conformityOutcomeSchema,
+  }).strict(),
+  template: z.object({ id: z.string(), version: z.string() }).strict(),
+  file: z.object({ name: z.string(), byteSize: z.number().int().min(0), sha256: z.string().regex(/^[0-9a-f]{64}$/) }).strict().nullable(),
+  failureClass: z.enum(["generation-failed", "storage-failed"]).nullable(),
+}).strict();
+export const reportCandidateListSchema: z.ZodType<ReportCandidateListContract> = z.object({
+  candidates: z.array(reportCandidateSchema),
+}).strict();
 export const acceptedEvidenceResponseSchema: z.ZodType<AcceptedEvidenceResponseContract> = z.object({
   conformityDecision: conformityDecisionSchema.nullable(),
   conformityHistory: z.array(conformityHistoryItemSchema),
@@ -390,6 +419,10 @@ export type ConformityOutcome = z.infer<typeof conformityOutcomeSchema>;
 export type ConformityDecisionRequest = z.infer<typeof conformityDecisionRequestSchema>;
 export type ConformityDecision = z.infer<typeof conformityDecisionSchema>;
 export type ConformityHistoryItem = z.infer<typeof conformityHistoryItemSchema>;
+export type ReportCandidateRequest = z.infer<typeof reportCandidateRequestSchema>;
+export type ReportCandidateStatus = z.infer<typeof reportCandidateStatusSchema>;
+export type ReportCandidate = z.infer<typeof reportCandidateSchema>;
+export type ReportCandidateList = z.infer<typeof reportCandidateListSchema>;
 export type SummaryDraftRequest = z.infer<typeof summaryDraftRequestSchema>;
 export type SummaryDraftResponse = z.infer<typeof summaryDraftResponseSchema>;
 export type EmployeeTaskListResponse = z.infer<typeof employeeTaskListResponseSchema>;

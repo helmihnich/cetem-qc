@@ -9,3 +9,5 @@ coverage/
 .env*
 !.env.example
 .automation/
+# Private object storage of the local file adapter (Story 11.1); never served.
+.data/

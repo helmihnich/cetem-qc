@@ -500,6 +500,50 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/tasks/{taskId}/report-candidates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the Word report candidates of a task, newest first
+         * @description Responsable only. The status of each candidate is derived on every read: a ready candidate whose bound summary or conformity decision is no longer current reads as outdated. A malformed, unknown or another team's task, and an own-team task without accepted submission, all get the same 404.
+         */
+        get: operations["listReportCandidates"];
+        put?: never;
+        /**
+         * Generate a Word report candidate from the current audit workflow inputs
+         * @description Responsable only. The body carries a client-generated attemptId only; actor and dates come from the session and the server clock. Generates one Word document, stores it privately and returns the candidate, which is bound immutably to the audit revision, the confirmed summary and the conformity decision. A candidate is never official in this story. The same attemptId for the same task replays the stored outcome (200 for a ready candidate, 502 for a failed one) without generating again. A malformed, unknown or another team's task, and an own-team task without accepted submission, all get the same 404.
+         */
+        post: operations["generateReportCandidate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tasks/{taskId}/report-candidates/{candidateId}/file": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Download the stored Word file of a candidate for inspection
+         * @description Responsable only, owning team only. Available for a candidate whose outcome retained a file (ready or outdated). The response is an attachment with Cache-Control no-store and X-Content-Type-Options nosniff. Any other case, including a failed or generating candidate and another team's candidate, gets the same 404 as an unknown task.
+         */
+        get: operations["downloadReportCandidateFile"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -878,6 +922,50 @@ export interface components {
             /** Format: date-time */
             invalidatedAt: string | null;
         };
+        ReportCandidateRequest: {
+            /** Format: uuid */
+            attemptId: string;
+        };
+        /** @enum {string} */
+        ReportCandidateStatus: "generating" | "ready" | "failed" | "outdated";
+        /** @description A Word report candidate. It is never official in this story, and no official designation property exists. */
+        ReportCandidate: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            attemptId: string;
+            /** @constant */
+            origin: "generated-word";
+            status: components["schemas"]["ReportCandidateStatus"];
+            /** Format: date-time */
+            requestedAt: string;
+            requestedBy: {
+                id: string;
+                displayName: string;
+            };
+            bindings: {
+                auditRevision: number;
+                /** Format: uuid */
+                summaryId: string;
+                summaryVersion: number;
+                /** Format: uuid */
+                conformityDecisionId: string;
+                conformityOutcome: components["schemas"]["ConformityOutcome"];
+            };
+            template: {
+                id: string;
+                version: string;
+            };
+            file: null | {
+                name: string;
+                byteSize: number;
+                sha256: string;
+            };
+            failureClass: null | ("generation-failed" | "storage-failed");
+        };
+        ReportCandidateList: {
+            candidates: components["schemas"]["ReportCandidate"][];
+        };
         SummaryHistoryItem: {
             version: number;
             text: string;
@@ -1123,7 +1211,7 @@ export interface components {
             /** @constant */
             version: "v1";
         };
-        /** @description Error envelope. Codes include VALIDATION_ERROR, AUTHENTICATION_FAILED, FORBIDDEN, TASK_NOT_FOUND, PAYLOAD_TOO_LARGE, IDEMPOTENCY_KEY_REUSED, AUDIT_NOT_ACCEPTED, REPLACEMENT_ALREADY_EXISTS, TASK_ASSIGNEE_UNAVAILABLE, AI_UNAVAILABLE, SUMMARY_ALREADY_CONFIRMED, SUMMARY_CONFIRMED, SUMMARY_NOT_CONFIRMED, SUMMARY_DESIGNATED, CONFORMITY_ALREADY_DECIDED and INTERNAL_ERROR. */
+        /** @description Error envelope. Codes include VALIDATION_ERROR, AUTHENTICATION_FAILED, FORBIDDEN, TASK_NOT_FOUND, PAYLOAD_TOO_LARGE, IDEMPOTENCY_KEY_REUSED, AUDIT_NOT_ACCEPTED, REPLACEMENT_ALREADY_EXISTS, TASK_ASSIGNEE_UNAVAILABLE, AI_UNAVAILABLE, SUMMARY_ALREADY_CONFIRMED, SUMMARY_CONFIRMED, SUMMARY_NOT_CONFIRMED, SUMMARY_DESIGNATED, CONFORMITY_ALREADY_DECIDED, CONFORMITY_NOT_DECIDED, REPORT_GENERATION_FAILED, REPORT_INPUTS_CHANGED, REPORT_ATTEMPT_CONFLICT and INTERNAL_ERROR. */
         ApiError: {
             error: {
                 code: string;
@@ -3066,6 +3154,221 @@ export interface operations {
                 };
             };
             /** @description Evidence inconsistent or decision not recorded (INTERNAL_ERROR) */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    listReportCandidates: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                taskId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Candidates, newest first (Cache-Control no-store) */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReportCandidateList"];
+                };
+            };
+            /** @description Session rejected */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Responsable role required (FORBIDDEN) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Malformed */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Candidates could not be loaded (INTERNAL_ERROR) */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    generateReportCandidate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                taskId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReportCandidateRequest"];
+            };
+        };
+        responses: {
+            /** @description Replay of an attempt that already produced a ready candidate (Cache-Control no-store) */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReportCandidate"];
+                };
+            };
+            /** @description Generated candidate (Cache-Control no-store) */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReportCandidate"];
+                };
+            };
+            /** @description Session rejected */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Responsable role required (FORBIDDEN) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Malformed */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Summary not confirmed (SUMMARY_NOT_CONFIRMED) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Missing or invalid attemptId */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Evidence inconsistent or candidate not recorded (INTERNAL_ERROR) */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Generation or storage failed; the attempt can be retried with a new attemptId (REPORT_GENERATION_FAILED) */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    downloadReportCandidateFile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                taskId: string;
+                candidateId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The Word document (Content-Disposition attachment, Cache-Control no-store, X-Content-Type-Options nosniff) */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": string;
+                };
+            };
+            /** @description Session rejected */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Responsable role required (FORBIDDEN) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Malformed */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description The stored file could not be read (INTERNAL_ERROR) */
             500: {
                 headers: {
                     [name: string]: unknown;

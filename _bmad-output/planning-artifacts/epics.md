@@ -883,7 +883,7 @@ So that I can inspect the proposed printable document before official designatio
 **And** the candidate is inspectable but not official; generation failure is recoverable and does not complete the control
 **And** template fields, labels, calculations, provenance and handwritten-signature zones are accepted only against DEP-03; no missing report field is invented.
 
-**Traceability:** FR-035, FR-041, NFR-005, DR-009, AD-8, AD-9, UX-DR2 (report-panel, loading-state), UX-DR10. **Dependency:** DEP-03 for final document acceptance.
+**Traceability:** spec `_bmad-output/specs/spec-11-1-generate-an-inspectable-word-report-candidate/SPEC.md`; FR-035, FR-041, NFR-005, DR-009, AD-8, AD-9, UX-DR2 (report-panel, loading-state), UX-DR10. **Dependency:** Stories 10.1–10.4 (done); DEP-03 for final document acceptance.
 
 ### Story 11.2: Validate, scan and store a manual PDF file
 

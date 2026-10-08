@@ -1201,6 +1201,104 @@ paths:
         '409': { description: The summary is not confirmed (SUMMARY_NOT_CONFIRMED) or a decision already exists for it (CONFORMITY_ALREADY_DECIDED), content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
         '422': { description: Missing or unknown outcome, or extra property (VALIDATION_FAILED), content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
         '500': { description: Evidence inconsistent or decision not recorded (INTERNAL_ERROR), content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+  /tasks/{taskId}/report-candidates:
+    post:
+      operationId: generateReportCandidate
+      summary: Generate a Word report candidate from the current audit workflow inputs
+      description: >-
+        Responsable only. The body carries a client-generated attemptId only; actor and dates come from the session and
+        the server clock. Generates one Word document, stores it privately and returns the candidate, which is bound
+        immutably to the audit revision, the confirmed summary and the conformity decision. A candidate is never
+        official in this story. The same attemptId for the same task replays the stored outcome (200 for a ready
+        candidate, 502 for a failed one) without generating again. A malformed, unknown or another team's task, and an
+        own-team task without accepted submission, all get the same 404.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: taskId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReportCandidateRequest'
+      responses:
+        '200':
+          description: Replay of an attempt that already produced a ready candidate (Cache-Control no-store)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReportCandidate'
+        '201':
+          description: Generated candidate (Cache-Control no-store)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReportCandidate'
+        '401': { description: Session rejected, content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+        '403': { description: Responsable role required (FORBIDDEN), content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+        '404': { description: Malformed, unknown or another team's task, or no accepted submission (TASK_NOT_FOUND), content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+        '409': { description: Summary not confirmed (SUMMARY_NOT_CONFIRMED), no current conformity decision (CONFORMITY_NOT_DECIDED), attempt used by another task (REPORT_ATTEMPT_CONFLICT) or inputs changed during generation (REPORT_INPUTS_CHANGED), content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+        '422': { description: Missing or invalid attemptId, or extra property (VALIDATION_FAILED), content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+        '500': { description: Evidence inconsistent or candidate not recorded (INTERNAL_ERROR), content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+        '502': { description: Generation or storage failed; the attempt can be retried with a new attemptId (REPORT_GENERATION_FAILED), content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+    get:
+      operationId: listReportCandidates
+      summary: List the Word report candidates of a task, newest first
+      description: >-
+        Responsable only. The status of each candidate is derived on every read: a ready candidate whose bound summary
+        or conformity decision is no longer current reads as outdated. A malformed, unknown or another team's task, and
+        an own-team task without accepted submission, all get the same 404.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: taskId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Candidates, newest first (Cache-Control no-store)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReportCandidateList'
+        '401': { description: Session rejected, content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+        '403': { description: Responsable role required (FORBIDDEN), content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+        '404': { description: Malformed, unknown or another team's task, or no accepted submission (TASK_NOT_FOUND), content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+        '500': { description: Candidates could not be loaded (INTERNAL_ERROR), content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+  /tasks/{taskId}/report-candidates/{candidateId}/file:
+    get:
+      operationId: downloadReportCandidateFile
+      summary: Download the stored Word file of a candidate for inspection
+      description: >-
+        Responsable only, owning team only. Available for a candidate whose outcome retained a file (ready or outdated).
+        The response is an attachment with Cache-Control no-store and X-Content-Type-Options nosniff. Any other case,
+        including a failed or generating candidate and another team's candidate, gets the same 404 as an unknown task.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: taskId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: candidateId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: The Word document (Content-Disposition attachment, Cache-Control no-store, X-Content-Type-Options nosniff)
+          content:
+            application/vnd.openxmlformats-officedocument.wordprocessingml.document:
+              schema: { type: string, format: binary }
+        '401': { description: Session rejected, content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+        '403': { description: Responsable role required (FORBIDDEN), content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+        '404': { description: Malformed, unknown, other team's, failed or generating candidate, or unknown task (TASK_NOT_FOUND), content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+        '500': { description: The stored file could not be read (INTERNAL_ERROR), content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
 components:
   securitySchemes:
     bearerAuth:
@@ -1728,6 +1826,79 @@ components:
         invalidatedAt:
           type: [string, 'null']
           format: date-time
+    ReportCandidateRequest:
+      type: object
+      additionalProperties: false
+      required: [attemptId]
+      properties:
+        attemptId: { type: string, format: uuid }
+    ReportCandidateStatus:
+      type: string
+      enum: [generating, ready, failed, outdated]
+    ReportCandidate:
+      type: object
+      description: >-
+        A Word report candidate. It is never official in this story, and no official designation property exists.
+      additionalProperties: false
+      required: [id, attemptId, origin, status, requestedAt, requestedBy, bindings, template, file, failureClass]
+      properties:
+        id: { type: string, format: uuid }
+        attemptId: { type: string, format: uuid }
+        origin:
+          type: string
+          const: generated-word
+        status:
+          $ref: '#/components/schemas/ReportCandidateStatus'
+        requestedAt: { type: string, format: date-time }
+        requestedBy:
+          type: object
+          additionalProperties: false
+          required: [id, displayName]
+          properties:
+            id: { type: string }
+            displayName: { type: string }
+        bindings:
+          type: object
+          additionalProperties: false
+          required: [auditRevision, summaryId, summaryVersion, conformityDecisionId, conformityOutcome]
+          properties:
+            auditRevision: { type: integer, minimum: 1 }
+            summaryId: { type: string, format: uuid }
+            summaryVersion: { type: integer, minimum: 1 }
+            conformityDecisionId: { type: string, format: uuid }
+            conformityOutcome:
+              $ref: '#/components/schemas/ConformityOutcome'
+        template:
+          type: object
+          additionalProperties: false
+          required: [id, version]
+          properties:
+            id: { type: string }
+            version: { type: string }
+        file:
+          oneOf:
+            - type: 'null'
+            - type: object
+              additionalProperties: false
+              required: [name, byteSize, sha256]
+              properties:
+                name: { type: string }
+                byteSize: { type: integer, minimum: 0 }
+                sha256: { type: string, pattern: '^[0-9a-f]{64}$' }
+        failureClass:
+          oneOf:
+            - type: 'null'
+            - type: string
+              enum: [generation-failed, storage-failed]
+    ReportCandidateList:
+      type: object
+      additionalProperties: false
+      required: [candidates]
+      properties:
+        candidates:
+          type: array
+          items:
+            $ref: '#/components/schemas/ReportCandidate'
     SummaryHistoryItem:
       type: object
       additionalProperties: false
@@ -2092,7 +2263,8 @@ components:
       description: >-
         Error envelope. Codes include VALIDATION_ERROR, AUTHENTICATION_FAILED, FORBIDDEN, TASK_NOT_FOUND,
         PAYLOAD_TOO_LARGE, IDEMPOTENCY_KEY_REUSED, AUDIT_NOT_ACCEPTED, REPLACEMENT_ALREADY_EXISTS,
-        TASK_ASSIGNEE_UNAVAILABLE, AI_UNAVAILABLE, SUMMARY_ALREADY_CONFIRMED, SUMMARY_CONFIRMED, SUMMARY_NOT_CONFIRMED, SUMMARY_DESIGNATED, CONFORMITY_ALREADY_DECIDED and INTERNAL_ERROR.
+        TASK_ASSIGNEE_UNAVAILABLE, AI_UNAVAILABLE, SUMMARY_ALREADY_CONFIRMED, SUMMARY_CONFIRMED, SUMMARY_NOT_CONFIRMED, SUMMARY_DESIGNATED, CONFORMITY_ALREADY_DECIDED, CONFORMITY_NOT_DECIDED, REPORT_GENERATION_FAILED,
+        REPORT_INPUTS_CHANGED, REPORT_ATTEMPT_CONFLICT and INTERNAL_ERROR.
       required: [error]
       properties:
         error:
