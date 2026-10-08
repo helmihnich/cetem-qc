@@ -1165,6 +1165,42 @@ paths:
         '409': { description: The summary is not confirmed (SUMMARY_NOT_CONFIRMED) or an official report is designated (SUMMARY_DESIGNATED), content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
         '422': { description: Non-empty body (VALIDATION_FAILED), content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
         '500': { description: Evidence inconsistent or reopening not recorded (INTERNAL_ERROR), content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+  /tasks/{taskId}/conformity-decision:
+    post:
+      operationId: recordConformityDecision
+      summary: Record the explicit machine conformity decision for the current confirmed summary
+      description: >-
+        Responsable only. The body carries the outcome only; actor and date come from the session and the server clock.
+        There is no default outcome and no value is computed or suggested. Refused when the summary is not confirmed
+        (SUMMARY_NOT_CONFIRMED) and when a decision already exists for the current confirmed summary
+        (CONFORMITY_ALREADY_DECIDED); a decision changes only by reopening the summary, which makes it historical.
+        A malformed, unknown or another team's task, and an own-team task without accepted submission, all get the same 404.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: taskId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConformityDecisionRequest'
+      responses:
+        '201':
+          description: Recorded decision (Cache-Control no-store)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConformityDecision'
+        '401': { description: Session rejected, content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+        '403': { description: Responsable role required (FORBIDDEN), content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+        '404': { description: Malformed, unknown or another team's task, or no accepted submission (TASK_NOT_FOUND), content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+        '409': { description: The summary is not confirmed (SUMMARY_NOT_CONFIRMED) or a decision already exists for it (CONFORMITY_ALREADY_DECIDED), content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+        '422': { description: Missing or unknown outcome, or extra property (VALIDATION_FAILED), content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+        '500': { description: Evidence inconsistent or decision not recorded (INTERNAL_ERROR), content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
 components:
   securitySchemes:
     bearerAuth:
@@ -1436,8 +1472,17 @@ components:
     AcceptedEvidenceResponse:
       type: object
       additionalProperties: false
-      required: [task, submission, identity, values, results, lineage, insights, insightDecisions, manualInsights, summary, summaryHistory, summaryVersion]
+      required: [task, submission, identity, values, results, lineage, insights, insightDecisions, manualInsights, summary, summaryHistory, summaryVersion, conformityDecision, conformityHistory]
       properties:
+        conformityDecision:
+          oneOf:
+            - type: 'null'
+            - $ref: '#/components/schemas/ConformityDecision'
+        conformityHistory:
+          type: array
+          description: Earlier conformity decisions made historical by a reopening, newest first.
+          items:
+            $ref: '#/components/schemas/ConformityHistoryItem'
         summaryHistory:
           type: array
           description: Earlier reopened versions of the summary, newest first.
@@ -1634,6 +1679,55 @@ components:
             displayName: { type: string }
         previous:
           $ref: '#/components/schemas/ConfirmedSummary'
+    ConformityOutcome:
+      type: string
+      enum: [machine-conforme, machine-non-conforme]
+    ConformityDecisionRequest:
+      type: object
+      additionalProperties: false
+      required: [outcome]
+      properties:
+        outcome:
+          $ref: '#/components/schemas/ConformityOutcome'
+    ConformityDecision:
+      type: object
+      additionalProperties: false
+      required: [id, outcome, decidedAt, decidedBy, summaryId, summaryVersion]
+      properties:
+        id: { type: string, format: uuid }
+        outcome:
+          $ref: '#/components/schemas/ConformityOutcome'
+        decidedAt: { type: string, format: date-time }
+        decidedBy:
+          type: object
+          additionalProperties: false
+          required: [id, displayName]
+          properties:
+            id: { type: string }
+            displayName: { type: string }
+        summaryId: { type: string, format: uuid }
+        summaryVersion: { type: integer, minimum: 1 }
+    ConformityHistoryItem:
+      type: object
+      additionalProperties: false
+      required: [id, outcome, decidedAt, decidedBy, summaryId, summaryVersion, invalidatedAt]
+      properties:
+        id: { type: string, format: uuid }
+        outcome:
+          $ref: '#/components/schemas/ConformityOutcome'
+        decidedAt: { type: string, format: date-time }
+        decidedBy:
+          type: object
+          additionalProperties: false
+          required: [id, displayName]
+          properties:
+            id: { type: string }
+            displayName: { type: string }
+        summaryId: { type: string, format: uuid }
+        summaryVersion: { type: integer, minimum: 1 }
+        invalidatedAt:
+          type: [string, 'null']
+          format: date-time
     SummaryHistoryItem:
       type: object
       additionalProperties: false
@@ -1998,7 +2092,7 @@ components:
       description: >-
         Error envelope. Codes include VALIDATION_ERROR, AUTHENTICATION_FAILED, FORBIDDEN, TASK_NOT_FOUND,
         PAYLOAD_TOO_LARGE, IDEMPOTENCY_KEY_REUSED, AUDIT_NOT_ACCEPTED, REPLACEMENT_ALREADY_EXISTS,
-        TASK_ASSIGNEE_UNAVAILABLE, AI_UNAVAILABLE, SUMMARY_ALREADY_CONFIRMED, SUMMARY_CONFIRMED, SUMMARY_NOT_CONFIRMED, SUMMARY_DESIGNATED and INTERNAL_ERROR.
+        TASK_ASSIGNEE_UNAVAILABLE, AI_UNAVAILABLE, SUMMARY_ALREADY_CONFIRMED, SUMMARY_CONFIRMED, SUMMARY_NOT_CONFIRMED, SUMMARY_DESIGNATED, CONFORMITY_ALREADY_DECIDED and INTERNAL_ERROR.
       required: [error]
       properties:
         error:

@@ -865,7 +865,7 @@ So that overall conformity remains an accountable human decision.
 **And** individual tolerance results, calculations, insights or AI text do not set or infer this decision
 **And** either outcome remains eligible for report completion; a reopened summary makes the prior decision historical and requires a fresh decision.
 
-**Traceability:** FR-026, FR-038, DR-005, AD-8, UX-DR2 (conformity-decision), UX-DR9, OD-10.
+**Traceability:** spec `_bmad-output/specs/spec-10-4-record-the-explicit-human-machine-conformity-decision/SPEC.md`; FR-026, FR-038, DR-005, AD-8, UX-DR2 (conformity-decision), UX-DR9, OD-10. **Dependency:** Stories 10.1–10.3 (done); registers its reopen participant into the 10.3 contract; reports (11.x) bind to the decision `id`.
 
 ## Epic 11: Official Reports and Authorized History
 

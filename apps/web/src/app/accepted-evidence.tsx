@@ -2,11 +2,12 @@
 
 import { useEffect, useRef, useState } from "react";
 import { acceptedEvidenceResponseSchema, insightDecisionResponseSchema, manualInsightResponseSchema } from "@cetem-qc/api-client/v1";
-import type { AcceptedEvidenceResponse, ConfirmedSummary, InsightDecisionResponse, ManualInsightResponse, SummaryHistoryItem, SummaryReopening } from "@cetem-qc/api-client/v1";
+import type { AcceptedEvidenceResponse, ConfirmedSummary, ConformityDecision, ConformityHistoryItem, InsightDecisionResponse, ManualInsightResponse, SummaryHistoryItem, SummaryReopening } from "@cetem-qc/api-client/v1";
 import { GRAPHIE_CALCULATION_FIELD_ID_LIST, GRAPHIE_MOBILE_POV_CATALOGUE } from "@cetem-qc/domain";
 import type { CatalogueField, CatalogueSection, GraphieCalculationResults } from "@cetem-qc/domain";
 import { fr } from "@cetem-qc/i18n";
 import { GraphieCalculationReview } from "./graphie-calculation-review";
+import { ConformityDecisionPanel } from "./conformity-decision";
 import { SummaryDraftPanel } from "./summary-draft";
 
 const dateTimeFormatter = new Intl.DateTimeFormat("fr-FR", { dateStyle: "medium", timeStyle: "short" });
@@ -227,7 +228,9 @@ export function ManualInsightsSection({ insights, pending = false, failed = fals
 }
 
 /** Holds the local decision state: it changes only from a server response, never from a client calculation. */
-export function InsightProposalsPanel({ taskId, insights, initialDecisions, initialManualInsights = [], initialSummary = null, initialSummaryHistory = [], initialSummaryVersion = null }: { taskId: string; insights: AcceptedEvidenceResponse["insights"]; initialDecisions: InsightDecisions; initialManualInsights?: ManualInsightItem[]; initialSummary?: ConfirmedSummary | null; initialSummaryHistory?: SummaryHistoryItem[]; initialSummaryVersion?: AcceptedEvidenceResponse["summaryVersion"] | null }) {
+export function InsightProposalsPanel({ taskId, insights, initialDecisions, initialManualInsights = [], initialSummary = null, initialSummaryHistory = [], initialSummaryVersion = null, initialConformityDecision = null, initialConformityHistory = [] }: { taskId: string; insights: AcceptedEvidenceResponse["insights"]; initialDecisions: InsightDecisions; initialManualInsights?: ManualInsightItem[]; initialSummary?: ConfirmedSummary | null; initialSummaryHistory?: SummaryHistoryItem[]; initialSummaryVersion?: AcceptedEvidenceResponse["summaryVersion"] | null; initialConformityDecision?: ConformityDecision | null; initialConformityHistory?: ConformityHistoryItem[] }) {
+  const [conformityDecision, setConformityDecision] = useState<ConformityDecision | null>(initialConformityDecision);
+  const [conformityHistory, setConformityHistory] = useState<ConformityHistoryItem[]>(initialConformityHistory);
   const [summary, setSummaryState] = useState<ConfirmedSummary | null>(initialSummary);
   const [summaryHistory, setSummaryHistory] = useState<SummaryHistoryItem[]>(initialSummaryHistory);
   const [summaryVersion, setSummaryVersion] = useState<AcceptedEvidenceResponse["summaryVersion"] | null>(initialSummaryVersion ?? (initialSummary ? { number: initialSummary.version, state: "confirmed" } : null));
@@ -239,6 +242,9 @@ export function InsightProposalsPanel({ taskId, insights, initialDecisions, init
   const onReopened = (reopening: SummaryReopening) => {
     setSummaryState(null);
     setSummaryVersion({ number: reopening.version, state: "open" });
+    // The decision bound to the reopened summary becomes historical; it is never carried over to the next version.
+    setConformityDecision(null);
+    setConformityHistory((previous) => conformityDecision ? [{ ...conformityDecision, invalidatedAt: reopening.reopenedAt }, ...previous] : previous);
     setSummaryHistory((previous) => [{
       version: reopening.previous.version, text: reopening.previous.text, confirmedAt: reopening.previous.confirmedAt,
       confirmedBy: reopening.previous.confirmedBy, reopenedAt: reopening.reopenedAt, reopenedBy: reopening.reopenedBy,
@@ -274,6 +280,10 @@ export function InsightProposalsPanel({ taskId, insights, initialDecisions, init
   // After a 409 the confirmed state is read back from the server: nothing is shown as confirmed otherwise.
   const reloadSummary = async () => {
     const reloaded = await loadAcceptedEvidence(taskId);
+    if (reloaded.kind === "ready") {
+      setConformityDecision(reloaded.evidence.conformityDecision);
+      setConformityHistory(reloaded.evidence.conformityHistory);
+    }
     return reloaded.kind === "ready" ? reloaded.evidence.summary : null;
   };
   // After a refused reopening (409) the whole summary state comes back from the server.
@@ -283,11 +293,14 @@ export function InsightProposalsPanel({ taskId, insights, initialDecisions, init
     setSummaryState(reloaded.evidence.summary);
     setSummaryVersion(reloaded.evidence.summaryVersion);
     setSummaryHistory(reloaded.evidence.summaryHistory);
+    setConformityDecision(reloaded.evidence.conformityDecision);
+    setConformityHistory(reloaded.evidence.conformityHistory);
   };
   return <>
     <InsightProposalsSection insights={insights} decisions={decisions} pendingProposalId={pendingProposalId} failed={failed} onDecide={onDecide} manualInsightCount={manualInsights.length} locked={summary !== null} />
     <ManualInsightsSection insights={manualInsights} pending={manualPending} failed={manualFailed} onAdd={onAddManual} locked={summary !== null} />
     <SummaryDraftPanel taskId={taskId} summary={summary} onConfirmed={setSummary} onReloadEvidence={reloadSummary} version={summaryVersion} history={summaryHistory} onReopened={onReopened} onReloadState={reloadState} />
+    <ConformityDecisionPanel taskId={taskId} confirmedVersion={summary ? summary.version : null} decision={summary ? conformityDecision : null} history={conformityHistory} onRecorded={setConformityDecision} onReloadState={reloadState} />
   </>;
 }
 
@@ -331,7 +344,7 @@ export function AcceptedEvidenceView({ taskId, load, onBack, onRetry, headingRef
       <EvidenceLineage lineage={evidence.lineage} />
       <EvidenceInputSections values={evidence.values} />
       <GraphieCalculationReview evidence={{ identity: evidence.identity, values: evidence.values, results: evidence.results as unknown as GraphieCalculationResults }} />
-      <InsightProposalsPanel taskId={evidence.task.id} insights={evidence.insights} initialDecisions={evidence.insightDecisions} initialManualInsights={evidence.manualInsights} initialSummary={evidence.summary} initialSummaryHistory={evidence.summaryHistory} initialSummaryVersion={evidence.summaryVersion} />
+      <InsightProposalsPanel taskId={evidence.task.id} insights={evidence.insights} initialDecisions={evidence.insightDecisions} initialManualInsights={evidence.manualInsights} initialSummary={evidence.summary} initialSummaryHistory={evidence.summaryHistory} initialSummaryVersion={evidence.summaryVersion} initialConformityDecision={evidence.conformityDecision} initialConformityHistory={evidence.conformityHistory} />
     </>;
   } else if (load.kind === "not-found") {
     content = <div className="state-message error-state" role="alert">{fr.evidence.unavailable}</div>;

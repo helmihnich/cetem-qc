@@ -118,6 +118,12 @@ export async function getSummaryHistory(client: Pool | PoolClient, submissionId:
   });
 }
 
+/** The version number of a confirmed summary row, or null when the row does not exist. Read only. */
+export async function getConfirmedSummaryVersion(client: Pool | PoolClient, summaryId: string): Promise<number | null> {
+  const result = await client.query<{ version: number }>("SELECT version FROM confirmed_summaries WHERE id = $1", [summaryId]);
+  return result.rows[0]?.version ?? null;
+}
+
 /**
  * Takes the per-task transaction lock that serializes confirmation against insight, decision and draft changes.
  * Released at commit or rollback.

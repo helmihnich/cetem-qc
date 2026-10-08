@@ -309,6 +309,8 @@ test("K8 getAcceptedEvidence returns typed outcomes for 200, 403, 404 and 500 an
     summary: null,
     summaryHistory: [],
     summaryVersion: { number: 1, state: "open" },
+    conformityDecision: null,
+    conformityHistory: [],
   };
   const ok = clientFor(body);
   assert.deepEqual(await ok.client.getAcceptedEvidence(id), { status: 200, body });
@@ -414,6 +416,31 @@ test("K25 reopenSummary sends an empty object and returns typed outcomes; the tw
   await assert.rejects(clientFor({ error: { code: "AUTHENTICATION_FAILED", message: "x" } }, 401).client.reopenSummary(id), ApiRequestError);
   await assert.rejects(clientFor({ error: { code: "SUMMARY_CONFIRMED", message: "x" } }, 409).client.reopenSummary(id), ApiRequestError);
   await assert.rejects(clientFor({ ...response, version: 1 }, 201).client.reopenSummary(id), ApiRequestError);
+});
+
+test("K29 recordConformityDecision sends only the outcome and returns typed outcomes; the two 409 codes are typed", async () => {
+  const id = "00000000-0000-4000-8000-000000000041";
+  const response = { id, outcome: "machine-non-conforme", decidedAt: "2026-10-08T12:00:00.000Z", decidedBy: { id, displayName: "Responsable Test" }, summaryId: id, summaryVersion: 1 };
+  const ok = clientFor(response, 201);
+  assert.deepEqual(await ok.client.recordConformityDecision(id, { outcome: "machine-non-conforme" }), { status: 201, body: response });
+  assert.equal(ok.calls[0]!.url, `https://cetem-qc.example.test/api/v1/tasks/${id}/conformity-decision`);
+  assert.equal(ok.calls[0]!.init?.method, "POST");
+  assert.deepEqual(JSON.parse(String(ok.calls[0]!.init?.body)), { outcome: "machine-non-conforme" });
+  const outcomes: Array<[number, string, string]> = [
+    [403, "FORBIDDEN", "Accès réservé au Responsable de l’équipe."],
+    [404, "TASK_NOT_FOUND", "Tâche introuvable."],
+    [409, "SUMMARY_NOT_CONFIRMED", "La synthèse n’est pas confirmée : la décision ne peut pas être enregistrée."],
+    [409, "CONFORMITY_ALREADY_DECIDED", "Une décision est déjà enregistrée pour cette synthèse."],
+    [422, "VALIDATION_FAILED", "Cette décision est invalide."],
+    [500, "INTERNAL_ERROR", "La décision n’a pas pu être enregistrée."],
+  ];
+  for (const [status, code, message] of outcomes) {
+    assert.deepEqual(await clientFor({ error: { code, message } }, status).client.recordConformityDecision(id, { outcome: "machine-conforme" }), { status, code, message });
+  }
+  await assert.rejects(clientFor({ error: { code: "AUTHENTICATION_FAILED", message: "x" } }, 401).client.recordConformityDecision(id, { outcome: "machine-conforme" }), ApiRequestError);
+  await assert.rejects(clientFor({ error: { code: "SUMMARY_DESIGNATED", message: "x" } }, 409).client.recordConformityDecision(id, { outcome: "machine-conforme" }), ApiRequestError);
+  await assert.rejects(clientFor({ ...response, outcome: "x" }, 201).client.recordConformityDecision(id, { outcome: "machine-conforme" }), ApiRequestError);
+  await assert.rejects(ok.client.recordConformityDecision(id, {} as never));
 });
 
 test("K21 confirmSummary sends the text and optional draft and returns typed outcomes; 409 is typed on the three locked operations", async () => {

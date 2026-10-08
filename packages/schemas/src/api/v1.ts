@@ -38,6 +38,9 @@ type ConfirmedSummaryContract = apiV1Operations["confirmSummary"]["responses"][2
 type SummaryReopeningRequestContract = apiV1Operations["reopenSummary"]["requestBody"]["content"]["application/json"];
 type SummaryReopeningContract = apiV1Operations["reopenSummary"]["responses"][201]["content"]["application/json"];
 type SummaryHistoryItemContract = apiV1Components["schemas"]["SummaryHistoryItem"];
+type ConformityDecisionRequestContract = apiV1Operations["recordConformityDecision"]["requestBody"]["content"]["application/json"];
+type ConformityDecisionContract = apiV1Operations["recordConformityDecision"]["responses"][201]["content"]["application/json"];
+type ConformityHistoryItemContract = apiV1Components["schemas"]["ConformityHistoryItem"];
 type EmployeeTaskListResponseContract = apiV1Operations["listAssignedEmployeeTasks"]["responses"][200]["content"]["application/json"];
 type EmployeeTaskResponseContract = apiV1Operations["getAssignedEmployeeTask"]["responses"][200]["content"]["application/json"];
 
@@ -228,7 +231,31 @@ export const summaryHistoryItemSchema: z.ZodType<SummaryHistoryItemContract> = z
   reopenedBy: summaryActorSchema,
   initialDraft: summaryInitialDraftSchema,
 }).strict();
+/** Story 10.4: the outcome is the only caller-supplied value and has no default. */
+export const conformityOutcomeSchema = z.enum(["machine-conforme", "machine-non-conforme"]);
+export const conformityDecisionRequestSchema: z.ZodType<ConformityDecisionRequestContract> = z.object({
+  outcome: conformityOutcomeSchema,
+}).strict();
+export const conformityDecisionSchema: z.ZodType<ConformityDecisionContract> = z.object({
+  id: z.string().uuid(),
+  outcome: conformityOutcomeSchema,
+  decidedAt: z.string().datetime(),
+  decidedBy: summaryActorSchema,
+  summaryId: z.string().uuid(),
+  summaryVersion: z.number().int().min(1),
+}).strict();
+export const conformityHistoryItemSchema: z.ZodType<ConformityHistoryItemContract> = z.object({
+  id: z.string().uuid(),
+  outcome: conformityOutcomeSchema,
+  decidedAt: z.string().datetime(),
+  decidedBy: summaryActorSchema,
+  summaryId: z.string().uuid(),
+  summaryVersion: z.number().int().min(1),
+  invalidatedAt: z.string().datetime().nullable(),
+}).strict();
 export const acceptedEvidenceResponseSchema: z.ZodType<AcceptedEvidenceResponseContract> = z.object({
+  conformityDecision: conformityDecisionSchema.nullable(),
+  conformityHistory: z.array(conformityHistoryItemSchema),
   summaryHistory: z.array(summaryHistoryItemSchema),
   summaryVersion: z.object({ number: z.number().int().min(1), state: z.enum(["confirmed", "open"]) }).strict(),
   manualInsights: z.array(manualInsightSchema),
@@ -359,6 +386,10 @@ export type ConfirmedSummary = z.infer<typeof confirmedSummarySchema>;
 export type SummaryReopeningRequest = z.infer<typeof summaryReopeningRequestSchema>;
 export type SummaryReopening = z.infer<typeof summaryReopeningSchema>;
 export type SummaryHistoryItem = z.infer<typeof summaryHistoryItemSchema>;
+export type ConformityOutcome = z.infer<typeof conformityOutcomeSchema>;
+export type ConformityDecisionRequest = z.infer<typeof conformityDecisionRequestSchema>;
+export type ConformityDecision = z.infer<typeof conformityDecisionSchema>;
+export type ConformityHistoryItem = z.infer<typeof conformityHistoryItemSchema>;
 export type SummaryDraftRequest = z.infer<typeof summaryDraftRequestSchema>;
 export type SummaryDraftResponse = z.infer<typeof summaryDraftResponseSchema>;
 export type EmployeeTaskListResponse = z.infer<typeof employeeTaskListResponseSchema>;

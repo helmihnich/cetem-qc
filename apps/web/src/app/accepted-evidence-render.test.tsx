@@ -42,6 +42,8 @@ const evidenceFor = (identity: CalculationContext = GRAPHIE_CALCULATION_IDENTITY
   summary: null,
   summaryHistory: [],
   summaryVersion: { number: 1, state: "open" },
+  conformityDecision: null,
+  conformityHistory: [],
   ...overrides,
 });
 

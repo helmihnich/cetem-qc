@@ -104,7 +104,7 @@ development_status:
   10-1-request-an-ai-assisted-summary-draft: done
   10-2-write-edit-and-explicitly-confirm-a-summary: done
   10-3-reopen-a-confirmed-summary-before-official-designation: done
-  10-4-record-the-explicit-human-machine-conformity-decision: backlog
+  10-4-record-the-explicit-human-machine-conformity-decision: done
   epic-10-retrospective: optional
 
   epic-11: backlog

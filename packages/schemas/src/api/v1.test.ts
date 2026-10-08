@@ -4,7 +4,7 @@ import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import type { apiV1Components, apiV1Operations } from "@cetem-qc/types";
-import { summaryReopeningRequestSchema, summaryReopeningSchema, summaryHistoryItemSchema, confirmedSummarySchema,summaryConfirmationRequestSchema, summaryDraftRequestSchema, summaryDraftResponseSchema, acceptedEvidenceResponseSchema, insightDecisionRequestSchema, insightDecisionResponseSchema, manualInsightRequestSchema, manualInsightResponseSchema, apiErrorSchema, createEmployeeRequestSchema, createTaskRequestSchema, employeeCredentialResponseSchema, employeeListResponseSchema, employeeTaskListQuerySchema, employeeTaskListResponseSchema, employeeTaskAuditVersionSchema, employeeTaskResponseSchema, graphieDraftPayloadSchema, healthQuerySchema, healthResponseSchema, replacementTaskResponseSchema, syncOperationAcceptedSchema, syncOperationConflictSchema, syncOperationRejectedSchema, syncOperationRequestSchema, taskListQuerySchema, taskListResponseSchema, updateEmployeeStatusRequestSchema, updateEmployeeStatusResponseSchema } from "./v1.js";
+import { conformityDecisionRequestSchema, conformityDecisionSchema, conformityHistoryItemSchema, summaryReopeningRequestSchema, summaryReopeningSchema, summaryHistoryItemSchema, confirmedSummarySchema,summaryConfirmationRequestSchema, summaryDraftRequestSchema, summaryDraftResponseSchema, acceptedEvidenceResponseSchema, insightDecisionRequestSchema, insightDecisionResponseSchema, manualInsightRequestSchema, manualInsightResponseSchema, apiErrorSchema, createEmployeeRequestSchema, createTaskRequestSchema, employeeCredentialResponseSchema, employeeListResponseSchema, employeeTaskListQuerySchema, employeeTaskListResponseSchema, employeeTaskAuditVersionSchema, employeeTaskResponseSchema, graphieDraftPayloadSchema, healthQuerySchema, healthResponseSchema, replacementTaskResponseSchema, syncOperationAcceptedSchema, syncOperationConflictSchema, syncOperationRejectedSchema, syncOperationRequestSchema, taskListQuerySchema, taskListResponseSchema, updateEmployeeStatusRequestSchema, updateEmployeeStatusResponseSchema } from "./v1.js";
 
 const contractPath = fileURLToPath(new URL("../../../types/openapi/cetem-qc-v1.yaml", import.meta.url));
 
@@ -322,6 +322,8 @@ test("K7 accepted evidence response schema parses a full body and refuses extras
     summary: null,
     summaryHistory: [],
     summaryVersion: { number: 1, state: "open" },
+    conformityDecision: null,
+    conformityHistory: [],
   };
   assert.deepEqual(acceptedEvidenceResponseSchema.parse(body), body);
   assert.equal(acceptedEvidenceResponseSchema.safeParse({ ...body, extra: true }).success, false);
@@ -353,6 +355,8 @@ test("K9 accepted evidence insights are required, parse both statuses and refuse
     summary: null,
     summaryHistory: [],
     summaryVersion: { number: 1, state: "open" },
+    conformityDecision: null,
+    conformityHistory: [],
   };
   assert.deepEqual(acceptedEvidenceResponseSchema.parse(body), body);
   assert.equal(acceptedEvidenceResponseSchema.safeParse({ ...body, insights: { ...body.insights, proposals: [] } }).success, true);
@@ -389,6 +393,8 @@ test("K11 insightDecisions is required, parses empty and populated, and refuses 
     summary: null,
     summaryHistory: [],
     summaryVersion: { number: 1, state: "open" },
+    conformityDecision: null,
+    conformityHistory: [],
   };
   assert.deepEqual(acceptedEvidenceResponseSchema.parse(body), body);
   assert.equal(acceptedEvidenceResponseSchema.safeParse({ ...body, insightDecisions: [] }).success, true);
@@ -422,6 +428,8 @@ test("K13 manualInsights is required, parses empty and populated, and refuses ex
     summary: null,
     summaryHistory: [],
     summaryVersion: { number: 1, state: "open" },
+    conformityDecision: null,
+    conformityHistory: [],
   };
   assert.deepEqual(acceptedEvidenceResponseSchema.parse(body), body);
   assert.equal(acceptedEvidenceResponseSchema.safeParse({ ...body, manualInsights: [] }).success, true);
@@ -473,6 +481,31 @@ test("K24 acceptedEvidenceResponseSchema requires summaryHistory and summaryVers
   assert.equal(parsed.success, false);
   const paths = new Set(parsed.success ? [] : parsed.error.issues.map((issue) => String(issue.path[0])));
   assert.ok(paths.has("summaryHistory") && paths.has("summaryVersion"));
+});
+
+test("K27 conformity schemas are strict; the outcome is exactly one of two values and the request has no other property", () => {
+  const id = "00000000-0000-4000-8000-000000000041";
+  const decision = { id, outcome: "machine-conforme", decidedAt: "2026-10-08T12:00:00.000Z", decidedBy: { id, displayName: "Responsable Test" }, summaryId: id, summaryVersion: 1 };
+  assert.deepEqual(conformityDecisionSchema.parse(decision), decision);
+  assert.deepEqual(conformityDecisionSchema.parse({ ...decision, outcome: "machine-non-conforme" }).outcome, "machine-non-conforme");
+  for (const bad of [{ ...decision, outcome: "conforme" }, { ...decision, outcome: undefined }, { ...decision, extra: 1 }, { ...decision, summaryVersion: 0 }, { ...decision, decidedAt: "hier" }]) {
+    assert.equal(conformityDecisionSchema.safeParse(bad).success, false, JSON.stringify(bad));
+  }
+  const item = { ...decision, invalidatedAt: "2026-10-08T13:00:00.000Z" };
+  assert.deepEqual(conformityHistoryItemSchema.parse(item), item);
+  assert.equal(conformityHistoryItemSchema.parse({ ...decision, invalidatedAt: null }).invalidatedAt, null);
+  assert.equal(conformityHistoryItemSchema.safeParse(decision).success, false);
+  assert.equal(conformityDecisionRequestSchema.safeParse({ outcome: "machine-non-conforme" }).success, true);
+  for (const bad of [{}, { outcome: "x" }, { outcome: null }, { outcome: "machine-conforme", reason: "x" }, null, [], "x"]) {
+    assert.equal(conformityDecisionRequestSchema.safeParse(bad).success, false, JSON.stringify(bad));
+  }
+});
+
+test("K28 acceptedEvidenceResponseSchema requires conformityDecision and conformityHistory", () => {
+  const parsed = acceptedEvidenceResponseSchema.safeParse({});
+  assert.equal(parsed.success, false);
+  const paths = new Set(parsed.success ? [] : parsed.error.issues.map((issue) => String(issue.path[0])));
+  assert.ok(paths.has("conformityDecision") && paths.has("conformityHistory"));
 });
 
 test("K19 confirmedSummarySchema is strict with a 64-hex identity and a nullable initial draft; the request schema trims and bounds the text", () => {

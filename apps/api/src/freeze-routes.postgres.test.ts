@@ -93,6 +93,7 @@ const OTHER_MUTATING_ROUTES = [
   "POST /tasks/:taskId/summary-drafts",
   "POST /tasks/:taskId/summary-confirmation",
   "POST /tasks/:taskId/summary-reopening",
+  "POST /tasks/:taskId/conformity-decision",
   "POST /employees",
   "POST /employees/:employeeId/credential",
   "POST /employees/:employeeId/password-reset",
@@ -195,6 +196,8 @@ test("F5 every other mutating route, called by both roles, leaves the accepted e
       ["POST", () => `/tasks/${taskId}/summary-confirmation`, { text: "Synthèse confirmée." }],
       // Story 10.3: a reopening writes only its own insert-only table; the accepted evidence stays unchanged.
       ["POST", () => `/tasks/${taskId}/summary-reopening`, {}],
+      // Story 10.4: a conformity decision (refused here: no confirmed summary) writes nothing; the accepted evidence stays unchanged.
+      ["POST", () => `/tasks/${taskId}/conformity-decision`, { outcome: "machine-conforme" }],
       ["POST", () => `/tasks/${taskId}/deactivated-assignee-reassignment`, { successorId: employee, expectedAssignmentVersion: 1 }],
       ["POST", () => `/tasks/${taskId}/deactivated-assignee-recovery`, { sourceRevision: 1, successorId: employee, establishment: "Établissement B", service: "Radiologie", type: "graphie_mobile" }],
       ["POST", () => "/employees", { firstName: "Nouveau", surname: "Test", email: `${randomUUID()}@example.test` }],

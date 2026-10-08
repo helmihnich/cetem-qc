@@ -480,6 +480,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/tasks/{taskId}/conformity-decision": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Record the explicit machine conformity decision for the current confirmed summary
+         * @description Responsable only. The body carries the outcome only; actor and date come from the session and the server clock. There is no default outcome and no value is computed or suggested. Refused when the summary is not confirmed (SUMMARY_NOT_CONFIRMED) and when a decision already exists for the current confirmed summary (CONFORMITY_ALREADY_DECIDED); a decision changes only by reopening the summary, which makes it historical. A malformed, unknown or another team's task, and an own-team task without accepted submission, all get the same 404.
+         */
+        post: operations["recordConformityDecision"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -669,6 +689,9 @@ export interface components {
             replacedBy: string | null;
         };
         AcceptedEvidenceResponse: {
+            conformityDecision: null | components["schemas"]["ConformityDecision"];
+            /** @description Earlier conformity decisions made historical by a reopening, newest first. */
+            conformityHistory: components["schemas"]["ConformityHistoryItem"][];
             /** @description Earlier reopened versions of the summary, newest first. */
             summaryHistory: components["schemas"]["SummaryHistoryItem"][];
             summaryVersion: {
@@ -819,6 +842,41 @@ export interface components {
                 displayName: string;
             };
             previous: components["schemas"]["ConfirmedSummary"];
+        };
+        /** @enum {string} */
+        ConformityOutcome: "machine-conforme" | "machine-non-conforme";
+        ConformityDecisionRequest: {
+            outcome: components["schemas"]["ConformityOutcome"];
+        };
+        ConformityDecision: {
+            /** Format: uuid */
+            id: string;
+            outcome: components["schemas"]["ConformityOutcome"];
+            /** Format: date-time */
+            decidedAt: string;
+            decidedBy: {
+                id: string;
+                displayName: string;
+            };
+            /** Format: uuid */
+            summaryId: string;
+            summaryVersion: number;
+        };
+        ConformityHistoryItem: {
+            /** Format: uuid */
+            id: string;
+            outcome: components["schemas"]["ConformityOutcome"];
+            /** Format: date-time */
+            decidedAt: string;
+            decidedBy: {
+                id: string;
+                displayName: string;
+            };
+            /** Format: uuid */
+            summaryId: string;
+            summaryVersion: number;
+            /** Format: date-time */
+            invalidatedAt: string | null;
         };
         SummaryHistoryItem: {
             version: number;
@@ -1065,7 +1123,7 @@ export interface components {
             /** @constant */
             version: "v1";
         };
-        /** @description Error envelope. Codes include VALIDATION_ERROR, AUTHENTICATION_FAILED, FORBIDDEN, TASK_NOT_FOUND, PAYLOAD_TOO_LARGE, IDEMPOTENCY_KEY_REUSED, AUDIT_NOT_ACCEPTED, REPLACEMENT_ALREADY_EXISTS, TASK_ASSIGNEE_UNAVAILABLE, AI_UNAVAILABLE, SUMMARY_ALREADY_CONFIRMED, SUMMARY_CONFIRMED, SUMMARY_NOT_CONFIRMED, SUMMARY_DESIGNATED and INTERNAL_ERROR. */
+        /** @description Error envelope. Codes include VALIDATION_ERROR, AUTHENTICATION_FAILED, FORBIDDEN, TASK_NOT_FOUND, PAYLOAD_TOO_LARGE, IDEMPOTENCY_KEY_REUSED, AUDIT_NOT_ACCEPTED, REPLACEMENT_ALREADY_EXISTS, TASK_ASSIGNEE_UNAVAILABLE, AI_UNAVAILABLE, SUMMARY_ALREADY_CONFIRMED, SUMMARY_CONFIRMED, SUMMARY_NOT_CONFIRMED, SUMMARY_DESIGNATED, CONFORMITY_ALREADY_DECIDED and INTERNAL_ERROR. */
         ApiError: {
             error: {
                 code: string;
@@ -2928,6 +2986,86 @@ export interface operations {
                 };
             };
             /** @description Evidence inconsistent or reopening not recorded (INTERNAL_ERROR) */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    recordConformityDecision: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                taskId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConformityDecisionRequest"];
+            };
+        };
+        responses: {
+            /** @description Recorded decision (Cache-Control no-store) */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConformityDecision"];
+                };
+            };
+            /** @description Session rejected */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Responsable role required (FORBIDDEN) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Malformed */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description The summary is not confirmed (SUMMARY_NOT_CONFIRMED) or a decision already exists for it (CONFORMITY_ALREADY_DECIDED) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Missing or unknown outcome */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Evidence inconsistent or decision not recorded (INTERNAL_ERROR) */
             500: {
                 headers: {
                     [name: string]: unknown;
