@@ -948,7 +948,7 @@ So that I can consult the correct evidence and report later.
 **And** download returns only the linked official file through an authorized endpoint or short-lived access path; cross-team/unassigned requests disclose no report data
 **And** replacement lineage is shown without changing the original record's state or measurements.
 
-**Traceability:** FR-036, FR-040, DR-001, DR-006, DR-009, SEC-002, SEC-003, AD-3, AD-6, AD-9, UX-DR2 (history-record), UX-DR11.
+**Traceability:** spec `_bmad-output/specs/spec-11-5-view-and-download-authorized-completed-history/SPEC.md`; FR-036, FR-040, DR-001, DR-006, DR-009, SEC-002, SEC-003, AD-3, AD-6, AD-9, UX-DR2 (history-record), UX-DR11. **Dependency:** Stories 9.1, 8.3–8.4, 10.1–10.4 and 11.1–11.4 (done); Employé access is delivered at API/typed-client level, the mobile screen is deferred.
 
 ### Story 11.6: Keep report candidates current through asynchronous processing
 

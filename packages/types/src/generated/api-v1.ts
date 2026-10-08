@@ -604,6 +604,66 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the completed controls the authenticated user may consult (read only)
+         * @description Responsable (own team) or Employé (currently assigned). A control is completed when it has an official report. Newest designation first. Nothing is written. Request query parameters are not supported.
+         */
+        get: operations["listHistory"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/history/{taskId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read one completed control (read only)
+         * @description Responsable (own team) or Employé (currently assigned). Returns the stored evidence, insights with decisions, confirmed summary, human conformity decision, official report and lineage. Nothing is written. A malformed, unknown or unauthorized task, and a task without accepted evidence or official report, all get the same 404.
+         */
+        get: operations["getHistoryRecord"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/history/{taskId}/official-report/file": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Download the official report file of a completed control
+         * @description Responsable (own team) or Employé (currently assigned). Serves the stored bytes of the official candidate only, after checking their SHA-256. The response is an attachment with Cache-Control no-store and X-Content-Type-Options nosniff. No URL or storage key is returned.
+         */
+        get: operations["downloadOfficialReport"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/tasks/{taskId}/pdf-files": {
         parameters: {
             query?: never;
@@ -1099,6 +1159,107 @@ export interface components {
                 byteSize: number;
                 sha256: string;
             };
+        };
+        /** @description A replacement or recovery relation of a completed control. The related ids are present only when the viewer is authorized for the related task; otherwise `accessible` is false and every other field is null. */
+        HistoryLineageRelation: {
+            /** @enum {string} */
+            relation: "replacement-of" | "replaced-by" | "recovery-source" | "recovery-successor";
+            accessible: boolean;
+            /** Format: uuid */
+            taskId: string | null;
+            /** Format: uuid */
+            auditId: string | null;
+            completed: boolean | null;
+        };
+        HistoryListItem: {
+            /** Format: uuid */
+            taskId: string;
+            /** @enum {string} */
+            type: "graphie_mobile";
+            establishment: string;
+            service: string;
+            assignee: string;
+            /** Format: uuid */
+            auditId: string;
+            auditRevision: number;
+            /** Format: date-time */
+            acceptedAt: string;
+            /** Format: date-time */
+            designatedAt: string;
+            conformityOutcome: components["schemas"]["ConformityOutcome"];
+            /** @enum {string} */
+            reportOrigin: "generated-word" | "uploaded-pdf";
+            lineage: components["schemas"]["HistoryLineageRelation"][];
+        };
+        HistoryListResponse: {
+            records: components["schemas"]["HistoryListItem"][];
+        };
+        /** @description A completed control exactly as stored: the accepted evidence of the 9.1 review plus the official report and the lineage relations visible to the viewer. A completed control always has a confirmed summary and a conformity decision. */
+        HistoryRecordResponse: {
+            task: {
+                /** Format: uuid */
+                id: string;
+                establishment: string;
+                service: string;
+                assignee: string;
+            };
+            submission: {
+                /** Format: uuid */
+                submissionId: string;
+                /** Format: uuid */
+                auditId: string;
+                revision: number;
+                submittedBy: {
+                    /** Format: uuid */
+                    id: string;
+                    displayName: string;
+                };
+                /** Format: date-time */
+                acceptedAt: string;
+            };
+            identity: {
+                catalogueId: string;
+                catalogueVersion: string;
+                schemaVersion: number;
+                ruleId: string;
+                ruleVersion: string;
+            };
+            /** @description The stored payload values, strings unchanged. */
+            values: {
+                [key: string]: string;
+            };
+            /** @description The server calculation snapshot as stored, one entry per paper test. The shape is owned by packages/domain. */
+            results: {
+                voltageAccuracy: {
+                    [key: string]: unknown;
+                };
+                voltageRepeatability: {
+                    [key: string]: unknown;
+                };
+                outputRepeatability: {
+                    [key: string]: unknown;
+                };
+                outputLinearity: {
+                    [key: string]: unknown;
+                };
+                lightFieldCorrespondence: {
+                    [key: string]: unknown;
+                };
+            };
+            insights: components["schemas"]["InsightProposalSet"];
+            insightDecisions: components["schemas"]["EvidenceInsightDecision"][];
+            manualInsights: components["schemas"]["ManualInsight"][];
+            summary: components["schemas"]["ConfirmedSummary"];
+            summaryVersion: {
+                number: number;
+                /** @enum {string} */
+                state: "confirmed" | "open";
+            };
+            summaryHistory: components["schemas"]["SummaryHistoryItem"][];
+            conformityDecision: components["schemas"]["ConformityDecision"];
+            conformityHistory: components["schemas"]["ConformityHistoryItem"][];
+            officialReport: components["schemas"]["OfficialReport"];
+            lineage: components["schemas"]["HistoryLineageRelation"][];
         };
         /** @description A report candidate, generated Word (template set, source null) or uploaded PDF (template null, source set). It is never official in this story, and no official designation property exists. */
         ReportCandidate: {
@@ -3819,6 +3980,163 @@ export interface operations {
                 };
             };
             /** @description The stored file could not be read (INTERNAL_ERROR) */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    listHistory: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Completed controls (Cache-Control no-store) */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HistoryListResponse"];
+                };
+            };
+            /** @description Unsupported query parameters (VALIDATION_ERROR) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Session rejected */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description History could not be loaded (INTERNAL_ERROR) */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    getHistoryRecord: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                taskId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The completed control (Cache-Control no-store) */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HistoryRecordResponse"];
+                };
+            };
+            /** @description Session rejected */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Malformed */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Stored evidence inconsistent or not loadable (INTERNAL_ERROR) */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    downloadOfficialReport: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                taskId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The official Word document or PDF */
+            200: {
+                headers: {
+                    "Content-Disposition"?: string;
+                    "Content-Length"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": string;
+                    "application/pdf": string;
+                };
+            };
+            /** @description Session rejected */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Malformed */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description The official PDF is no longer ready (REPORT_FILE_NOT_READY); no bytes are served */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Stored bytes missing or altered (INTERNAL_ERROR); no bytes are served */
             500: {
                 headers: {
                     [name: string]: unknown;

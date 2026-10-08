@@ -27,6 +27,9 @@ type ReassignUnstartedTaskResponseContract = apiV1Operations["reassignUnstartedD
 type CreateDeactivatedAssigneeRecoveryRequestContract = apiV1Operations["createDeactivatedAssigneeRecovery"]["requestBody"]["content"]["application/json"];
 type DeactivatedAssigneeRecoveryResponseContract = apiV1Operations["createDeactivatedAssigneeRecovery"]["responses"][201]["content"]["application/json"];
 type AcceptedEvidenceResponseContract = apiV1Operations["getAcceptedEvidence"]["responses"][200]["content"]["application/json"];
+type HistoryListResponseContract = apiV1Operations["listHistory"]["responses"][200]["content"]["application/json"];
+type HistoryRecordResponseContract = apiV1Operations["getHistoryRecord"]["responses"][200]["content"]["application/json"];
+type HistoryLineageRelationContract = apiV1Components["schemas"]["HistoryLineageRelation"];
 type InsightDecisionRequestContract = apiV1Operations["recordInsightDecision"]["requestBody"]["content"]["application/json"];
 type InsightDecisionResponseContract = apiV1Operations["recordInsightDecision"]["responses"][200]["content"]["application/json"];
 type ManualInsightRequestContract = apiV1Operations["addManualInsight"]["requestBody"]["content"]["application/json"];
@@ -363,6 +366,57 @@ export const acceptedEvidenceResponseSchema: z.ZodType<AcceptedEvidenceResponseC
     recoverySuccessorTaskId: z.string().uuid().nullable(),
   }).strict(),
 }).strict();
+/** Story 11.5: completed history shared by both roles. Related ids are present only when the viewer is authorized for them. */
+export const historyLineageRelationSchema: z.ZodType<HistoryLineageRelationContract> = z.object({
+  relation: z.enum(["replacement-of", "replaced-by", "recovery-source", "recovery-successor"]),
+  accessible: z.boolean(),
+  taskId: z.string().uuid().nullable(),
+  auditId: z.string().uuid().nullable(),
+  completed: z.boolean().nullable(),
+}).strict();
+export const historyListResponseSchema: z.ZodType<HistoryListResponseContract> = z.object({
+  records: z.array(z.object({
+    taskId: z.string().uuid(),
+    type: z.literal("graphie_mobile"),
+    establishment: z.string(),
+    service: z.string(),
+    assignee: z.string(),
+    auditId: z.string().uuid(),
+    auditRevision: z.number().int().min(1),
+    acceptedAt: z.string().datetime(),
+    designatedAt: z.string().datetime(),
+    conformityOutcome: conformityOutcomeSchema,
+    reportOrigin: z.enum(["generated-word", "uploaded-pdf"]),
+    lineage: z.array(historyLineageRelationSchema),
+  }).strict()),
+}).strict();
+export const historyListQuerySchema = z.object({}).strict();
+export const historyRecordResponseSchema: z.ZodType<HistoryRecordResponseContract> = z.object({
+  task: z.object({ id: z.string().uuid(), establishment: z.string(), service: z.string(), assignee: z.string() }).strict(),
+  submission: z.object({
+    submissionId: z.string().uuid(), auditId: z.string().uuid(), revision: z.number().int().positive(),
+    submittedBy: z.object({ id: z.string().uuid(), displayName: z.string() }).strict(),
+    acceptedAt: z.string().datetime(),
+  }).strict(),
+  identity: z.object({
+    catalogueId: z.string(), catalogueVersion: z.string(), schemaVersion: z.number().int(), ruleId: z.string(), ruleVersion: z.string(),
+  }).strict(),
+  values: z.record(z.string(), z.string()),
+  results: z.object({
+    voltageAccuracy: storedTestResultSchema, voltageRepeatability: storedTestResultSchema, outputRepeatability: storedTestResultSchema,
+    outputLinearity: storedTestResultSchema, lightFieldCorrespondence: storedTestResultSchema,
+  }).strict(),
+  insights: insightProposalSetSchema,
+  insightDecisions: z.array(evidenceInsightDecisionSchema),
+  manualInsights: z.array(manualInsightSchema),
+  summary: confirmedSummarySchema,
+  summaryVersion: z.object({ number: z.number().int().min(1), state: z.enum(["confirmed", "open"]) }).strict(),
+  summaryHistory: z.array(summaryHistoryItemSchema),
+  conformityDecision: conformityDecisionSchema,
+  conformityHistory: z.array(conformityHistoryItemSchema),
+  officialReport: officialReportSchema,
+  lineage: z.array(historyLineageRelationSchema),
+}).strict();
 const employeeTaskSchema = z.object({
   id: z.string().uuid(), type: z.literal("graphie_mobile"), establishment: z.string(), service: z.string(),
   state: z.literal("draft"), createdAt: z.string().datetime(),
@@ -458,6 +512,10 @@ export type ReassignUnstartedTaskResponse = z.infer<typeof reassignUnstartedTask
 export type CreateDeactivatedAssigneeRecoveryRequest = z.infer<typeof createDeactivatedAssigneeRecoveryRequestSchema>;
 export type DeactivatedAssigneeRecoveryResponse = z.infer<typeof deactivatedAssigneeRecoveryResponseSchema>;
 export type AcceptedEvidenceResponse = z.infer<typeof acceptedEvidenceResponseSchema>;
+export type HistoryLineageRelation = z.infer<typeof historyLineageRelationSchema>;
+export type HistoryListResponse = z.infer<typeof historyListResponseSchema>;
+export type HistoryListItem = HistoryListResponse["records"][number];
+export type HistoryRecordResponse = z.infer<typeof historyRecordResponseSchema>;
 export type InsightDecisionRequest = z.infer<typeof insightDecisionRequestSchema>;
 export type InsightDecisionResponse = z.infer<typeof insightDecisionResponseSchema>;
 export type ManualInsightRequest = z.infer<typeof manualInsightRequestSchema>;

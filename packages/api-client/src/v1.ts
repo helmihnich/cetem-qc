@@ -1,11 +1,11 @@
 import { acceptedEvidenceResponseSchema, apiErrorSchema, conformityDecisionRequestSchema, conformityDecisionSchema, conformityHistoryItemSchema, authenticationRequestSchema, authenticationResponseSchema, confirmedSummarySchema, summaryReopeningRequestSchema, summaryReopeningSchema, summaryHistoryItemSchema, createDeactivatedAssigneeRecoveryRequestSchema, createEmployeeRequestSchema, createTaskRequestSchema, deactivatedAssigneeRecoveryResponseSchema, employeeCredentialResponseSchema, employeeListResponseSchema, employeeTaskAuditVersionSchema, employeeTaskRecoverySeedResponseSchema, employeeTaskListQuerySchema, employeeTaskListResponseSchema, employeeTaskResponseSchema, healthResponseSchema, insightDecisionRequestSchema, insightDecisionResponseSchema, manualInsightRequestSchema, manualInsightResponseSchema, passwordReplacementRequestSchema, reassignUnstartedTaskRequestSchema, reassignUnstartedTaskResponseSchema, replacementTaskResponseSchema, sessionResponseSchema, summaryConfirmationRequestSchema, summaryDraftRequestSchema, summaryDraftResponseSchema, syncOperationAcceptedSchema, syncOperationConflictSchema, syncOperationRejectedSchema, syncOperationRequestSchema, taskAssigneeListResponseSchema, taskListResponseSchema, taskResponseSchema } from "@cetem-qc/schemas/api/v1";
 import type { ConformityDecision, ConformityDecisionRequest, ConformityHistoryItem, ConformityOutcome, AcceptedEvidenceResponse, AuthenticationRequest, AuthenticationResponse, ConfirmedSummary, SummaryReopening, SummaryReopeningRequest, SummaryHistoryItem, CreateDeactivatedAssigneeRecoveryRequest, CreateEmployeeRequest, CreateTaskRequest, DeactivatedAssigneeRecoveryResponse, EmployeeCredentialResponse, EmployeeListResponse, EmployeeTaskAuditVersion, EmployeeTaskRecoverySeedResponse, EmployeeTaskListResponse, EmployeeTaskResponse, HealthResponse, InsightDecisionRequest, InsightDecisionResponse, ManualInsightRequest, ManualInsightResponse, PasswordReplacementRequest, ReassignUnstartedTaskRequest, ReassignUnstartedTaskResponse, ReplacementTaskResponse, SummaryConfirmationRequest, SummaryDraftResponse, SyncOperationAccepted, SyncOperationConflict, SyncOperationRejected, SyncOperationRequest, TaskListResponse, TaskResponse } from "@cetem-qc/schemas/api/v1";
 
-import { officialReportSchema, reportCandidateListSchema, reportDesignateRequestSchema, reportCandidateRequestSchema, reportCandidateSchema, reportFromPdfRequestSchema, storedFileListSchema, storedFileSchema } from "@cetem-qc/schemas/api/v1";
-import type { OfficialReport, ReportCandidate, ReportCandidateList, ReportCandidateRequest, ReportFromPdfRequest, StoredFile, StoredFileList } from "@cetem-qc/schemas/api/v1";
+import { historyListResponseSchema, historyRecordResponseSchema, officialReportSchema, reportCandidateListSchema, reportDesignateRequestSchema, reportCandidateRequestSchema, reportCandidateSchema, reportFromPdfRequestSchema, storedFileListSchema, storedFileSchema } from "@cetem-qc/schemas/api/v1";
+import type { HistoryLineageRelation, HistoryListItem, HistoryListResponse, HistoryRecordResponse, OfficialReport, ReportCandidate, ReportCandidateList, ReportCandidateRequest, ReportFromPdfRequest, StoredFile, StoredFileList } from "@cetem-qc/schemas/api/v1";
 
-export { officialReportSchema, reportCandidateListSchema, reportCandidateSchema, storedFileListSchema, storedFileSchema };
-export type { OfficialReport, ReportCandidate, ReportCandidateList, ReportCandidateRequest, ReportFromPdfRequest, StoredFile, StoredFileList };
+export { historyListResponseSchema, historyRecordResponseSchema, officialReportSchema, reportCandidateListSchema, reportCandidateSchema, storedFileListSchema, storedFileSchema };
+export type { HistoryLineageRelation, HistoryListItem, HistoryListResponse, HistoryRecordResponse, OfficialReport, ReportCandidate, ReportCandidateList, ReportCandidateRequest, ReportFromPdfRequest, StoredFile, StoredFileList };
 
 export { conformityDecisionSchema, conformityHistoryItemSchema,acceptedEvidenceResponseSchema, confirmedSummarySchema, summaryReopeningSchema, summaryHistoryItemSchema,insightDecisionResponseSchema, manualInsightResponseSchema, replacementTaskResponseSchema, summaryDraftResponseSchema, taskListResponseSchema };
 export type { ConformityDecision, ConformityDecisionRequest, ConformityHistoryItem, ConformityOutcome, ConfirmedSummary, SummaryReopening, SummaryHistoryItem,SummaryConfirmationRequest, SummaryDraftResponse, AcceptedEvidenceResponse, InsightDecisionRequest, InsightDecisionResponse, ManualInsightRequest, ManualInsightResponse, CreateDeactivatedAssigneeRecoveryRequest, CreateTaskRequest, DeactivatedAssigneeRecoveryResponse, EmployeeTaskAuditVersion, EmployeeTaskRecoverySeedResponse, EmployeeTaskListResponse, EmployeeTaskResponse, ReassignUnstartedTaskRequest, ReassignUnstartedTaskResponse, ReplacementTaskResponse, SyncOperationAccepted, SyncOperationConflict, SyncOperationRejected, SyncOperationRequest, TaskListResponse };
@@ -151,6 +151,24 @@ export type RetryManualPdfScanOutcome =
   | { status: 403; code: "FORBIDDEN"; message: string }
   | { status: 404; code: "TASK_NOT_FOUND"; message: string }
   | { status: 409; code: "FILE_NOT_RESCANNABLE"; message: string }
+  | { status: 500; code: "INTERNAL_ERROR"; message: string };
+
+/** The documented outcomes of listing the completed history (both roles); any other status or body throws `ApiRequestError`. */
+export type ListHistoryOutcome =
+  | { status: 200; body: HistoryListResponse }
+  | { status: 500; code: "INTERNAL_ERROR"; message: string };
+
+/** The documented outcomes of reading one completed control; any other status or body throws `ApiRequestError`. */
+export type GetHistoryRecordOutcome =
+  | { status: 200; body: HistoryRecordResponse }
+  | { status: 404; code: "TASK_NOT_FOUND"; message: string }
+  | { status: 500; code: "INTERNAL_ERROR"; message: string };
+
+/** The documented outcomes of downloading the official report; any other status or body throws `ApiRequestError`. */
+export type DownloadOfficialReportOutcome =
+  | { status: 200; bytes: Uint8Array; fileName: string; mediaType: string }
+  | { status: 404; code: "TASK_NOT_FOUND"; message: string }
+  | { status: 409; code: "REPORT_FILE_NOT_READY"; message: string }
   | { status: 500; code: "INTERNAL_ERROR"; message: string };
 
 export class ApiRequestError extends Error {
@@ -660,6 +678,57 @@ export function createApiClient({ baseUrl, fetch: fetcher = fetch, sessionToken:
       if (response.status === 200) {
         const parsed = employeeTaskRecoverySeedResponseSchema.safeParse(data);
         if (parsed.success) return parsed.data;
+      }
+      throw toRequestError(response.status, data);
+    },
+    /** Lists the completed controls the session may consult: own team (Responsable) or current assignments (Employé). */
+    async listHistory(): Promise<ListHistoryOutcome> {
+      const payload = await request("/history", { method: "GET", headers: { accept: "application/json", ...sessionHeaders() }, cache: "no-store" });
+      const status = payload.response.status;
+      if (status === 200) {
+        const parsed = historyListResponseSchema.safeParse(payload.data);
+        if (parsed.success) return { status, body: parsed.data };
+        throw toRequestError(status, payload.data);
+      }
+      const error = apiErrorSchema.safeParse(payload.data);
+      if (error.success && status === 500 && error.data.error.code === "INTERNAL_ERROR") return { status, code: "INTERNAL_ERROR", message: error.data.error.message };
+      throw toRequestError(status, payload.data);
+    },
+    /** Reads one completed control, read only (both roles); 404 for anything the session may not see. */
+    async getHistoryRecord(taskId: string): Promise<GetHistoryRecordOutcome> {
+      const payload = await request(`/history/${encodeURIComponent(taskId)}`, { method: "GET", headers: { accept: "application/json", ...sessionHeaders() }, cache: "no-store" });
+      const status = payload.response.status;
+      if (status === 200) {
+        const parsed = historyRecordResponseSchema.safeParse(payload.data);
+        if (parsed.success) return { status, body: parsed.data };
+        throw toRequestError(status, payload.data);
+      }
+      const error = apiErrorSchema.safeParse(payload.data);
+      if (error.success) {
+        const { code, message } = error.data.error;
+        if (status === 404 && code === "TASK_NOT_FOUND") return { status, code, message };
+        if (status === 500 && code === "INTERNAL_ERROR") return { status, code, message };
+      }
+      throw toRequestError(status, payload.data);
+    },
+    /** Downloads the official report file of a completed control: its bytes, the served file name and media type. */
+    async downloadOfficialReport(taskId: string): Promise<DownloadOfficialReportOutcome> {
+      const response = await fetcher(`${root}/history/${encodeURIComponent(taskId)}/official-report/file`, { method: "GET", headers: { ...sessionHeaders() }, cache: "no-store" });
+      if (response.status === 200) {
+        const mediaType = response.headers.get("content-type") ?? "application/octet-stream";
+        const fileName = /filename="([^"]+)"/.exec(response.headers.get("content-disposition") ?? "")?.[1];
+        if (!fileName) throw new ApiRequestError("The API response could not be read.", response.status, "UNEXPECTED_API_RESPONSE");
+        return { status: 200, bytes: new Uint8Array(await response.arrayBuffer()), fileName, mediaType };
+      }
+      let data: unknown;
+      try { data = await response.json(); }
+      catch { throw new ApiRequestError("The API response could not be read.", response.status, "UNEXPECTED_API_RESPONSE"); }
+      const error = apiErrorSchema.safeParse(data);
+      if (error.success) {
+        const { code, message } = error.data.error;
+        if (response.status === 404 && code === "TASK_NOT_FOUND") return { status: 404, code, message };
+        if (response.status === 409 && code === "REPORT_FILE_NOT_READY") return { status: 409, code, message };
+        if (response.status === 500 && code === "INTERNAL_ERROR") return { status: 500, code, message };
       }
       throw toRequestError(response.status, data);
     },

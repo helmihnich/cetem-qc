@@ -94,3 +94,52 @@ export async function hasOfficialReport(client: Pool | PoolClient, taskId: strin
     : await client.query("SELECT 1 FROM official_reports WHERE task_id = $1 AND submission_id = $2", [taskId, submissionId]);
   return result.rows.length > 0;
 }
+
+/** The official reports of already-authorized tasks, keyed by task id; tasks without one are absent. Read only. */
+export async function listOfficialReports(client: Pool | PoolClient, authorizedTaskIds: string[]): Promise<Map<string, OfficialReport>> {
+  const reports = new Map<string, OfficialReport>();
+  if (authorizedTaskIds.length === 0) return reports;
+  const designated = await client.query<{ task_id: string }>("SELECT task_id FROM official_reports WHERE task_id = ANY($1::uuid[])", [authorizedTaskIds]);
+  for (const { task_id } of designated.rows) {
+    const official = await readOfficialReport(client, task_id);
+    if (official) reports.set(task_id, official);
+  }
+  return reports;
+}
+
+/** The stored file of the official candidate only, never another candidate's. */
+export interface OfficialReportFile {
+  candidateId: string;
+  origin: ReportOrigin;
+  fileName: string;
+  /** The Word object key; null for a PDF report, whose bytes stay behind the files module. */
+  storageRef: string | null;
+  storedFileId: string | null;
+  designatedAt: Date;
+  byteSize: number;
+  sha256: string;
+}
+
+/** The file reference of the official report of an already-authorized task, or undefined. Read only. */
+export async function getOfficialReportFile(client: Pool | PoolClient, authorizedTaskId: string): Promise<OfficialReportFile | undefined> {
+  const result = await client.query<{ candidate_id: string; origin: ReportOrigin; stored_file_id: string | null; storage_ref: string | null; file_name: string; byte_size: number; sha256: string; designated_at: Date }>(
+    `SELECT candidate.id AS candidate_id, candidate.origin, candidate.stored_file_id, outcome.storage_ref, outcome.file_name,
+            outcome.byte_size, outcome.sha256, official.designated_at
+     FROM official_reports official
+     JOIN report_candidates candidate ON candidate.id = official.candidate_id
+     JOIN report_candidate_outcomes outcome ON outcome.candidate_id = candidate.id
+     WHERE official.task_id = $1`,
+    [authorizedTaskId],
+  );
+  const row = result.rows[0];
+  return row
+    ? { candidateId: row.candidate_id, origin: row.origin, fileName: row.file_name, storageRef: row.storage_ref, storedFileId: row.stored_file_id, designatedAt: row.designated_at, byteSize: row.byte_size, sha256: row.sha256 }
+    : undefined;
+}
+
+/** The subset of the given tasks that have an official report. Read only. */
+export async function listCompletedTaskIds(client: Pool | PoolClient, taskIds: string[]): Promise<Set<string>> {
+  if (taskIds.length === 0) return new Set();
+  const result = await client.query<{ task_id: string }>("SELECT task_id FROM official_reports WHERE task_id = ANY($1::uuid[])", [taskIds]);
+  return new Set(result.rows.map((row) => row.task_id));
+}

@@ -14,6 +14,10 @@ import { registerEvidenceRoutes } from "./routes/register-evidence-routes.js";
 import { registerSummaryRoutes } from "./routes/register-summary-routes.js";
 import { registerConformityRoutes } from "./routes/register-conformity-routes.js";
 import { registerReportRoutes } from "./routes/register-report-routes.js";
+import { registerHistoryRoutes } from "./routes/register-history-routes.js";
+import { createObjectStorage } from "./modules/files/index.js";
+import type { ObjectStorage } from "./modules/files/index.js";
+import { reportCommandTestSeams } from "./modules/reports/index.js";
 import { registerFileRoutes } from "./routes/register-file-routes.js";
 
 export function createApp(pool?: Pool) {
@@ -77,7 +81,9 @@ export function createApp(pool?: Pool) {
     }
   };
 
-  const deps: RouteDeps = { getPool, unauthorized, bearerToken, requireSession };
+  let configuredReportStorage: ObjectStorage | undefined;
+  const reportStorage = () => reportCommandTestSeams.storage ?? (configuredReportStorage ??= createObjectStorage(process.env));
+  const deps: RouteDeps = { getPool, unauthorized, bearerToken, requireSession, reportStorage };
   registerPublicAuthRoutes(v1, deps);
 
   // All server operations registered after the public auth flow require a live session.
@@ -91,6 +97,7 @@ export function createApp(pool?: Pool) {
   registerSummaryRoutes(v1, deps);
   registerConformityRoutes(v1, deps);
   registerReportRoutes(v1, deps);
+  registerHistoryRoutes(v1, deps);
   registerFileRoutes(v1, deps);
 
   app.use("/api/v1", v1);

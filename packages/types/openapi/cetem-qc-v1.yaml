@@ -1419,6 +1419,80 @@ paths:
         '403': { description: Responsable role required (FORBIDDEN), content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
         '404': { description: Malformed, unknown, other team's, failed or generating candidate, or unknown task (TASK_NOT_FOUND), content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
         '500': { description: The stored file could not be read (INTERNAL_ERROR), content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+  /history:
+    get:
+      operationId: listHistory
+      summary: List the completed controls the authenticated user may consult (read only)
+      description: >-
+        Responsable (own team) or Employé (currently assigned). A control is completed when it has an official report.
+        Newest designation first. Nothing is written. Request query parameters are not supported.
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Completed controls (Cache-Control no-store)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HistoryListResponse'
+        '400': { description: Unsupported query parameters (VALIDATION_ERROR), content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+        '401': { description: Session rejected, content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+        '500': { description: History could not be loaded (INTERNAL_ERROR), content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+  /history/{taskId}:
+    get:
+      operationId: getHistoryRecord
+      summary: Read one completed control (read only)
+      description: >-
+        Responsable (own team) or Employé (currently assigned). Returns the stored evidence, insights with decisions,
+        confirmed summary, human conformity decision, official report and lineage. Nothing is written. A malformed,
+        unknown or unauthorized task, and a task without accepted evidence or official report, all get the same 404.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: taskId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: The completed control (Cache-Control no-store)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HistoryRecordResponse'
+        '401': { description: Session rejected, content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+        '404': { description: Malformed, unknown or unauthorized task, or not completed (TASK_NOT_FOUND); the cases are not told apart, content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+        '500': { description: Stored evidence inconsistent or not loadable (INTERNAL_ERROR), content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+  /history/{taskId}/official-report/file:
+    get:
+      operationId: downloadOfficialReport
+      summary: Download the official report file of a completed control
+      description: >-
+        Responsable (own team) or Employé (currently assigned). Serves the stored bytes of the official candidate only,
+        after checking their SHA-256. The response is an attachment with Cache-Control no-store and
+        X-Content-Type-Options nosniff. No URL or storage key is returned.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: taskId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: The official Word document or PDF
+          headers:
+            Content-Disposition: { schema: { type: string } }
+            Content-Length: { schema: { type: integer } }
+          content:
+            application/vnd.openxmlformats-officedocument.wordprocessingml.document:
+              schema: { type: string, format: binary }
+            application/pdf:
+              schema: { type: string, format: binary }
+        '401': { description: Session rejected, content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+        '404': { description: Malformed, unknown or unauthorized task, or not completed (TASK_NOT_FOUND), content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+        '409': { description: The official PDF is no longer ready (REPORT_FILE_NOT_READY); no bytes are served, content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+        '500': { description: Stored bytes missing or altered (INTERNAL_ERROR); no bytes are served, content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
   /tasks/{taskId}/pdf-files:
     post:
       operationId: uploadManualPdfFile
@@ -2160,6 +2234,146 @@ components:
             name: { type: string }
             byteSize: { type: integer, minimum: 0 }
             sha256: { type: string, pattern: '^[0-9a-f]{64}$' }
+    HistoryLineageRelation:
+      type: object
+      description: >-
+        A replacement or recovery relation of a completed control. The related ids are present only when the viewer is
+        authorized for the related task; otherwise `accessible` is false and every other field is null.
+      additionalProperties: false
+      required: [relation, accessible, taskId, auditId, completed]
+      properties:
+        relation:
+          type: string
+          enum: [replacement-of, replaced-by, recovery-source, recovery-successor]
+        accessible: { type: boolean }
+        taskId: { type: [string, 'null'], format: uuid }
+        auditId: { type: [string, 'null'], format: uuid }
+        completed: { type: [boolean, 'null'] }
+    HistoryListItem:
+      type: object
+      additionalProperties: false
+      required: [taskId, type, establishment, service, assignee, auditId, auditRevision, acceptedAt, designatedAt, conformityOutcome, reportOrigin, lineage]
+      properties:
+        taskId: { type: string, format: uuid }
+        type: { type: string, enum: [graphie_mobile] }
+        establishment: { type: string }
+        service: { type: string }
+        assignee: { type: string }
+        auditId: { type: string, format: uuid }
+        auditRevision: { type: integer, minimum: 1 }
+        acceptedAt: { type: string, format: date-time }
+        designatedAt: { type: string, format: date-time }
+        conformityOutcome:
+          $ref: '#/components/schemas/ConformityOutcome'
+        reportOrigin:
+          type: string
+          enum: [generated-word, uploaded-pdf]
+        lineage:
+          type: array
+          items:
+            $ref: '#/components/schemas/HistoryLineageRelation'
+    HistoryListResponse:
+      type: object
+      additionalProperties: false
+      required: [records]
+      properties:
+        records:
+          type: array
+          items:
+            $ref: '#/components/schemas/HistoryListItem'
+    HistoryRecordResponse:
+      type: object
+      description: >-
+        A completed control exactly as stored: the accepted evidence of the 9.1 review plus the official report and the
+        lineage relations visible to the viewer. A completed control always has a confirmed summary and a conformity decision.
+      additionalProperties: false
+      required: [task, submission, identity, values, results, insights, insightDecisions, manualInsights, summary, summaryVersion, summaryHistory, conformityDecision, conformityHistory, officialReport, lineage]
+      properties:
+        task:
+          type: object
+          additionalProperties: false
+          required: [id, establishment, service, assignee]
+          properties:
+            id: { type: string, format: uuid }
+            establishment: { type: string }
+            service: { type: string }
+            assignee: { type: string }
+        submission:
+          type: object
+          additionalProperties: false
+          required: [submissionId, auditId, revision, submittedBy, acceptedAt]
+          properties:
+            submissionId: { type: string, format: uuid }
+            auditId: { type: string, format: uuid }
+            revision: { type: integer, minimum: 1 }
+            submittedBy:
+              type: object
+              additionalProperties: false
+              required: [id, displayName]
+              properties:
+                id: { type: string, format: uuid }
+                displayName: { type: string }
+            acceptedAt: { type: string, format: date-time }
+        identity:
+          type: object
+          additionalProperties: false
+          required: [catalogueId, catalogueVersion, schemaVersion, ruleId, ruleVersion]
+          properties:
+            catalogueId: { type: string }
+            catalogueVersion: { type: string }
+            schemaVersion: { type: integer }
+            ruleId: { type: string }
+            ruleVersion: { type: string }
+        values:
+          type: object
+          description: The stored payload values, strings unchanged.
+          additionalProperties: { type: string }
+        results:
+          type: object
+          description: The server calculation snapshot as stored, one entry per paper test. The shape is owned by packages/domain.
+          required: [voltageAccuracy, voltageRepeatability, outputRepeatability, outputLinearity, lightFieldCorrespondence]
+          additionalProperties: false
+          properties:
+            voltageAccuracy: { type: object, additionalProperties: true }
+            voltageRepeatability: { type: object, additionalProperties: true }
+            outputRepeatability: { type: object, additionalProperties: true }
+            outputLinearity: { type: object, additionalProperties: true }
+            lightFieldCorrespondence: { type: object, additionalProperties: true }
+        insights:
+          $ref: '#/components/schemas/InsightProposalSet'
+        insightDecisions:
+          type: array
+          items:
+            $ref: '#/components/schemas/EvidenceInsightDecision'
+        manualInsights:
+          type: array
+          items:
+            $ref: '#/components/schemas/ManualInsight'
+        summary:
+          $ref: '#/components/schemas/ConfirmedSummary'
+        summaryVersion:
+          type: object
+          additionalProperties: false
+          required: [number, state]
+          properties:
+            number: { type: integer, minimum: 1 }
+            state: { type: string, enum: [confirmed, open] }
+        summaryHistory:
+          type: array
+          items:
+            $ref: '#/components/schemas/SummaryHistoryItem'
+        conformityDecision:
+          $ref: '#/components/schemas/ConformityDecision'
+        conformityHistory:
+          type: array
+          items:
+            $ref: '#/components/schemas/ConformityHistoryItem'
+        officialReport:
+          $ref: '#/components/schemas/OfficialReport'
+        lineage:
+          type: array
+          items:
+            $ref: '#/components/schemas/HistoryLineageRelation'
     ReportCandidate:
       type: object
       description: >-

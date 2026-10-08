@@ -155,6 +155,12 @@
   summary: No restart test covers the new v4 startup guards: a v4 database missing `conflict_resolutions` / `conflict_resolution_items` or `outbox_operations.conflict_operation_id` should be refused as incomplete, with no row deleted.
   evidence: The guard is defensive against a damaged schema. Following the S3 pattern in `outbox.test.ts`, it is a cheap follow-up.
 
+## Deferred from: spec of 11-5-view-and-download-authorized-completed-history (2026-10-08)
+
+- source_spec: `_bmad-output/specs/spec-11-5-view-and-download-authorized-completed-history/SPEC.md`
+  summary: The Employé mobile history screen and on-device saving of the official report are not part of 11.5. The Employé is served by the API routes (`/history`), the typed client and the download endpoint.
+  evidence: `apps/mobile` has no file-system or share capability (only expo-crypto, network, secure-store, sqlite). Adding `expo-file-system`/`expo-sharing` and a mobile history screen needs its own story or an Epic 12 demonstration step; no business rule is open.
+
 ## Deferred from: code review of spec-8-2-create-a-correction-draft-after-validation-rejection (2026-10-05)
 
 - source_spec: `_bmad-output/specs/spec-8-2-create-a-correction-draft-after-validation-rejection/correction-model.md`

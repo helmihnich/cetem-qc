@@ -50,6 +50,14 @@ export async function getAcceptedSubmissionForReview(
 ): Promise<AcceptedSubmissionSnapshot | undefined> {
   const ownTaskId = await getOwnTeamTaskId(pool, responsableId, taskId);
   if (!ownTaskId) return undefined;
+  return getAcceptedSubmissionByTask(pool, ownTaskId);
+}
+
+/**
+ * The accepted snapshot of a task whose access the caller has already authorized. Performs no ownership check:
+ * pass only an ID that an authorization predicate of the `tasks` module returned. Read only.
+ */
+export async function getAcceptedSubmissionByTask(pool: Pool | PoolClient, authorizedTaskId: string): Promise<AcceptedSubmissionSnapshot | undefined> {
   const result = await pool.query<AcceptedSubmissionRow>(
     `SELECT submission.id AS submission_id, submission.operation_id, audit.task_id, audit.id AS audit_id,
             revision.revision, revision.catalogue_id, revision.catalogue_version, revision.schema_version,
@@ -60,7 +68,7 @@ export async function getAcceptedSubmissionForReview(
      JOIN audit_revisions revision ON revision.audit_id = submission.audit_id AND revision.revision = submission.revision
      JOIN identity_accounts account ON account.id = submission.submitted_by
      WHERE audit.task_id = $1`,
-    [ownTaskId],
+    [authorizedTaskId],
   );
   const row = result.rows[0];
   if (!row) return undefined;

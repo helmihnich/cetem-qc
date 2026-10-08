@@ -9,6 +9,6 @@ export type { ReportDocumentGenerator } from "./ports/report-document-generator.
 export { createWordTemplateGenerator } from "./adapters/word-template.js";
 export { designateReportCandidate } from "./commands/designate-report-candidate.js";
 export type { DesignateReportCandidateDeps, DesignateReportCandidateOutcome } from "./commands/designate-report-candidate.js";
-export { getOfficialReport } from "./queries/official-report.js";
-export type { OfficialReport } from "./queries/official-report.js";
+export { getOfficialReport, getOfficialReportFile, listCompletedTaskIds, listOfficialReports } from "./queries/official-report.js";
+export type { OfficialReport, OfficialReportFile } from "./queries/official-report.js";
 export { registerReportsReopenParticipant, reportsReopenParticipant } from "./reopen-participant.js";

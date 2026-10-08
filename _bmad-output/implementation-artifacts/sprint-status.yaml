@@ -112,7 +112,7 @@ development_status:
   11-2-validate-scan-and-store-a-manual-pdf-file: done
   11-3-create-a-report-candidate-from-a-ready-pdf: done
   11-4-designate-exactly-one-current-report-official: done
-  11-5-view-and-download-authorized-completed-history: backlog
+  11-5-view-and-download-authorized-completed-history: done
   11-6-keep-report-candidates-current-through-asynchronous-processi: backlog
   epic-11-retrospective: optional
 

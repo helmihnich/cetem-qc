@@ -1,7 +1,6 @@
 import type express from "express";
 import { apiErrorSchema, officialReportSchema, reportCandidateListSchema, reportDesignateRequestSchema, reportCandidateRequestSchema, reportCandidateSchema, reportFromPdfRequestSchema } from "@cetem-qc/schemas/api/v1";
-import { createObjectStorage, readStoredFile } from "../modules/files/index.js";
-import type { ObjectStorage } from "../modules/files/index.js";
+import { readStoredFile } from "../modules/files/index.js";
 import { attachPdfReportCandidate, createWordTemplateGenerator, designateReportCandidate, generateReportCandidate, getOfficialReport, getReportCandidateFile, listReportCandidates, reportCommandTestSeams } from "../modules/reports/index.js";
 import type { ReportDocumentGenerator } from "../modules/reports/index.js";
 import { getAcceptedSubmissionForReview } from "../modules/audits/queries/accepted-submission.js";
@@ -15,9 +14,8 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-
 
 export function registerReportRoutes(v1: express.Router, deps: RouteDeps): void {
   const { getPool } = deps;
-  let configuredStorage: ObjectStorage | undefined;
   let configuredGenerator: ReportDocumentGenerator | undefined;
-  const storage = () => reportCommandTestSeams.storage ?? (configuredStorage ??= createObjectStorage(process.env));
+  const storage = deps.reportStorage;
   const generator = () => reportCommandTestSeams.generator ?? (configuredGenerator ??= createWordTemplateGenerator());
 
   // Log lines carry the event, the actor and a fixed class only: never a task, candidate, summary or decision ID, a file name, a path or text.

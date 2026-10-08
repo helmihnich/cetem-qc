@@ -107,3 +107,12 @@ export async function readTaskAcceptanceAndLineage(pool: Pool, taskIds: string[]
   }
   return lineage;
 }
+
+/** The audit ID of each given task that has an audit; tasks without one are absent. Read only. */
+export async function readAuditIdsByTask(pool: Pool, taskIds: string[]): Promise<Map<string, string>> {
+  const auditIds = new Map<string, string>();
+  if (taskIds.length === 0) return auditIds;
+  const result = await pool.query<{ task_id: string; id: string }>("SELECT task_id, id FROM audits WHERE task_id = ANY($1::uuid[])", [taskIds]);
+  for (const row of result.rows) auditIds.set(row.task_id, row.id);
+  return auditIds;
+}
