@@ -964,7 +964,7 @@ So that delayed work cannot make an obsolete report designatable.
 **And** only a result whose audit revision, summary version and conformity decision are still current can become Ready/designatable
 **And** file-scan completion is consumed through the files contract/event; reports owns candidate freshness and eligibility and does not reach into file repositories.
 
-**Traceability:** FR-035, AD-8, AD-9, UX-DR10, UX-DR13.
+**Traceability:** spec `_bmad-output/specs/spec-11-6-keep-report-candidates-current-through-asynchronous-processi/SPEC.md`; FR-035, AD-8, AD-9, UX-DR10, UX-DR13. **Dependency:** Stories 11.1–11.5 (done); no queue or migration, completion-time freshness check on audit revision/summary/decision and file readiness derived through the `files` contract.
 
 ## Epic 12: PoV Environment, Verification and Acceptance Readiness
 

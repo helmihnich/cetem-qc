@@ -92,7 +92,10 @@ export async function generateReportCandidate(
         return { type: "failed", candidate: candidate!, failureClass: failed };
       }
       const current = await getCurrentBindings(transaction, row.submission_id);
-      const stillCurrent = current.summaryId === bound.summaryId && current.decisionId === bound.decisionId;
+      // Fail closed: a task that is no longer readable, or whose accepted submission/revision moved on, cannot be current.
+      const accepted = await getAcceptedSubmissionForReview(transaction, responsableId, taskId);
+      const stillCurrent = accepted !== undefined && accepted.submissionId === row.submission_id && accepted.revision === row.audit_revision
+        && current.summaryId === bound.summaryId && current.decisionId === bound.decisionId;
       const fileName = fileNameOf(bound.candidateId, requestedAt);
       const sha256 = createHash("sha256").update(bytes).digest("hex");
       await transaction.query(

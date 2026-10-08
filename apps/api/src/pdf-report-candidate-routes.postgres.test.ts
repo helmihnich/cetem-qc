@@ -114,6 +114,33 @@ async function withPdfReports<T>(run: (context: Context) => Promise<T>, options:
   }
 }
 
+test("B1 B2 a later non-ready file state reads outdated in the list and refuses designation; a later clean scan makes it ready again", async () => {
+  await withPdfReports(async () => {
+    await withSyncFixture(async (fixture) => {
+      const { pool } = fixture;
+      const { taskId } = await readyTask(fixture);
+      const file = fileOf(await upload(fixture, taskId));
+      const candidate = candidateOf(await attach(fixture, taskId, file.id));
+      const statusOf = async () => reportCandidateListSchema.parse((await list(fixture, taskId)).body).candidates.map((item) => item.status);
+      const designate = () => call(fixture, "POST", `/tasks/${taskId}/report-candidates/${candidate.id}/designate`, fixture.tokens.owner, {});
+      assert.deepEqual(await statusOf(), ["ready"]);
+      const reports = () => fingerprint(pool, ["report_candidates", "report_candidate_outcomes"]);
+      const before = await reports();
+      await pool.query("INSERT INTO stored_file_checks (file_id, stage, result, scanner) VALUES ($1, 'scan', 'unavailable', 'clamav')", [file.id]);
+      assert.deepEqual(await statusOf(), ["outdated"]);
+      assert.equal(await reports(), before, "the candidate and outcome rows are untouched");
+      const refused = await designate();
+      assert.deepEqual([refused.status, errorCode(refused)], [409, "REPORT_CANDIDATE_OUTDATED"]);
+      await pool.query("INSERT INTO stored_file_checks (file_id, stage, result, scanner) VALUES ($1, 'scan', 'clean', 'clamav')", [file.id]);
+      assert.deepEqual(await statusOf(), ["ready"]);
+      await pool.query("INSERT INTO stored_file_checks (file_id, stage, result, scanner) VALUES ($1, 'scan', 'threat', 'clamav')", [file.id]);
+      assert.deepEqual(await statusOf(), ["outdated"]);
+      const threat = await designate();
+      assert.deepEqual([threat.status, errorCode(threat)], [409, "REPORT_CANDIDATE_OUTDATED"]);
+    });
+  });
+});
+
 test("P1 P2 ready file (none or clean scanner), either decision: 201 uploaded-pdf ready, bound to the current inputs; one candidate row, one outcome row, no storage key, no new object", async () => {
   for (const scannerKind of ["none", "clean"] as const) {
     await withPdfReports(async ({ storage, calls }) => {

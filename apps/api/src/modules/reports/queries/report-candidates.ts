@@ -120,7 +120,9 @@ export async function presentCandidateRows(client: Pool | PoolClient, rows: read
   return rows.map((row) => {
     const derived = deriveStatus(row, current, official);
     // A candidate of another submission can never be current (an official report is permanent and stays official).
-    const status = (derived === "ready" || derived === "superseded") && row.submission_id !== currentSubmissionId ? "outdated" : derived;
+    // A PDF candidate whose file no longer derives as ready (files contract: null or unknown) cannot be designated either.
+    const fileNotReady = row.stored_file_id !== null && (scans.get(row.stored_file_id) ?? null) === null;
+    const status = (derived === "ready" || derived === "superseded") && (row.submission_id !== currentSubmissionId || fileNotReady) ? "outdated" : derived;
     return toReportCandidate(row, status, outcomes.get(row.conformity_decision_id)!, row.stored_file_id ? scans.get(row.stored_file_id) ?? null : null);
   });
 }

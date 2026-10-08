@@ -402,6 +402,27 @@ test("R15 a reopening between insert and completion gives outdated and 409 REPOR
   }, { generate: blocked.generate });
 });
 
+test("A4 a task no longer readable by the Responsable at completion gives outdated, never ready, keeping the file", async () => {
+  const blocked = blockedGenerator();
+  await withReports(async ({ storage }) => {
+    await withSyncFixture(async (fixture) => {
+      const { taskId } = await readyTask(fixture);
+      const pending = generate(fixture, taskId);
+      await blocked.hasStarted;
+      let reply: Reply;
+      try {
+        await fixture.pool.query("DELETE FROM task_assignments");
+      } finally {
+        blocked.release();
+        reply = await pending;
+      }
+      assert.deepEqual([reply.status, reply.body], [409, CHANGED]);
+      assert.deepEqual((await outcomeRows(fixture.pool)).map((row) => row.outcome), ["outdated"]);
+      assert.equal(storage.keys().length, 1, "the file is retained");
+    });
+  }, { generate: blocked.generate });
+});
+
 test("R16 reopen, reconfirm and re-decide during generation: the candidate is outdated because the bound ids differ", async () => {
   const blocked = blockedGenerator();
   await withReports(async () => {
