@@ -1,11 +1,11 @@
 import { acceptedEvidenceResponseSchema, apiErrorSchema, conformityDecisionRequestSchema, conformityDecisionSchema, conformityHistoryItemSchema, authenticationRequestSchema, authenticationResponseSchema, confirmedSummarySchema, summaryReopeningRequestSchema, summaryReopeningSchema, summaryHistoryItemSchema, createDeactivatedAssigneeRecoveryRequestSchema, createEmployeeRequestSchema, createTaskRequestSchema, deactivatedAssigneeRecoveryResponseSchema, employeeCredentialResponseSchema, employeeListResponseSchema, employeeTaskAuditVersionSchema, employeeTaskRecoverySeedResponseSchema, employeeTaskListQuerySchema, employeeTaskListResponseSchema, employeeTaskResponseSchema, healthResponseSchema, insightDecisionRequestSchema, insightDecisionResponseSchema, manualInsightRequestSchema, manualInsightResponseSchema, passwordReplacementRequestSchema, reassignUnstartedTaskRequestSchema, reassignUnstartedTaskResponseSchema, replacementTaskResponseSchema, sessionResponseSchema, summaryConfirmationRequestSchema, summaryDraftRequestSchema, summaryDraftResponseSchema, syncOperationAcceptedSchema, syncOperationConflictSchema, syncOperationRejectedSchema, syncOperationRequestSchema, taskAssigneeListResponseSchema, taskListResponseSchema, taskResponseSchema } from "@cetem-qc/schemas/api/v1";
 import type { ConformityDecision, ConformityDecisionRequest, ConformityHistoryItem, ConformityOutcome, AcceptedEvidenceResponse, AuthenticationRequest, AuthenticationResponse, ConfirmedSummary, SummaryReopening, SummaryReopeningRequest, SummaryHistoryItem, CreateDeactivatedAssigneeRecoveryRequest, CreateEmployeeRequest, CreateTaskRequest, DeactivatedAssigneeRecoveryResponse, EmployeeCredentialResponse, EmployeeListResponse, EmployeeTaskAuditVersion, EmployeeTaskRecoverySeedResponse, EmployeeTaskListResponse, EmployeeTaskResponse, HealthResponse, InsightDecisionRequest, InsightDecisionResponse, ManualInsightRequest, ManualInsightResponse, PasswordReplacementRequest, ReassignUnstartedTaskRequest, ReassignUnstartedTaskResponse, ReplacementTaskResponse, SummaryConfirmationRequest, SummaryDraftResponse, SyncOperationAccepted, SyncOperationConflict, SyncOperationRejected, SyncOperationRequest, TaskListResponse, TaskResponse } from "@cetem-qc/schemas/api/v1";
 
-import { reportCandidateListSchema, reportCandidateRequestSchema, reportCandidateSchema } from "@cetem-qc/schemas/api/v1";
-import type { ReportCandidate, ReportCandidateList, ReportCandidateRequest } from "@cetem-qc/schemas/api/v1";
+import { reportCandidateListSchema, reportCandidateRequestSchema, reportCandidateSchema, storedFileListSchema, storedFileSchema } from "@cetem-qc/schemas/api/v1";
+import type { ReportCandidate, ReportCandidateList, ReportCandidateRequest, StoredFile, StoredFileList } from "@cetem-qc/schemas/api/v1";
 
-export { reportCandidateListSchema, reportCandidateSchema };
-export type { ReportCandidate, ReportCandidateList, ReportCandidateRequest };
+export { reportCandidateListSchema, reportCandidateSchema, storedFileListSchema, storedFileSchema };
+export type { ReportCandidate, ReportCandidateList, ReportCandidateRequest, StoredFile, StoredFileList };
 
 export { conformityDecisionSchema, conformityHistoryItemSchema,acceptedEvidenceResponseSchema, confirmedSummarySchema, summaryReopeningSchema, summaryHistoryItemSchema,insightDecisionResponseSchema, manualInsightResponseSchema, replacementTaskResponseSchema, summaryDraftResponseSchema, taskListResponseSchema };
 export type { ConformityDecision, ConformityDecisionRequest, ConformityHistoryItem, ConformityOutcome, ConfirmedSummary, SummaryReopening, SummaryHistoryItem,SummaryConfirmationRequest, SummaryDraftResponse, AcceptedEvidenceResponse, InsightDecisionRequest, InsightDecisionResponse, ManualInsightRequest, ManualInsightResponse, CreateDeactivatedAssigneeRecoveryRequest, CreateTaskRequest, DeactivatedAssigneeRecoveryResponse, EmployeeTaskAuditVersion, EmployeeTaskRecoverySeedResponse, EmployeeTaskListResponse, EmployeeTaskResponse, ReassignUnstartedTaskRequest, ReassignUnstartedTaskResponse, ReplacementTaskResponse, SyncOperationAccepted, SyncOperationConflict, SyncOperationRejected, SyncOperationRequest, TaskListResponse };
@@ -99,6 +99,33 @@ export type ListReportCandidatesOutcome =
   | { status: 200; body: ReportCandidateList }
   | { status: 403; code: "FORBIDDEN"; message: string }
   | { status: 404; code: "TASK_NOT_FOUND"; message: string }
+  | { status: 500; code: "INTERNAL_ERROR"; message: string };
+
+/** The documented outcomes of a manual PDF upload; any other status or body throws `ApiRequestError`. */
+export type UploadManualPdfOutcome =
+  | { status: 200 | 201; body: StoredFile }
+  | { status: 403; code: "FORBIDDEN"; message: string }
+  | { status: 404; code: "TASK_NOT_FOUND"; message: string }
+  | { status: 409; code: "SUMMARY_NOT_CONFIRMED" | "CONFORMITY_NOT_DECIDED" | "FILE_ATTEMPT_CONFLICT"; message: string }
+  | { status: 413; code: "FILE_TOO_LARGE"; message: string }
+  | { status: 415; code: "UNSUPPORTED_FILE_TYPE"; message: string }
+  | { status: 422; code: "VALIDATION_FAILED"; message: string }
+  | { status: 500; code: "INTERNAL_ERROR"; message: string }
+  | { status: 502; code: "FILE_STORAGE_FAILED"; message: string };
+
+/** The documented outcomes of listing the uploaded PDF files; any other status or body throws `ApiRequestError`. */
+export type ListManualPdfFilesOutcome =
+  | { status: 200; body: StoredFileList }
+  | { status: 403; code: "FORBIDDEN"; message: string }
+  | { status: 404; code: "TASK_NOT_FOUND"; message: string }
+  | { status: 500; code: "INTERNAL_ERROR"; message: string };
+
+/** The documented outcomes of re-scanning a PDF file; any other status or body throws `ApiRequestError`. */
+export type RetryManualPdfScanOutcome =
+  | { status: 200; body: StoredFile }
+  | { status: 403; code: "FORBIDDEN"; message: string }
+  | { status: 404; code: "TASK_NOT_FOUND"; message: string }
+  | { status: 409; code: "FILE_NOT_RESCANNABLE"; message: string }
   | { status: 500; code: "INTERNAL_ERROR"; message: string };
 
 export class ApiRequestError extends Error {
@@ -400,6 +427,77 @@ export function createApiClient({ baseUrl, fetch: fetcher = fetch, sessionToken:
         const { code, message } = error.data.error;
         if (status === 403 && code === "FORBIDDEN") return { status, code, message };
         if (status === 404 && code === "TASK_NOT_FOUND") return { status, code, message };
+        if (status === 500 && code === "INTERNAL_ERROR") return { status, code, message };
+      }
+      throw toRequestError(status, payload.data);
+    },
+    /** Uploads a manually prepared PDF (Responsable only). The raw bytes are the body; the file is never official. */
+    async uploadManualPdfFile(taskId: string, input: { attemptId: string; fileName?: string; bytes: Uint8Array }): Promise<UploadManualPdfOutcome> {
+      const payload = await request(`/tasks/${encodeURIComponent(taskId)}/pdf-files`, {
+        method: "POST",
+        headers: {
+          accept: "application/json", "content-type": "application/pdf", "x-attempt-id": input.attemptId,
+          ...(input.fileName ? { "x-file-name": encodeURIComponent(input.fileName) } : {}), ...sessionHeaders(),
+        },
+        body: input.bytes as BodyInit, cache: "no-store",
+      });
+      const status = payload.response.status;
+      if (status === 200 || status === 201) {
+        const parsed = storedFileSchema.safeParse(payload.data);
+        if (parsed.success) return { status, body: parsed.data };
+        throw toRequestError(status, payload.data);
+      }
+      const error = apiErrorSchema.safeParse(payload.data);
+      if (error.success) {
+        const { code, message } = error.data.error;
+        if (status === 403 && code === "FORBIDDEN") return { status, code, message };
+        if (status === 404 && code === "TASK_NOT_FOUND") return { status, code, message };
+        if (status === 409 && (code === "SUMMARY_NOT_CONFIRMED" || code === "CONFORMITY_NOT_DECIDED" || code === "FILE_ATTEMPT_CONFLICT")) return { status, code, message };
+        if (status === 413 && code === "FILE_TOO_LARGE") return { status, code, message };
+        if (status === 415 && code === "UNSUPPORTED_FILE_TYPE") return { status, code, message };
+        if (status === 422 && code === "VALIDATION_FAILED") return { status, code, message };
+        if (status === 500 && code === "INTERNAL_ERROR") return { status, code, message };
+        if (status === 502 && code === "FILE_STORAGE_FAILED") return { status, code, message };
+      }
+      throw toRequestError(status, payload.data);
+    },
+    /** Lists the uploaded PDF files of a task, newest first (Responsable only). */
+    async listManualPdfFiles(taskId: string): Promise<ListManualPdfFilesOutcome> {
+      const payload = await request(`/tasks/${encodeURIComponent(taskId)}/pdf-files`, {
+        method: "GET", headers: { accept: "application/json", ...sessionHeaders() }, cache: "no-store",
+      });
+      const status = payload.response.status;
+      if (status === 200) {
+        const parsed = storedFileListSchema.safeParse(payload.data);
+        if (parsed.success) return { status, body: parsed.data };
+        throw toRequestError(status, payload.data);
+      }
+      const error = apiErrorSchema.safeParse(payload.data);
+      if (error.success) {
+        const { code, message } = error.data.error;
+        if (status === 403 && code === "FORBIDDEN") return { status, code, message };
+        if (status === 404 && code === "TASK_NOT_FOUND") return { status, code, message };
+        if (status === 500 && code === "INTERNAL_ERROR") return { status, code, message };
+      }
+      throw toRequestError(status, payload.data);
+    },
+    /** Re-scans a scan-failed or scan-pending PDF file (Responsable only). */
+    async retryManualPdfScan(taskId: string, fileId: string): Promise<RetryManualPdfScanOutcome> {
+      const payload = await request(`/tasks/${encodeURIComponent(taskId)}/pdf-files/${encodeURIComponent(fileId)}/scan-retries`, {
+        method: "POST", headers: { accept: "application/json", ...sessionHeaders() }, cache: "no-store",
+      });
+      const status = payload.response.status;
+      if (status === 200) {
+        const parsed = storedFileSchema.safeParse(payload.data);
+        if (parsed.success) return { status, body: parsed.data };
+        throw toRequestError(status, payload.data);
+      }
+      const error = apiErrorSchema.safeParse(payload.data);
+      if (error.success) {
+        const { code, message } = error.data.error;
+        if (status === 403 && code === "FORBIDDEN") return { status, code, message };
+        if (status === 404 && code === "TASK_NOT_FOUND") return { status, code, message };
+        if (status === 409 && code === "FILE_NOT_RESCANNABLE") return { status, code, message };
         if (status === 500 && code === "INTERNAL_ERROR") return { status, code, message };
       }
       throw toRequestError(status, payload.data);

@@ -14,6 +14,7 @@ import { registerEvidenceRoutes } from "./routes/register-evidence-routes.js";
 import { registerSummaryRoutes } from "./routes/register-summary-routes.js";
 import { registerConformityRoutes } from "./routes/register-conformity-routes.js";
 import { registerReportRoutes } from "./routes/register-report-routes.js";
+import { registerFileRoutes } from "./routes/register-file-routes.js";
 
 export function createApp(pool?: Pool) {
   registerDefaultSummaryReopenParticipants();
@@ -27,7 +28,11 @@ export function createApp(pool?: Pool) {
   const syncOperationJson = express.json({ limit: "256kb" });
   // Case-insensitive like Express routing, so every path that reaches the two routes gets their limit.
   const syncOperationPath = /^\/api\/v1\/employee\/tasks\/[^/]+\/(?:draft-syncs|submissions)\/?$/i;
+  // The raw PDF upload (Story 11.2) is parsed by its own route after the role, ownership, size and type checks, so a
+  // body of any declared type must reach it unparsed and be answered there (415 instead of a JSON syntax error).
+  const binaryUploadPath = /^\/api\/v1\/tasks\/[^/]+\/pdf-files\/?$/i;
   app.use((request, response, next) => {
+    if (request.method === "POST" && binaryUploadPath.test(request.path)) { next(); return; }
     const parser = request.method === "POST" && syncOperationPath.test(request.path) ? syncOperationJson : defaultJson;
     parser(request, response, next);
   });
@@ -86,6 +91,7 @@ export function createApp(pool?: Pool) {
   registerSummaryRoutes(v1, deps);
   registerConformityRoutes(v1, deps);
   registerReportRoutes(v1, deps);
+  registerFileRoutes(v1, deps);
 
   app.use("/api/v1", v1);
   return app;

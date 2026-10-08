@@ -900,7 +900,7 @@ So that an unsafe or incomplete file cannot become official.
 **And** the `files` capability stores the binary in private object storage and metadata/references in PostgreSQL, performs server-side type/structure/size validation and coordinates malware scanning
 **And** failed/unavailable/incomplete scanning never counts as clean; this story reports validated/scanned file outcomes through a files-owned contract and does not create report business state.
 
-**Traceability:** SEC-008, SEC-010, AD-9, UX-DR2 (report-panel, alert-message, loading-state), UX-DR10, OD-04. **Dependency:** none for the resolved file security baseline.
+**Traceability:** spec `_bmad-output/specs/spec-11-2-validate-scan-and-store-a-manual-pdf-file/SPEC.md`; SEC-008, SEC-010, AD-9, UX-DR2 (report-panel, alert-message, loading-state), UX-DR10, OD-04. **Dependency:** none for the resolved file security baseline (reuses the 11.1 `files` storage port).
 
 ### Story 11.3: Create a report candidate from a ready PDF
 

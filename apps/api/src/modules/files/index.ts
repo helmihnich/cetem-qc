@@ -1,4 +1,13 @@
-// Public surface of the files module: private object storage only (Story 11.1). It imports no business module.
+// Public surface of the files module: private object storage (Story 11.1) and manual PDF intake (Story 11.2).
+// It imports no business module and owns no report meaning.
+export { storePdfFile, rescanPdfFile, fileCommandTestSeams } from "./commands/store-pdf-file.js";
+export type { FileCommandDeps, StorePdfFileOutcome, RescanPdfFileOutcome } from "./commands/store-pdf-file.js";
+export { listStoredFiles, getReadyFile, readStoredFile, getReadyPdfFile } from "./queries/stored-files.js";
+export type { StoredFile, StoredFileStatus, ReadyFile } from "./queries/stored-files.js";
+export type { PdfScanner, ScanResult } from "./ports/pdf-scanner.js";
+export { createPdfScanner, resolvePdfMaxBytes } from "./config.js";
+export { validatePdf, PDF_ABSOLUTE_MAX_BYTES } from "./validators/pdf.js";
+export type { PdfValidation } from "./validators/pdf.js";
 import { createLocalObjectStorage } from "./adapters/local-object-storage.js";
 import { createMemoryObjectStorage } from "./adapters/memory-object-storage.js";
 import type { ObjectStorage } from "./ports/object-storage.js";

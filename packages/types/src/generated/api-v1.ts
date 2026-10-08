@@ -544,6 +544,70 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/tasks/{taskId}/pdf-files": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the uploaded PDF files of a task with their validation and scan status, newest first
+         * @description Responsable only, owning team only. No report eligibility is needed, so the history stays visible after a reopening. A malformed, unknown or another team's task all get the same 404.
+         */
+        get: operations["listManualPdfFiles"];
+        put?: never;
+        /**
+         * Upload a manually prepared PDF report for validation, scanning and private storage
+         * @description Responsable only, for a task whose summary is confirmed and whose conformity decision is current. The body is the raw PDF (Content-Type application/pdf, 20 MB maximum by default); X-Attempt-Id is a client-generated UUID and X-File-Name an optional display name. The file is validated on the server (the declared type is never trusted) and scanned through the configured antivirus adapter. Any file that reached validation returns a StoredFile with its status, including rejected, quarantined and scan-failed ones. The same attempt for the same task replays the stored file (200). A stored file is never official in this story and no report property exists.
+         */
+        post: operations["uploadManualPdfFile"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tasks/{taskId}/pdf-files/{fileId}/content": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Download a ready PDF file for inspection
+         * @description Responsable only, owning team only, and only for a file whose status is ready. The response is an attachment with Cache-Control no-store and X-Content-Type-Options nosniff. Any other status, an unknown, malformed or another team's file gets the same 404 as an unknown task.
+         */
+        get: operations["downloadManualPdfFile"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tasks/{taskId}/pdf-files/{fileId}/scan-retries": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Re-scan a PDF file whose scan failed or is pending
+         * @description Responsable only, owning team only. Only a scan-failed or scan-pending file can be re-scanned; the new scan result is appended. A quarantined, rejected, storage-failed or ready file answers 409.
+         */
+        post: operations["retryManualPdfScan"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -966,6 +1030,39 @@ export interface components {
         ReportCandidateList: {
             candidates: components["schemas"]["ReportCandidate"][];
         };
+        /** @enum {string} */
+        StoredFileStatus: "rejected" | "quarantined" | "scan-pending" | "scan-failed" | "storage-failed" | "ready";
+        /** @description A manually prepared PDF with its derived validation and scan status. It is never official in this story: no storage key, official designation or report property exists. */
+        StoredFile: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            attemptId: string;
+            status: components["schemas"]["StoredFileStatus"];
+            fileName: string;
+            byteSize: number;
+            sha256: string;
+            /** Format: date-time */
+            uploadedAt: string;
+            uploadedBy: {
+                id: string;
+                displayName: string;
+            };
+            validation: {
+                /** @enum {string} */
+                result: "passed" | "rejected" | "quarantined";
+                class: null | string;
+            };
+            scan: {
+                /** @enum {string} */
+                result: "clean" | "threat" | "unavailable" | "not-performed" | "pending";
+                scanner: null | ("none" | "clamav");
+                checkedAt: null | string;
+            };
+        };
+        StoredFileList: {
+            files: components["schemas"]["StoredFile"][];
+        };
         SummaryHistoryItem: {
             version: number;
             text: string;
@@ -1211,7 +1308,7 @@ export interface components {
             /** @constant */
             version: "v1";
         };
-        /** @description Error envelope. Codes include VALIDATION_ERROR, AUTHENTICATION_FAILED, FORBIDDEN, TASK_NOT_FOUND, PAYLOAD_TOO_LARGE, IDEMPOTENCY_KEY_REUSED, AUDIT_NOT_ACCEPTED, REPLACEMENT_ALREADY_EXISTS, TASK_ASSIGNEE_UNAVAILABLE, AI_UNAVAILABLE, SUMMARY_ALREADY_CONFIRMED, SUMMARY_CONFIRMED, SUMMARY_NOT_CONFIRMED, SUMMARY_DESIGNATED, CONFORMITY_ALREADY_DECIDED, CONFORMITY_NOT_DECIDED, REPORT_GENERATION_FAILED, REPORT_INPUTS_CHANGED, REPORT_ATTEMPT_CONFLICT and INTERNAL_ERROR. */
+        /** @description Error envelope. Codes include VALIDATION_ERROR, AUTHENTICATION_FAILED, FORBIDDEN, TASK_NOT_FOUND, PAYLOAD_TOO_LARGE, IDEMPOTENCY_KEY_REUSED, AUDIT_NOT_ACCEPTED, REPLACEMENT_ALREADY_EXISTS, TASK_ASSIGNEE_UNAVAILABLE, AI_UNAVAILABLE, SUMMARY_ALREADY_CONFIRMED, SUMMARY_CONFIRMED, SUMMARY_NOT_CONFIRMED, SUMMARY_DESIGNATED, CONFORMITY_ALREADY_DECIDED, CONFORMITY_NOT_DECIDED, REPORT_GENERATION_FAILED, REPORT_INPUTS_CHANGED, REPORT_ATTEMPT_CONFLICT, FILE_TOO_LARGE, UNSUPPORTED_FILE_TYPE, FILE_STORAGE_FAILED, FILE_ATTEMPT_CONFLICT, FILE_NOT_RESCANNABLE and INTERNAL_ERROR. */
         ApiError: {
             error: {
                 code: string;
@@ -3369,6 +3466,310 @@ export interface operations {
                 };
             };
             /** @description The stored file could not be read (INTERNAL_ERROR) */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    listManualPdfFiles: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                taskId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Files, newest first (Cache-Control no-store) */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StoredFileList"];
+                };
+            };
+            /** @description Session rejected */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Responsable role required (FORBIDDEN) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Malformed */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Files could not be loaded (INTERNAL_ERROR) */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    uploadManualPdfFile: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-Attempt-Id": string;
+                "X-File-Name"?: string;
+            };
+            path: {
+                taskId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/pdf": string;
+            };
+        };
+        responses: {
+            /** @description Replay of an attempt that already stored a file (Cache-Control no-store) */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StoredFile"];
+                };
+            };
+            /** @description The file was recorded with its validation and scan status (Cache-Control no-store) */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StoredFile"];
+                };
+            };
+            /** @description Session rejected */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Responsable role required (FORBIDDEN) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Malformed */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Summary not confirmed (SUMMARY_NOT_CONFIRMED) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description The file is larger than the configured limit (FILE_TOO_LARGE) */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description The media type is not application/pdf (UNSUPPORTED_FILE_TYPE) */
+            415: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Empty body or missing or invalid X-Attempt-Id (VALIDATION_FAILED) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description The file could not be processed (INTERNAL_ERROR) */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description The binary could not be stored; retry with a new attempt ID (FILE_STORAGE_FAILED) */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    downloadManualPdfFile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                taskId: string;
+                fileId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The PDF (Content-Disposition attachment, Cache-Control no-store, X-Content-Type-Options nosniff) */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/pdf": string;
+                };
+            };
+            /** @description Session rejected */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Responsable role required (FORBIDDEN) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Malformed */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description The stored file could not be read (INTERNAL_ERROR) */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    retryManualPdfScan: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                taskId: string;
+                fileId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The file with its new status (Cache-Control no-store) */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StoredFile"];
+                };
+            };
+            /** @description Session rejected */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Responsable role required (FORBIDDEN) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Malformed */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description The file cannot be re-scanned (FILE_NOT_RESCANNABLE) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description The scan could not be recorded (INTERNAL_ERROR) */
             500: {
                 headers: {
                     [name: string]: unknown;

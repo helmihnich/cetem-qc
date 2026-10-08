@@ -44,6 +44,8 @@ type ConformityHistoryItemContract = apiV1Components["schemas"]["ConformityHisto
 type ReportCandidateRequestContract = apiV1Operations["generateReportCandidate"]["requestBody"]["content"]["application/json"];
 type ReportCandidateContract = apiV1Operations["generateReportCandidate"]["responses"][201]["content"]["application/json"];
 type ReportCandidateListContract = apiV1Operations["listReportCandidates"]["responses"][200]["content"]["application/json"];
+type StoredFileContract = apiV1Operations["uploadManualPdfFile"]["responses"][201]["content"]["application/json"];
+type StoredFileListContract = apiV1Operations["listManualPdfFiles"]["responses"][200]["content"]["application/json"];
 type EmployeeTaskListResponseContract =apiV1Operations["listAssignedEmployeeTasks"]["responses"][200]["content"]["application/json"];
 type EmployeeTaskResponseContract = apiV1Operations["getAssignedEmployeeTask"]["responses"][200]["content"]["application/json"];
 
@@ -282,6 +284,27 @@ export const reportCandidateSchema: z.ZodType<ReportCandidateContract> = z.objec
 export const reportCandidateListSchema: z.ZodType<ReportCandidateListContract> = z.object({
   candidates: z.array(reportCandidateSchema),
 }).strict();
+/** Story 11.2: a manually prepared PDF with its derived status. It is never official: no storage key or report property exists. */
+export const storedFileStatusSchema = z.enum(["rejected", "quarantined", "scan-pending", "scan-failed", "storage-failed", "ready"]);
+export const storedFileSchema: z.ZodType<StoredFileContract> = z.object({
+  id: z.string().uuid(),
+  attemptId: z.string().uuid(),
+  status: storedFileStatusSchema,
+  fileName: z.string(),
+  byteSize: z.number().int().min(0),
+  sha256: z.string().regex(/^[0-9a-f]{64}$/),
+  uploadedAt: z.string().datetime(),
+  uploadedBy: summaryActorSchema,
+  validation: z.object({ result: z.enum(["passed", "rejected", "quarantined"]), class: z.string().nullable() }).strict(),
+  scan: z.object({
+    result: z.enum(["clean", "threat", "unavailable", "not-performed", "pending"]),
+    scanner: z.enum(["none", "clamav"]).nullable(),
+    checkedAt: z.string().datetime().nullable(),
+  }).strict(),
+}).strict();
+export const storedFileListSchema: z.ZodType<StoredFileListContract> = z.object({
+  files: z.array(storedFileSchema),
+}).strict();
 export const acceptedEvidenceResponseSchema: z.ZodType<AcceptedEvidenceResponseContract> = z.object({
   conformityDecision: conformityDecisionSchema.nullable(),
   conformityHistory: z.array(conformityHistoryItemSchema),
@@ -423,6 +446,9 @@ export type ReportCandidateRequest = z.infer<typeof reportCandidateRequestSchema
 export type ReportCandidateStatus = z.infer<typeof reportCandidateStatusSchema>;
 export type ReportCandidate = z.infer<typeof reportCandidateSchema>;
 export type ReportCandidateList = z.infer<typeof reportCandidateListSchema>;
+export type StoredFileStatus = z.infer<typeof storedFileStatusSchema>;
+export type StoredFile = z.infer<typeof storedFileSchema>;
+export type StoredFileList = z.infer<typeof storedFileListSchema>;
 export type SummaryDraftRequest = z.infer<typeof summaryDraftRequestSchema>;
 export type SummaryDraftResponse = z.infer<typeof summaryDraftResponseSchema>;
 export type EmployeeTaskListResponse = z.infer<typeof employeeTaskListResponseSchema>;
