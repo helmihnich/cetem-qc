@@ -932,7 +932,7 @@ So that finalization is tied to the confirmed summary and human decision.
 **And** candidates based on stale summary/decision/audit versions are Outdated/Superseded and cannot be designated; pre-designation candidate replacement preserves history
 **And** official designation locks the completed workflow/report and no later in-place replacement or mutation is allowed; both human conformity outcomes can complete.
 
-**Traceability:** FR-014, FR-035, DR-005, DR-009, AD-8, AD-9, UX-DR10. **Dependency:** DEP-03 blocks final report-content acceptance; lifecycle and freshness behavior can be implemented against the defined bindings.
+**Traceability:** spec `_bmad-output/specs/spec-11-4-designate-exactly-one-current-report-official/SPEC.md`; FR-014, FR-035, DR-005, DR-009, AD-8, AD-9, UX-DR10. **Dependency:** Stories 10.1–10.4, 11.1–11.3 (done); registers the real reopen participant (Epic 10 retro F5); DEP-03 blocks final report-content acceptance; lifecycle and freshness behavior can be implemented against the defined bindings.
 
 ### Story 11.5: View and download authorized completed history
 

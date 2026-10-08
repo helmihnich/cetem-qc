@@ -95,6 +95,7 @@ const OTHER_MUTATING_ROUTES = [
   "POST /tasks/:taskId/summary-reopening",
   "POST /tasks/:taskId/conformity-decision",
   "POST /tasks/:taskId/report-candidates",
+  "POST /tasks/:taskId/report-candidates/:candidateId/designate",
   "POST /tasks/:taskId/pdf-files",
   "POST /tasks/:taskId/pdf-files/:fileId/report-candidate",
   "POST /tasks/:taskId/pdf-files/:fileId/scan-retries",
@@ -204,6 +205,8 @@ test("F5 every other mutating route, called by both roles, leaves the accepted e
       ["POST", () => `/tasks/${taskId}/conformity-decision`, { outcome: "machine-conforme" }],
       // Story 11.1: a report candidate request (refused here: no confirmed summary) writes nothing; the accepted evidence stays unchanged.
       ["POST", () => `/tasks/${taskId}/report-candidates`, { attemptId: randomUUID() }],
+      // Story 11.4: designating an unknown candidate writes nothing; the accepted evidence stays unchanged.
+      ["POST", () => `/tasks/${taskId}/report-candidates/${randomUUID()}/designate`, {}],
       // Story 11.2: a PDF upload (a JSON body is refused with 415) and a rescan of an unknown file write nothing; the accepted evidence stays unchanged.
       ["POST", () => `/tasks/${taskId}/pdf-files`, { attemptId: randomUUID() }],
       // Story 11.3: attaching an unknown file as a report candidate writes nothing; the accepted evidence stays unchanged.
@@ -230,7 +233,7 @@ test("F5 every other mutating route, called by both roles, leaves the accepted e
         assert.equal(await evidenceFingerprint(pool, taskId), before, `${method} ${path()}`);
       }
     }
-    const routeOf = (line: string) => line.replace(/\/tasks\/[0-9a-f-]{36}\//, "/tasks/:taskId/").replace(/\/pdf-files\/[0-9a-f-]{36}\//, "/pdf-files/:fileId/").replace(/\/[0-9a-f-]{36}\//, "/:employeeId/");
+    const routeOf = (line: string) => line.replace(/\/tasks\/[0-9a-f-]{36}\//, "/tasks/:taskId/").replace(/\/pdf-files\/[0-9a-f-]{36}\//, "/pdf-files/:fileId/").replace(/\/report-candidates\/[0-9a-f-]{36}\//, "/report-candidates/:candidateId/").replace(/\/[0-9a-f-]{36}\//, "/:employeeId/");
     const called = new Set(statuses.map((line) => routeOf(line.split(" ").slice(1, 3).join(" "))));
     assert.deepEqual([...called].sort(), [...OTHER_MUTATING_ROUTES].sort());
     // The Responsable's routes really wrote, so the unchanged fingerprint is not only the result of refusals.

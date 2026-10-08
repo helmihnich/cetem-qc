@@ -132,6 +132,7 @@ const attachRefusals: Array<[number, string, string]> = [
   [409, "REPORT_FILE_NOT_READY", fr.pdfFile.candidateFileNotReady],
   [409, "REPORT_FILE_ALREADY_ATTACHED", fr.pdfFile.candidateAlreadyAttached],
   [409, "REPORT_ATTEMPT_CONFLICT", fr.pdfFile.invalid],
+  [409, "REPORT_OFFICIAL_DESIGNATED", fr.report.designate.officialDesignated],
   [404, "TASK_NOT_FOUND", fr.pdfFile.candidateNotFound],
   [422, "VALIDATION_FAILED", fr.pdfFile.invalid],
 ];
@@ -167,7 +168,7 @@ export async function attachPdfCandidateOnServer(taskId: string, fileId: string,
 
 /** A file has a current candidate while a ready candidate built from it exists in the list. */
 export const hasCurrentCandidate = (candidates: readonly ReportCandidate[], fileId: string) =>
-  candidates.some((candidate) => candidate.source?.fileId === fileId && candidate.status === "ready");
+  candidates.some((candidate) => candidate.source?.fileId === fileId && (candidate.status === "ready" || candidate.status === "official"));
 
 export type PdfFilesSectionProps = {
   taskId: string;
@@ -176,6 +177,8 @@ export type PdfFilesSectionProps = {
   files: StoredFile[];
   /** The report candidates of the task, to tell which ready files already have a current candidate. */
   candidates?: ReportCandidate[];
+  /** True once an official report is designated: candidate creation is no longer offered. */
+  official?: boolean;
   /** The file whose candidate is being created, or null. */
   attachingId?: string | null;
   pending?: boolean;
@@ -191,9 +194,9 @@ export type PdfFilesSectionProps = {
   onAttach?: (fileId: string) => void;
 };
 
-function FileItem({ taskId, file, rescanning, onRescan, candidate, eligible, attaching, onAttach }: {
+function FileItem({ taskId, file, rescanning, onRescan, candidate, eligible, attaching, onAttach, official }: {
   taskId: string; file: StoredFile; rescanning: boolean; onRescan?: (fileId: string) => void;
-  candidate: boolean; eligible: boolean; attaching: boolean; onAttach?: (fileId: string) => void;
+  candidate: boolean; eligible: boolean; attaching: boolean; onAttach?: (fileId: string) => void; official: boolean;
 }) {
   const reason = reasonOf(file);
   return <li className="insight-item pdf-file" data-status={file.status}>
@@ -210,7 +213,7 @@ function FileItem({ taskId, file, rescanning, onRescan, candidate, eligible, att
     {file.scan.result === "not-performed" && <>{" · "}<span className="field-hint">{fr.pdfFile.scanNote}</span></>}
     {file.status === "ready" && <>{" · "}<a href={pdfDownloadUrl(taskId, file.id)} download>{fr.pdfFile.download}</a></>}
     {file.status === "ready" && candidate && <>{" · "}<strong>{fr.pdfFile.candidateCreated}</strong></>}
-    {file.status === "ready" && !candidate && eligible && <>
+    {file.status === "ready" && !candidate && eligible && !official && <>
       {" · "}
       <button className="secondary-button" type="button" disabled={attaching} aria-busy={attaching} onClick={() => onAttach?.(file.id)}>
         {attaching ? fr.pdfFile.creatingCandidate : fr.pdfFile.createCandidate}
@@ -226,7 +229,7 @@ function FileItem({ taskId, file, rescanning, onRescan, candidate, eligible, att
 }
 
 /** W5 « Rapport PDF manuel » area: the import control only when eligible, the files with their status, the candidate-creation control only on a ready file when eligible, never a designation control. */
-export function PdfFilesSection({ taskId, eligible, files, candidates = [], attachingId = null, pending = false, rescanningId = null, hasSelection = false, message = null, onSelect, onUpload, onRescan, onAttach }: PdfFilesSectionProps) {
+export function PdfFilesSection({ taskId, eligible, files, candidates = [], official = false, attachingId = null, pending = false, rescanningId = null, hasSelection = false, message = null, onSelect, onUpload, onRescan, onAttach }: PdfFilesSectionProps) {
   return <section className="evidence-report pdf-files" aria-labelledby="pdf-files-heading">
     <h3 id="pdf-files-heading">{fr.pdfFile.heading}</h3>
     {message && <p className="field-error" role="alert">{message}</p>}
@@ -244,7 +247,7 @@ export function PdfFilesSection({ taskId, eligible, files, candidates = [], atta
       : <p className="field-hint">{fr.pdfFile.notEligible}</p>}
     {files.length > 0 && <ul className="report-candidate-list">
       {files.map((file) => <FileItem key={file.id} taskId={taskId} file={file} rescanning={rescanningId === file.id} onRescan={onRescan}
-        candidate={hasCurrentCandidate(candidates, file.id)} eligible={eligible} attaching={attachingId === file.id} onAttach={onAttach} />)}
+        candidate={hasCurrentCandidate(candidates, file.id)} eligible={eligible} attaching={attachingId === file.id} onAttach={onAttach} official={official} />)}
     </ul>}
   </section>;
 }
@@ -336,5 +339,5 @@ export function PdfFilesPanel({ taskId, eligible, refreshKey = 0, onReloadState,
       setAttachingId(null);
     });
   };
-  return <PdfFilesSection taskId={taskId} eligible={eligible} files={files} candidates={candidates} attachingId={attachingId} pending={pending} rescanningId={rescanningId} hasSelection={selected !== null} message={message} onSelect={onSelect} onUpload={onUpload} onRescan={onRescan} onAttach={onAttach} />;
+  return <PdfFilesSection taskId={taskId} eligible={eligible} files={files} candidates={candidates} official={candidates.some((candidate) => candidate.status === "official")} attachingId={attachingId} pending={pending} rescanningId={rescanningId} hasSelection={selected !== null} message={message} onSelect={onSelect} onUpload={onUpload} onRescan={onRescan} onAttach={onAttach} />;
 }

@@ -9,6 +9,7 @@ import { getCurrentConformityDecision } from "../../conformity/index.js";
 import type { ObjectStorage } from "../../files/index.js";
 import { getSummaryState, lockTaskSummary } from "../../summaries/index.js";
 import type { ReportDocumentGenerator } from "../ports/report-document-generator.js";
+import { hasOfficialReport } from "../queries/official-report.js";
 import { candidateSelect, getCurrentBindings, presentCandidateRows } from "../queries/report-candidates.js";
 import type { CandidateRow, ReportCandidate, ReportFailureClass } from "../queries/report-candidates.js";
 
@@ -25,6 +26,7 @@ export type GenerateReportCandidateOutcome =
   | { type: "replayed-failed"; candidate: ReportCandidate; failureClass: ReportFailureClass }
   | { type: "inputs-changed"; candidate: ReportCandidate }
   | { type: "not-found" }
+  | { type: "official-designated" }
   | { type: "not-confirmed" }
   | { type: "not-decided" }
   | { type: "attempt-conflict" }
@@ -132,6 +134,7 @@ async function bindCandidate(
   const replayed = await replay();
   if (replayed) return replayed;
 
+  if (await hasOfficialReport(transaction, evidence.taskId)) return { type: "official-designated" };
   const state = await getSummaryState(transaction, evidence.submissionId);
   if (state.state !== "confirmed") return { type: "not-confirmed" };
   const decision = await getCurrentConformityDecision(transaction, evidence.submissionId);

@@ -1,8 +1,8 @@
 import type express from "express";
-import { apiErrorSchema, reportCandidateListSchema, reportCandidateRequestSchema, reportCandidateSchema, reportFromPdfRequestSchema } from "@cetem-qc/schemas/api/v1";
+import { apiErrorSchema, officialReportSchema, reportCandidateListSchema, reportDesignateRequestSchema, reportCandidateRequestSchema, reportCandidateSchema, reportFromPdfRequestSchema } from "@cetem-qc/schemas/api/v1";
 import { createObjectStorage, readStoredFile } from "../modules/files/index.js";
 import type { ObjectStorage } from "../modules/files/index.js";
-import { attachPdfReportCandidate, createWordTemplateGenerator, generateReportCandidate, getReportCandidateFile, listReportCandidates, reportCommandTestSeams } from "../modules/reports/index.js";
+import { attachPdfReportCandidate, createWordTemplateGenerator, designateReportCandidate, generateReportCandidate, getOfficialReport, getReportCandidateFile, listReportCandidates, reportCommandTestSeams } from "../modules/reports/index.js";
 import type { ReportDocumentGenerator } from "../modules/reports/index.js";
 import { getAcceptedSubmissionForReview } from "../modules/audits/queries/accepted-submission.js";
 import type { findActiveSession } from "../modules/identity-auth/sessions.js";
@@ -10,6 +10,7 @@ import type { RouteDeps } from "./route-deps.js";
 
 const PDF_MEDIA_TYPE = "application/pdf";
 const DOCX_MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+const OFFICIAL_DESIGNATED_MESSAGE = "Un rapport officiel est désigné : aucun nouveau candidat ne peut être créé.";
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export function registerReportRoutes(v1: express.Router, deps: RouteDeps): void {
@@ -20,7 +21,7 @@ export function registerReportRoutes(v1: express.Router, deps: RouteDeps): void 
   const generator = () => reportCommandTestSeams.generator ?? (configuredGenerator ??= createWordTemplateGenerator());
 
   // Log lines carry the event, the actor and a fixed class only: never a task, candidate, summary or decision ID, a file name, a path or text.
-  const refuse = (actorId: string, refusalClass: "forbidden-role" | "not-found" | "not-confirmed" | "not-decided" | "attempt-conflict" | "inputs-changed" | "file-not-ready" | "already-attached") =>
+  const refuse = (actorId: string, refusalClass: "forbidden-role" | "not-found" | "not-confirmed" | "not-decided" | "attempt-conflict" | "inputs-changed" | "file-not-ready" | "already-attached" | "official-designated") =>
     console.info(JSON.stringify({ event: "report.candidate.refused", class: refusalClass, actorId }));
   const error = (response: express.Response, status: number, code: string, message: string) =>
     response.status(status).json(apiErrorSchema.parse({ error: { code, message } }));
@@ -77,6 +78,10 @@ export function registerReportRoutes(v1: express.Router, deps: RouteDeps): void 
         case "not-found":
           notFound(session.id, response);
           return;
+        case "official-designated":
+          refuse(session.id, "official-designated");
+          error(response, 409, "REPORT_OFFICIAL_DESIGNATED", OFFICIAL_DESIGNATED_MESSAGE);
+          return;
         case "not-confirmed":
           refuse(session.id, "not-confirmed");
           error(response, 409, "SUMMARY_NOT_CONFIRMED", "La synthèse n’est pas confirmée : le rapport ne peut pas être généré.");
@@ -129,6 +134,10 @@ export function registerReportRoutes(v1: express.Router, deps: RouteDeps): void 
         case "not-found":
           notFound(session.id, response);
           return;
+        case "official-designated":
+          refuse(session.id, "official-designated");
+          error(response, 409, "REPORT_OFFICIAL_DESIGNATED", OFFICIAL_DESIGNATED_MESSAGE);
+          return;
         case "not-confirmed":
           refuse(session.id, "not-confirmed");
           error(response, 409, "SUMMARY_NOT_CONFIRMED", "La synthèse n’est pas confirmée : le fichier ne peut pas devenir un candidat de rapport.");
@@ -157,6 +166,88 @@ export function registerReportRoutes(v1: express.Router, deps: RouteDeps): void 
     } catch {
       // Never log the error: it may carry stored values.
       error(response, 500, "INTERNAL_ERROR", "Le candidat de rapport n’a pas pu être créé.");
+    }
+  });
+
+  const refuseOfficial = (actorId: string, refusalClass: "forbidden-role" | "not-found" | "not-ready" | "outdated" | "already-official") =>
+    console.info(JSON.stringify({ event: "report.official.refused", class: refusalClass, actorId }));
+
+  v1.post("/tasks/:taskId/report-candidates/:candidateId/designate", async (request, response) => {
+    response.set("Cache-Control", "no-store");
+    const session = response.locals.session as NonNullable<Awaited<ReturnType<typeof findActiveSession>>>;
+    const missing = () => {
+      refuseOfficial(session.id, "not-found");
+      error(response, 404, "TASK_NOT_FOUND", "Tâche introuvable.");
+    };
+    if (session.role !== "responsable") {
+      refuseOfficial(session.id, "forbidden-role");
+      error(response, 403, "FORBIDDEN", "Accès réservé au Responsable de l’équipe.");
+      return;
+    }
+    const taskId = String(request.params.taskId ?? "");
+    const candidateId = String(request.params.candidateId ?? "");
+    if (!UUID.test(taskId) || !UUID.test(candidateId)) { missing(); return; }
+    const parsed = reportDesignateRequestSchema.safeParse(request.body);
+    try {
+      if (!parsed.success) {
+        const probe = await getAcceptedSubmissionForReview(getPool(), session.id, taskId.toLowerCase());
+        if (!probe) missing();
+        else error(response, 422, "VALIDATION_FAILED", "Cette demande est invalide.");
+        return;
+      }
+      const outcome = await designateReportCandidate({ pool: getPool() }, session.id, taskId.toLowerCase(), candidateId.toLowerCase());
+      switch (outcome.type) {
+        case "designated":
+          console.info(JSON.stringify({ event: "report.official.designated", actorId: session.id }));
+          response.status(201).json(officialReportSchema.parse(outcome.official));
+          return;
+        case "replayed":
+          response.status(200).json(officialReportSchema.parse(outcome.official));
+          return;
+        case "not-found":
+          missing();
+          return;
+        case "not-ready":
+          refuseOfficial(session.id, "not-ready");
+          error(response, 409, "REPORT_CANDIDATE_NOT_READY", "Ce rapport n’est pas prêt : il doit être généré avant d’être désigné.");
+          return;
+        case "outdated":
+          refuseOfficial(session.id, "outdated");
+          error(response, 409, "REPORT_CANDIDATE_OUTDATED", "Les données ont changé : ce rapport est obsolète et ne peut pas être désigné.");
+          return;
+        case "already-official":
+          refuseOfficial(session.id, "already-official");
+          error(response, 409, "REPORT_ALREADY_OFFICIAL", "Un rapport officiel est déjà désigné pour ce contrôle.");
+          return;
+        case "inconsistent":
+          error(response, 500, "INTERNAL_ERROR", "Le rapport officiel n’a pas pu être désigné.");
+          return;
+      }
+    } catch {
+      // Never log the error: it may carry stored values.
+      error(response, 500, "INTERNAL_ERROR", "Le rapport officiel n’a pas pu être désigné.");
+    }
+  });
+
+  v1.get("/tasks/:taskId/official-report", async (request, response) => {
+    response.set("Cache-Control", "no-store");
+    const session = response.locals.session as NonNullable<Awaited<ReturnType<typeof findActiveSession>>>;
+    if (session.role !== "responsable") {
+      refuseOfficial(session.id, "forbidden-role");
+      error(response, 403, "FORBIDDEN", "Accès réservé au Responsable de l’équipe.");
+      return;
+    }
+    const taskId = String(request.params.taskId ?? "");
+    try {
+      const official = UUID.test(taskId) ? await getOfficialReport(getPool(), session.id, taskId.toLowerCase()) : undefined;
+      if (!official) {
+        refuseOfficial(session.id, "not-found");
+        error(response, 404, "TASK_NOT_FOUND", "Tâche introuvable.");
+        return;
+      }
+      response.status(200).json(officialReportSchema.parse(official));
+    } catch {
+      error(response, 500, "INTERNAL_ERROR", "Le rapport officiel n’a pas pu être chargé.");
     }
   });
 

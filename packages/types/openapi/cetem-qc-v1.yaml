@@ -1241,7 +1241,7 @@ paths:
         '401': { description: Session rejected, content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
         '403': { description: Responsable role required (FORBIDDEN), content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
         '404': { description: Malformed, unknown or another team's task, or no accepted submission (TASK_NOT_FOUND), content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
-        '409': { description: Summary not confirmed (SUMMARY_NOT_CONFIRMED), no current conformity decision (CONFORMITY_NOT_DECIDED), attempt used by another task (REPORT_ATTEMPT_CONFLICT) or inputs changed during generation (REPORT_INPUTS_CHANGED), content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+        '409': { description: Summary not confirmed (SUMMARY_NOT_CONFIRMED), no current conformity decision (CONFORMITY_NOT_DECIDED), attempt used by another task (REPORT_ATTEMPT_CONFLICT) inputs changed during generation (REPORT_INPUTS_CHANGED) or an official report already designated (REPORT_OFFICIAL_DESIGNATED), content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
         '422': { description: Missing or invalid attemptId, or extra property (VALIDATION_FAILED), content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
         '500': { description: Evidence inconsistent or candidate not recorded (INTERNAL_ERROR), content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
         '502': { description: Generation or storage failed; the attempt can be retried with a new attemptId (REPORT_GENERATION_FAILED), content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
@@ -1313,9 +1313,81 @@ paths:
         '401': { description: Session rejected, content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
         '403': { description: Responsable role required (FORBIDDEN), content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
         '404': { description: Malformed, unknown or another team's task or file (TASK_NOT_FOUND), content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
-        '409': { description: Summary not confirmed (SUMMARY_NOT_CONFIRMED), no current conformity decision (CONFORMITY_NOT_DECIDED), file not ready (REPORT_FILE_NOT_READY), file already a candidate for the current data (REPORT_FILE_ALREADY_ATTACHED) or attempt used elsewhere (REPORT_ATTEMPT_CONFLICT), content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+        '409': { description: Summary not confirmed (SUMMARY_NOT_CONFIRMED), no current conformity decision (CONFORMITY_NOT_DECIDED), file not ready (REPORT_FILE_NOT_READY), file already a candidate for the current data (REPORT_FILE_ALREADY_ATTACHED) attempt used elsewhere (REPORT_ATTEMPT_CONFLICT) or an official report already designated (REPORT_OFFICIAL_DESIGNATED), content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
         '422': { description: Missing or invalid attemptId, or extra property (VALIDATION_FAILED), content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
         '500': { description: Evidence inconsistent or candidate not recorded (INTERNAL_ERROR), content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+  /tasks/{taskId}/report-candidates/{candidateId}/designate:
+    post:
+      operationId: designateReportCandidate
+      summary: Designate one ready report candidate as the official report of the control
+      description: >-
+        Responsable only, owning team only. The body is an empty object. Designates one ready, current candidate (Word
+        or PDF) as the single official report of the task; the choice is final and nothing can replace it. The server
+        rechecks in one transaction that the candidate is ready and still bound to the current confirmed summary,
+        conformity decision and accepted submission, and that a PDF file is still ready. Designating the same candidate
+        again returns the stored official report (200). Either conformity outcome can be designated. A malformed,
+        unknown or another team's task or candidate all get the same 404.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: taskId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+        - name: candidateId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReportDesignateRequest'
+      responses:
+        '200':
+          description: Replay of a designation of the same candidate (Cache-Control no-store)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OfficialReport'
+        '201':
+          description: Designated official report (Cache-Control no-store)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OfficialReport'
+        '401': { description: Session rejected, content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+        '403': { description: Responsable role required (FORBIDDEN), content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+        '404': { description: Malformed, unknown or another team's task or candidate (TASK_NOT_FOUND), content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+        '409': { description: Candidate not ready (REPORT_CANDIDATE_NOT_READY), candidate outdated (REPORT_CANDIDATE_OUTDATED) or another candidate already official (REPORT_ALREADY_OFFICIAL), content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+        '422': { description: Body is not an empty object (VALIDATION_FAILED), content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+        '500': { description: Evidence inconsistent or designation not recorded (INTERNAL_ERROR), content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+  /tasks/{taskId}/official-report:
+    get:
+      operationId: getOfficialReport
+      summary: Read the official report of a task
+      description: >-
+        Responsable only, owning team only. A task without an official report, a malformed, unknown or another team's
+        task, and an own-team task without accepted submission all get the same 404.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: taskId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: The official report (Cache-Control no-store)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OfficialReport'
+        '401': { description: Session rejected, content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+        '403': { description: Responsable role required (FORBIDDEN), content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+        '404': { description: No official report, or malformed, unknown or another team's task (TASK_NOT_FOUND), content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+        '500': { description: Official report could not be loaded (INTERNAL_ERROR), content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
   /tasks/{taskId}/report-candidates/{candidateId}/file:
     get:
       operationId: downloadReportCandidateFile
@@ -2022,9 +2094,72 @@ components:
       required: [attemptId]
       properties:
         attemptId: { type: string, format: uuid }
+    ReportDesignateRequest:
+      type: object
+      additionalProperties: false
+      properties: {}
     ReportCandidateStatus:
       type: string
-      enum: [generating, ready, failed, outdated]
+      enum: [generating, ready, failed, outdated, official, superseded]
+    OfficialReport:
+      type: object
+      description: >-
+        The single official report of a control, tied to the confirmed summary and the human conformity decision. No storage key.
+      additionalProperties: false
+      required: [id, candidateId, origin, designatedAt, designatedBy, taskId, auditId, auditRevision, submissionId, bindings, template, source, file]
+      properties:
+        id: { type: string, format: uuid }
+        candidateId: { type: string, format: uuid }
+        origin:
+          type: string
+          enum: [generated-word, uploaded-pdf]
+        designatedAt: { type: string, format: date-time }
+        designatedBy:
+          type: object
+          additionalProperties: false
+          required: [id, displayName]
+          properties:
+            id: { type: string }
+            displayName: { type: string }
+        taskId: { type: string, format: uuid }
+        auditId: { type: string, format: uuid }
+        auditRevision: { type: integer, minimum: 1 }
+        submissionId: { type: string, format: uuid }
+        bindings:
+          type: object
+          additionalProperties: false
+          required: [summaryId, summaryVersion, conformityDecisionId, conformityOutcome]
+          properties:
+            summaryId: { type: string, format: uuid }
+            summaryVersion: { type: integer, minimum: 1 }
+            conformityDecisionId: { type: string, format: uuid }
+            conformityOutcome:
+              $ref: '#/components/schemas/ConformityOutcome'
+        template:
+          oneOf:
+            - type: 'null'
+            - type: object
+              additionalProperties: false
+              required: [id, version]
+              properties:
+                id: { type: string }
+                version: { type: string }
+        source:
+          oneOf:
+            - type: 'null'
+            - type: object
+              additionalProperties: false
+              required: [fileId]
+              properties:
+                fileId: { type: string, format: uuid }
+        file:
+          type: object
+          additionalProperties: false
+          required: [name, byteSize, sha256]
+          properties:
+            name: { type: string }
+            byteSize: { type: integer, minimum: 0 }
+            sha256: { type: string, pattern: '^[0-9a-f]{64}$' }
     ReportCandidate:
       type: object
       description: >-
@@ -2532,7 +2667,7 @@ components:
         Error envelope. Codes include VALIDATION_ERROR, AUTHENTICATION_FAILED, FORBIDDEN, TASK_NOT_FOUND,
         PAYLOAD_TOO_LARGE, IDEMPOTENCY_KEY_REUSED, AUDIT_NOT_ACCEPTED, REPLACEMENT_ALREADY_EXISTS,
         TASK_ASSIGNEE_UNAVAILABLE, AI_UNAVAILABLE, SUMMARY_ALREADY_CONFIRMED, SUMMARY_CONFIRMED, SUMMARY_NOT_CONFIRMED, SUMMARY_DESIGNATED, CONFORMITY_ALREADY_DECIDED, CONFORMITY_NOT_DECIDED, REPORT_GENERATION_FAILED,
-        REPORT_INPUTS_CHANGED, REPORT_ATTEMPT_CONFLICT, REPORT_FILE_NOT_READY, REPORT_FILE_ALREADY_ATTACHED, FILE_TOO_LARGE, UNSUPPORTED_FILE_TYPE, FILE_STORAGE_FAILED,
+        REPORT_INPUTS_CHANGED, REPORT_ATTEMPT_CONFLICT, REPORT_FILE_NOT_READY, REPORT_FILE_ALREADY_ATTACHED, REPORT_CANDIDATE_NOT_READY, REPORT_CANDIDATE_OUTDATED, REPORT_ALREADY_OFFICIAL, REPORT_OFFICIAL_DESIGNATED, FILE_TOO_LARGE, UNSUPPORTED_FILE_TYPE, FILE_STORAGE_FAILED,
         FILE_ATTEMPT_CONFLICT, FILE_NOT_RESCANNABLE and INTERNAL_ERROR.
       required: [error]
       properties:

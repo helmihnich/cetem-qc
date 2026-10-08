@@ -1,11 +1,11 @@
 import { acceptedEvidenceResponseSchema, apiErrorSchema, conformityDecisionRequestSchema, conformityDecisionSchema, conformityHistoryItemSchema, authenticationRequestSchema, authenticationResponseSchema, confirmedSummarySchema, summaryReopeningRequestSchema, summaryReopeningSchema, summaryHistoryItemSchema, createDeactivatedAssigneeRecoveryRequestSchema, createEmployeeRequestSchema, createTaskRequestSchema, deactivatedAssigneeRecoveryResponseSchema, employeeCredentialResponseSchema, employeeListResponseSchema, employeeTaskAuditVersionSchema, employeeTaskRecoverySeedResponseSchema, employeeTaskListQuerySchema, employeeTaskListResponseSchema, employeeTaskResponseSchema, healthResponseSchema, insightDecisionRequestSchema, insightDecisionResponseSchema, manualInsightRequestSchema, manualInsightResponseSchema, passwordReplacementRequestSchema, reassignUnstartedTaskRequestSchema, reassignUnstartedTaskResponseSchema, replacementTaskResponseSchema, sessionResponseSchema, summaryConfirmationRequestSchema, summaryDraftRequestSchema, summaryDraftResponseSchema, syncOperationAcceptedSchema, syncOperationConflictSchema, syncOperationRejectedSchema, syncOperationRequestSchema, taskAssigneeListResponseSchema, taskListResponseSchema, taskResponseSchema } from "@cetem-qc/schemas/api/v1";
 import type { ConformityDecision, ConformityDecisionRequest, ConformityHistoryItem, ConformityOutcome, AcceptedEvidenceResponse, AuthenticationRequest, AuthenticationResponse, ConfirmedSummary, SummaryReopening, SummaryReopeningRequest, SummaryHistoryItem, CreateDeactivatedAssigneeRecoveryRequest, CreateEmployeeRequest, CreateTaskRequest, DeactivatedAssigneeRecoveryResponse, EmployeeCredentialResponse, EmployeeListResponse, EmployeeTaskAuditVersion, EmployeeTaskRecoverySeedResponse, EmployeeTaskListResponse, EmployeeTaskResponse, HealthResponse, InsightDecisionRequest, InsightDecisionResponse, ManualInsightRequest, ManualInsightResponse, PasswordReplacementRequest, ReassignUnstartedTaskRequest, ReassignUnstartedTaskResponse, ReplacementTaskResponse, SummaryConfirmationRequest, SummaryDraftResponse, SyncOperationAccepted, SyncOperationConflict, SyncOperationRejected, SyncOperationRequest, TaskListResponse, TaskResponse } from "@cetem-qc/schemas/api/v1";
 
-import { reportCandidateListSchema, reportCandidateRequestSchema, reportCandidateSchema, reportFromPdfRequestSchema, storedFileListSchema, storedFileSchema } from "@cetem-qc/schemas/api/v1";
-import type { ReportCandidate, ReportCandidateList, ReportCandidateRequest, ReportFromPdfRequest, StoredFile, StoredFileList } from "@cetem-qc/schemas/api/v1";
+import { officialReportSchema, reportCandidateListSchema, reportDesignateRequestSchema, reportCandidateRequestSchema, reportCandidateSchema, reportFromPdfRequestSchema, storedFileListSchema, storedFileSchema } from "@cetem-qc/schemas/api/v1";
+import type { OfficialReport, ReportCandidate, ReportCandidateList, ReportCandidateRequest, ReportFromPdfRequest, StoredFile, StoredFileList } from "@cetem-qc/schemas/api/v1";
 
-export { reportCandidateListSchema, reportCandidateSchema, storedFileListSchema, storedFileSchema };
-export type { ReportCandidate, ReportCandidateList, ReportCandidateRequest, ReportFromPdfRequest, StoredFile, StoredFileList };
+export { officialReportSchema, reportCandidateListSchema, reportCandidateSchema, storedFileListSchema, storedFileSchema };
+export type { OfficialReport, ReportCandidate, ReportCandidateList, ReportCandidateRequest, ReportFromPdfRequest, StoredFile, StoredFileList };
 
 export { conformityDecisionSchema, conformityHistoryItemSchema,acceptedEvidenceResponseSchema, confirmedSummarySchema, summaryReopeningSchema, summaryHistoryItemSchema,insightDecisionResponseSchema, manualInsightResponseSchema, replacementTaskResponseSchema, summaryDraftResponseSchema, taskListResponseSchema };
 export type { ConformityDecision, ConformityDecisionRequest, ConformityHistoryItem, ConformityOutcome, ConfirmedSummary, SummaryReopening, SummaryHistoryItem,SummaryConfirmationRequest, SummaryDraftResponse, AcceptedEvidenceResponse, InsightDecisionRequest, InsightDecisionResponse, ManualInsightRequest, ManualInsightResponse, CreateDeactivatedAssigneeRecoveryRequest, CreateTaskRequest, DeactivatedAssigneeRecoveryResponse, EmployeeTaskAuditVersion, EmployeeTaskRecoverySeedResponse, EmployeeTaskListResponse, EmployeeTaskResponse, ReassignUnstartedTaskRequest, ReassignUnstartedTaskResponse, ReplacementTaskResponse, SyncOperationAccepted, SyncOperationConflict, SyncOperationRejected, SyncOperationRequest, TaskListResponse };
@@ -89,7 +89,7 @@ export type GenerateReportCandidateOutcome =
   | { status: 200 | 201; body: ReportCandidate }
   | { status: 403; code: "FORBIDDEN"; message: string }
   | { status: 404; code: "TASK_NOT_FOUND"; message: string }
-  | { status: 409; code: "SUMMARY_NOT_CONFIRMED" | "CONFORMITY_NOT_DECIDED" | "REPORT_ATTEMPT_CONFLICT" | "REPORT_INPUTS_CHANGED"; message: string }
+  | { status: 409; code: "SUMMARY_NOT_CONFIRMED" | "CONFORMITY_NOT_DECIDED" | "REPORT_ATTEMPT_CONFLICT" | "REPORT_INPUTS_CHANGED" | "REPORT_OFFICIAL_DESIGNATED"; message: string }
   | { status: 422; code: "VALIDATION_FAILED"; message: string }
   | { status: 500; code: "INTERNAL_ERROR"; message: string }
   | { status: 502; code: "REPORT_GENERATION_FAILED"; message: string };
@@ -99,8 +99,24 @@ export type CreateReportCandidateFromPdfOutcome =
   | { status: 200 | 201; body: ReportCandidate }
   | { status: 403; code: "FORBIDDEN"; message: string }
   | { status: 404; code: "TASK_NOT_FOUND"; message: string }
-  | { status: 409; code: "SUMMARY_NOT_CONFIRMED" | "CONFORMITY_NOT_DECIDED" | "REPORT_FILE_NOT_READY" | "REPORT_FILE_ALREADY_ATTACHED" | "REPORT_ATTEMPT_CONFLICT"; message: string }
+  | { status: 409; code: "SUMMARY_NOT_CONFIRMED" | "CONFORMITY_NOT_DECIDED" | "REPORT_FILE_NOT_READY" | "REPORT_FILE_ALREADY_ATTACHED" | "REPORT_ATTEMPT_CONFLICT" | "REPORT_OFFICIAL_DESIGNATED"; message: string }
   | { status: 422; code: "VALIDATION_FAILED"; message: string }
+  | { status: 500; code: "INTERNAL_ERROR"; message: string };
+
+/** The documented outcomes of designating a candidate official; any other status or body throws `ApiRequestError`. */
+export type DesignateReportCandidateOutcome =
+  | { status: 200 | 201; body: OfficialReport }
+  | { status: 403; code: "FORBIDDEN"; message: string }
+  | { status: 404; code: "TASK_NOT_FOUND"; message: string }
+  | { status: 409; code: "REPORT_CANDIDATE_NOT_READY" | "REPORT_CANDIDATE_OUTDATED" | "REPORT_ALREADY_OFFICIAL"; message: string }
+  | { status: 422; code: "VALIDATION_FAILED"; message: string }
+  | { status: 500; code: "INTERNAL_ERROR"; message: string };
+
+/** The documented outcomes of reading the official report; any other status or body throws `ApiRequestError`. */
+export type GetOfficialReportOutcome =
+  | { status: 200; body: OfficialReport }
+  | { status: 403; code: "FORBIDDEN"; message: string }
+  | { status: 404; code: "TASK_NOT_FOUND"; message: string }
   | { status: 500; code: "INTERNAL_ERROR"; message: string };
 
 /** The documented outcomes of listing report candidates; any other status or body throws `ApiRequestError`. */
@@ -413,7 +429,7 @@ export function createApiClient({ baseUrl, fetch: fetcher = fetch, sessionToken:
         const { code, message } = error.data.error;
         if (status === 403 && code === "FORBIDDEN") return { status, code, message };
         if (status === 404 && code === "TASK_NOT_FOUND") return { status, code, message };
-        if (status === 409 && (code === "SUMMARY_NOT_CONFIRMED" || code === "CONFORMITY_NOT_DECIDED" || code === "REPORT_ATTEMPT_CONFLICT" || code === "REPORT_INPUTS_CHANGED")) return { status, code, message };
+        if (status === 409 && (code === "SUMMARY_NOT_CONFIRMED" || code === "CONFORMITY_NOT_DECIDED" || code === "REPORT_ATTEMPT_CONFLICT" || code === "REPORT_INPUTS_CHANGED" || code === "REPORT_OFFICIAL_DESIGNATED")) return { status, code, message };
         if (status === 422 && code === "VALIDATION_FAILED") return { status, code, message };
         if (status === 500 && code === "INTERNAL_ERROR") return { status, code, message };
         if (status === 502 && code === "REPORT_GENERATION_FAILED") return { status, code, message };
@@ -437,8 +453,51 @@ export function createApiClient({ baseUrl, fetch: fetcher = fetch, sessionToken:
         const { code, message } = error.data.error;
         if (status === 403 && code === "FORBIDDEN") return { status, code, message };
         if (status === 404 && code === "TASK_NOT_FOUND") return { status, code, message };
-        if (status === 409 && (code === "SUMMARY_NOT_CONFIRMED" || code === "CONFORMITY_NOT_DECIDED" || code === "REPORT_FILE_NOT_READY" || code === "REPORT_FILE_ALREADY_ATTACHED" || code === "REPORT_ATTEMPT_CONFLICT")) return { status, code, message };
+        if (status === 409 && (code === "SUMMARY_NOT_CONFIRMED" || code === "CONFORMITY_NOT_DECIDED" || code === "REPORT_FILE_NOT_READY" || code === "REPORT_FILE_ALREADY_ATTACHED" || code === "REPORT_ATTEMPT_CONFLICT" || code === "REPORT_OFFICIAL_DESIGNATED")) return { status, code, message };
         if (status === 422 && code === "VALIDATION_FAILED") return { status, code, message };
+        if (status === 500 && code === "INTERNAL_ERROR") return { status, code, message };
+      }
+      throw toRequestError(status, payload.data);
+    },
+    /** Designates one ready candidate as the official report (Responsable only). The designation is final. */
+    async designateReportCandidate(taskId: string, candidateId: string): Promise<DesignateReportCandidateOutcome> {
+      const payload = await request(`/tasks/${encodeURIComponent(taskId)}/report-candidates/${encodeURIComponent(candidateId)}/designate`, {
+        method: "POST", headers: { accept: "application/json", "content-type": "application/json", ...sessionHeaders() },
+        body: JSON.stringify(reportDesignateRequestSchema.parse({})), cache: "no-store",
+      });
+      const status = payload.response.status;
+      if (status === 200 || status === 201) {
+        const parsed = officialReportSchema.safeParse(payload.data);
+        if (parsed.success) return { status, body: parsed.data };
+        throw toRequestError(status, payload.data);
+      }
+      const error = apiErrorSchema.safeParse(payload.data);
+      if (error.success) {
+        const { code, message } = error.data.error;
+        if (status === 403 && code === "FORBIDDEN") return { status, code, message };
+        if (status === 404 && code === "TASK_NOT_FOUND") return { status, code, message };
+        if (status === 409 && (code === "REPORT_CANDIDATE_NOT_READY" || code === "REPORT_CANDIDATE_OUTDATED" || code === "REPORT_ALREADY_OFFICIAL")) return { status, code, message };
+        if (status === 422 && code === "VALIDATION_FAILED") return { status, code, message };
+        if (status === 500 && code === "INTERNAL_ERROR") return { status, code, message };
+      }
+      throw toRequestError(status, payload.data);
+    },
+    /** Reads the official report of a task (Responsable only); 404 until one is designated. */
+    async getOfficialReport(taskId: string): Promise<GetOfficialReportOutcome> {
+      const payload = await request(`/tasks/${encodeURIComponent(taskId)}/official-report`, {
+        method: "GET", headers: { accept: "application/json", ...sessionHeaders() }, cache: "no-store",
+      });
+      const status = payload.response.status;
+      if (status === 200) {
+        const parsed = officialReportSchema.safeParse(payload.data);
+        if (parsed.success) return { status, body: parsed.data };
+        throw toRequestError(status, payload.data);
+      }
+      const error = apiErrorSchema.safeParse(payload.data);
+      if (error.success) {
+        const { code, message } = error.data.error;
+        if (status === 403 && code === "FORBIDDEN") return { status, code, message };
+        if (status === 404 && code === "TASK_NOT_FOUND") return { status, code, message };
         if (status === 500 && code === "INTERNAL_ERROR") return { status, code, message };
       }
       throw toRequestError(status, payload.data);

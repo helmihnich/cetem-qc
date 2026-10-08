@@ -121,7 +121,10 @@ test("U7 no designation, upload or « officiel » control and no English text; m
     assert.ok(!markup.includes("<b>gras") && !markup.includes("<script>"));
     assert.ok(!/<input|type="file"/.test(markup));
     const text = decode(markup).replaceAll(raw, "");
-    assert.ok(!/Désigner|Téléverser|Importer|officiel(?!\s*$)/.test(text.replaceAll(fr.report.candidateBadge, "")), text);
+    // Narrowed (11.4): the designation control exists only on ready candidates (here at most one) while no official report exists.
+    const designations = text.split(fr.report.designate.button).length - 1;
+    assert.equal(designations, (markup.match(/data-status="ready"/g) ?? []).length, text);
+    assert.ok(!/Désigner|Téléverser|Importer|officiel(?!\s*$)/.test(text.replaceAll(fr.report.candidateBadge, "").replaceAll(fr.report.designate.button, "")), text);
     assert.ok(!english.test(text), text);
   }
 });

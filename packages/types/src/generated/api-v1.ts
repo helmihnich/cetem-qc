@@ -544,6 +544,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/tasks/{taskId}/report-candidates/{candidateId}/designate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Designate one ready report candidate as the official report of the control
+         * @description Responsable only, owning team only. The body is an empty object. Designates one ready, current candidate (Word or PDF) as the single official report of the task; the choice is final and nothing can replace it. The server rechecks in one transaction that the candidate is ready and still bound to the current confirmed summary, conformity decision and accepted submission, and that a PDF file is still ready. Designating the same candidate again returns the stored official report (200). Either conformity outcome can be designated. A malformed, unknown or another team's task or candidate all get the same 404.
+         */
+        post: operations["designateReportCandidate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/tasks/{taskId}/official-report": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read the official report of a task
+         * @description Responsable only, owning team only. A task without an official report, a malformed, unknown or another team's task, and an own-team task without accepted submission all get the same 404.
+         */
+        get: operations["getOfficialReport"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/tasks/{taskId}/report-candidates/{candidateId}/file": {
         parameters: {
             query?: never;
@@ -1014,8 +1054,52 @@ export interface components {
             /** Format: uuid */
             attemptId: string;
         };
+        ReportDesignateRequest: Record<string, never>;
         /** @enum {string} */
-        ReportCandidateStatus: "generating" | "ready" | "failed" | "outdated";
+        ReportCandidateStatus: "generating" | "ready" | "failed" | "outdated" | "official" | "superseded";
+        /** @description The single official report of a control, tied to the confirmed summary and the human conformity decision. No storage key. */
+        OfficialReport: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            candidateId: string;
+            /** @enum {string} */
+            origin: "generated-word" | "uploaded-pdf";
+            /** Format: date-time */
+            designatedAt: string;
+            designatedBy: {
+                id: string;
+                displayName: string;
+            };
+            /** Format: uuid */
+            taskId: string;
+            /** Format: uuid */
+            auditId: string;
+            auditRevision: number;
+            /** Format: uuid */
+            submissionId: string;
+            bindings: {
+                /** Format: uuid */
+                summaryId: string;
+                summaryVersion: number;
+                /** Format: uuid */
+                conformityDecisionId: string;
+                conformityOutcome: components["schemas"]["ConformityOutcome"];
+            };
+            template: null | {
+                id: string;
+                version: string;
+            };
+            source: null | {
+                /** Format: uuid */
+                fileId: string;
+            };
+            file: {
+                name: string;
+                byteSize: number;
+                sha256: string;
+            };
+        };
         /** @description A report candidate, generated Word (template set, source null) or uploaded PDF (template null, source set). It is never official in this story, and no official designation property exists. */
         ReportCandidate: {
             /** Format: uuid */
@@ -1338,7 +1422,7 @@ export interface components {
             /** @constant */
             version: "v1";
         };
-        /** @description Error envelope. Codes include VALIDATION_ERROR, AUTHENTICATION_FAILED, FORBIDDEN, TASK_NOT_FOUND, PAYLOAD_TOO_LARGE, IDEMPOTENCY_KEY_REUSED, AUDIT_NOT_ACCEPTED, REPLACEMENT_ALREADY_EXISTS, TASK_ASSIGNEE_UNAVAILABLE, AI_UNAVAILABLE, SUMMARY_ALREADY_CONFIRMED, SUMMARY_CONFIRMED, SUMMARY_NOT_CONFIRMED, SUMMARY_DESIGNATED, CONFORMITY_ALREADY_DECIDED, CONFORMITY_NOT_DECIDED, REPORT_GENERATION_FAILED, REPORT_INPUTS_CHANGED, REPORT_ATTEMPT_CONFLICT, REPORT_FILE_NOT_READY, REPORT_FILE_ALREADY_ATTACHED, FILE_TOO_LARGE, UNSUPPORTED_FILE_TYPE, FILE_STORAGE_FAILED, FILE_ATTEMPT_CONFLICT, FILE_NOT_RESCANNABLE and INTERNAL_ERROR. */
+        /** @description Error envelope. Codes include VALIDATION_ERROR, AUTHENTICATION_FAILED, FORBIDDEN, TASK_NOT_FOUND, PAYLOAD_TOO_LARGE, IDEMPOTENCY_KEY_REUSED, AUDIT_NOT_ACCEPTED, REPLACEMENT_ALREADY_EXISTS, TASK_ASSIGNEE_UNAVAILABLE, AI_UNAVAILABLE, SUMMARY_ALREADY_CONFIRMED, SUMMARY_CONFIRMED, SUMMARY_NOT_CONFIRMED, SUMMARY_DESIGNATED, CONFORMITY_ALREADY_DECIDED, CONFORMITY_NOT_DECIDED, REPORT_GENERATION_FAILED, REPORT_INPUTS_CHANGED, REPORT_ATTEMPT_CONFLICT, REPORT_FILE_NOT_READY, REPORT_FILE_ALREADY_ATTACHED, REPORT_CANDIDATE_NOT_READY, REPORT_CANDIDATE_OUTDATED, REPORT_ALREADY_OFFICIAL, REPORT_OFFICIAL_DESIGNATED, FILE_TOO_LARGE, UNSUPPORTED_FILE_TYPE, FILE_STORAGE_FAILED, FILE_ATTEMPT_CONFLICT, FILE_NOT_RESCANNABLE and INTERNAL_ERROR. */
         ApiError: {
             error: {
                 code: string;
@@ -3527,6 +3611,154 @@ export interface operations {
                 };
             };
             /** @description Evidence inconsistent or candidate not recorded (INTERNAL_ERROR) */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    designateReportCandidate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                taskId: string;
+                candidateId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReportDesignateRequest"];
+            };
+        };
+        responses: {
+            /** @description Replay of a designation of the same candidate (Cache-Control no-store) */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OfficialReport"];
+                };
+            };
+            /** @description Designated official report (Cache-Control no-store) */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OfficialReport"];
+                };
+            };
+            /** @description Session rejected */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Responsable role required (FORBIDDEN) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Malformed */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Candidate not ready (REPORT_CANDIDATE_NOT_READY) */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Body is not an empty object (VALIDATION_FAILED) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Evidence inconsistent or designation not recorded (INTERNAL_ERROR) */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    getOfficialReport: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                taskId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The official report (Cache-Control no-store) */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OfficialReport"];
+                };
+            };
+            /** @description Session rejected */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Responsable role required (FORBIDDEN) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description No official report */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Official report could not be loaded (INTERNAL_ERROR) */
             500: {
                 headers: {
                     [name: string]: unknown;

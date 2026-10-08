@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { reportCandidateListSchema, reportCandidateSchema } from "@cetem-qc/api-client/v1";
-import type { ReportCandidate } from "@cetem-qc/api-client/v1";
+import { officialReportSchema, reportCandidateListSchema, reportCandidateSchema } from "@cetem-qc/api-client/v1";
+import type { OfficialReport, ReportCandidate } from "@cetem-qc/api-client/v1";
 import { fr } from "@cetem-qc/i18n";
 
 const dateTimeFormatter = new Intl.DateTimeFormat("fr-FR", { dateStyle: "medium", timeStyle: "short" });
@@ -23,7 +23,50 @@ const refusalMessages: Record<string, string> = {
   CONFORMITY_NOT_DECIDED: fr.report.notDecided,
   REPORT_INPUTS_CHANGED: fr.report.inputsChanged,
   REPORT_ATTEMPT_CONFLICT: fr.report.attemptConflict,
+  REPORT_OFFICIAL_DESIGNATED: fr.report.designate.officialDesignated,
 };
+
+export type ReportDesignateResult =
+  | { kind: "designated"; official: OfficialReport }
+  | { kind: "refused"; message: string }
+  | { kind: "failed" };
+
+const designateRefusals: Record<string, string> = {
+  REPORT_CANDIDATE_NOT_READY: fr.report.designate.notReady,
+  REPORT_CANDIDATE_OUTDATED: fr.report.designate.outdated,
+  REPORT_ALREADY_OFFICIAL: fr.report.designate.alreadyOfficial,
+};
+
+/** Designates one candidate official. One request per click; the designation is final, so it is never retried automatically. */
+export async function designateReportCandidateOnServer(taskId: string, candidateId: string, fetcher: typeof fetch = fetch): Promise<ReportDesignateResult> {
+  try {
+    const response = await fetcher(`/api/tasks/${encodeURIComponent(taskId)}/report-candidates/${encodeURIComponent(candidateId)}/designate`, {
+      method: "POST", headers: { "content-type": "application/json", accept: "application/json" }, body: "{}", cache: "no-store",
+    });
+    if (response.status === 200 || response.status === 201) {
+      const parsed = officialReportSchema.safeParse(await response.json());
+      return parsed.success ? { kind: "designated", official: parsed.data } : { kind: "failed" };
+    }
+    const code = ((await response.json().catch(() => null)) as { error?: { code?: unknown } } | null)?.error?.code;
+    if (response.status === 409 && typeof code === "string" && designateRefusals[code]) return { kind: "refused", message: designateRefusals[code]! };
+    if (response.status === 404) return { kind: "refused", message: fr.report.designate.notFound };
+    return { kind: "failed" };
+  } catch {
+    return { kind: "failed" };
+  }
+}
+
+/** The official report of the task, or null when there is none or it could not be loaded. */
+export async function loadOfficialReport(taskId: string, fetcher: typeof fetch = fetch): Promise<OfficialReport | null> {
+  try {
+    const response = await fetcher(`/api/tasks/${encodeURIComponent(taskId)}/official-report`, { headers: { accept: "application/json" }, cache: "no-store" });
+    if (response.status !== 200) return null;
+    const parsed = officialReportSchema.safeParse(await response.json());
+    return parsed.success ? parsed.data : null;
+  } catch {
+    return null;
+  }
+}
 
 async function postOnce(taskId: string, attemptId: string, fetcher: typeof fetch): Promise<ReportGenerateResult> {
   const response = await fetcher(`/api/tasks/${encodeURIComponent(taskId)}/report-candidates`, {
@@ -78,9 +121,21 @@ export type ReportCandidatesSectionProps = {
   /** French message of the last failed or refused request, or null. */
   message?: string | null;
   onGenerate?: () => void;
+  /** The official report once designated: generation, retry and designation controls are then hidden. */
+  official?: OfficialReport | null;
+  /** The candidate waiting for the irreversible confirmation, or null. */
+  confirmingId?: string | null;
+  /** The candidate being designated, or null. */
+  designatingId?: string | null;
+  onAskDesignate?: (candidateId: string) => void;
+  onCancelDesignate?: () => void;
+  onConfirmDesignate?: (candidateId: string) => void;
 };
 
-function CandidateItem({ taskId, candidate }: { taskId: string; candidate: ReportCandidate }) {
+function CandidateItem({ taskId, candidate, official, confirming, designating, anyDesignating, onAskDesignate, onCancelDesignate, onConfirmDesignate }: {
+  taskId: string; candidate: ReportCandidate; official: OfficialReport | null; confirming: boolean; designating: boolean; anyDesignating: boolean;
+  onAskDesignate?: (candidateId: string) => void; onCancelDesignate?: () => void; onConfirmDesignate?: (candidateId: string) => void;
+}) {
   return <li className="insight-item report-candidate" data-status={candidate.status}>
     <strong>{fr.report.candidateBadge}</strong>
     {" · "}
@@ -96,24 +151,44 @@ function CandidateItem({ taskId, candidate }: { taskId: string; candidate: Repor
     {" · "}
     <span>{fill(fr.report.decision, { label: decisionLabel(candidate.bindings.conformityOutcome) })}</span>
     {candidate.source?.scanResult === "not-performed" && <>{" · "}<span className="field-hint">{fr.pdfFile.scanNote}</span></>}
-    {candidate.file && (candidate.status === "ready" || candidate.status === "outdated")
+    {candidate.status === "official" && official && official.candidateId === candidate.id && <>
+      {" · "}<span>{fill(fr.report.designate.designatedBy, { name: official.designatedBy.displayName })}</span>
+      {" "}<span>{fill(fr.report.designate.designatedAt, { date: dateTimeFormatter.format(new Date(official.designatedAt)) })}</span>
+    </>}
+    {candidate.file && (candidate.status === "ready" || candidate.status === "outdated" || candidate.status === "official" || candidate.status === "superseded")
       ? <>{" · "}<a href={reportDownloadUrl(taskId, candidate.id)} download>{fr.report.download}</a></>
       : null}
+    {candidate.status === "ready" && !official && !confirming && !designating && <>
+      {" · "}
+      <button className="secondary-button" type="button" disabled={anyDesignating} onClick={() => onAskDesignate?.(candidate.id)}>{fr.report.designate.button}</button>
+    </>}
+    {candidate.status === "ready" && !official && (confirming || designating) && <div className="field-hint" role="group" aria-label={fr.report.designate.button}>
+      <p>{fr.report.designate.prompt}</p>
+      <button className="primary-button" type="button" disabled={designating} aria-busy={designating} onClick={() => onConfirmDesignate?.(candidate.id)}>
+        {designating ? fr.report.designate.pending : fr.report.designate.confirm}
+      </button>
+      {" "}
+      <button className="secondary-button" type="button" disabled={designating} onClick={onCancelDesignate}>{fr.report.designate.cancel}</button>
+    </div>}
   </li>;
 }
 
-/** W5 report area: the generate button only when eligible, the list of candidates, never a designation or upload control. */
-export function ReportCandidatesSection({ taskId, eligible, candidates, pending = false, failedAttempt = false, message = null, onGenerate }: ReportCandidatesSectionProps) {
+/** W5 report area: the generate button only when eligible and no official report exists, the list of candidates, the designation control only on ready candidates. */
+export function ReportCandidatesSection({ taskId, eligible, candidates, pending = false, failedAttempt = false, message = null, onGenerate, official = null, confirmingId = null, designatingId = null, onAskDesignate, onCancelDesignate, onConfirmDesignate }: ReportCandidatesSectionProps) {
   return <section className="evidence-report" aria-labelledby="evidence-report-heading">
     <h3 id="evidence-report-heading">{fr.report.heading}</h3>
     {message && <p className="field-error" role="alert">{message}</p>}
-    {eligible
-      ? <button className="secondary-button" type="button" disabled={pending} aria-busy={pending} onClick={onGenerate}>
-        {pending ? fr.report.generating : failedAttempt ? fr.report.retry : fr.report.generate}
-      </button>
-      : <p className="field-hint">{fr.report.notEligible}</p>}
+    {official
+      ? null
+      : eligible
+        ? <button className="secondary-button" type="button" disabled={pending || designatingId !== null} aria-busy={pending} onClick={onGenerate}>
+          {pending ? fr.report.generating : failedAttempt ? fr.report.retry : fr.report.generate}
+        </button>
+        : <p className="field-hint">{fr.report.notEligible}</p>}
     {candidates.length > 0 && <ul className="report-candidate-list">
-      {candidates.map((candidate) => <CandidateItem key={candidate.id} taskId={taskId} candidate={candidate} />)}
+      {candidates.map((candidate) => <CandidateItem key={candidate.id} taskId={taskId} candidate={candidate} official={official}
+        confirming={confirmingId === candidate.id} designating={designatingId === candidate.id} anyDesignating={designatingId !== null}
+        onAskDesignate={onAskDesignate} onCancelDesignate={onCancelDesignate} onConfirmDesignate={onConfirmDesignate} />)}
     </ul>}
   </section>;
 }
@@ -131,10 +206,15 @@ export function ReportCandidatesPanel({ taskId, eligible, refreshKey = 0, onRelo
   const [pending, setPending] = useState(false);
   const [failedAttempt, setFailedAttempt] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [official, setOfficial] = useState<OfficialReport | null>(null);
+  const [confirmingId, setConfirmingId] = useState<string | null>(null);
+  const [designatingId, setDesignatingId] = useState<string | null>(null);
   const inFlight = useRef(false);
   const refresh = async () => {
     const loaded = await loadReportCandidates(taskId);
     if (loaded) setCandidates(loaded);
+    const loadedOfficial = await loadOfficialReport(taskId);
+    if (loadedOfficial) setOfficial(loadedOfficial);
   };
   useEffect(() => { void refresh(); }, [taskId, refreshKey]);
   const onGenerate = () => {
@@ -161,5 +241,27 @@ export function ReportCandidatesPanel({ taskId, eligible, refreshKey = 0, onRelo
       setPending(false);
     });
   };
-  return <ReportCandidatesSection taskId={taskId} eligible={eligible} candidates={candidates} pending={pending} failedAttempt={failedAttempt} message={message} onGenerate={onGenerate} />;
+  const onConfirmDesignate = (candidateId: string) => {
+    if (inFlight.current) return;
+    inFlight.current = true;
+    setDesignatingId(candidateId);
+    setMessage(null);
+    void designateReportCandidateOnServer(taskId, candidateId).then(async (result) => {
+      if (result.kind === "designated") {
+        setOfficial(result.official);
+      } else if (result.kind === "refused") {
+        await onReloadState?.();
+        setMessage(result.message);
+      } else {
+        setMessage(fr.report.designate.internal);
+      }
+      await refresh();
+      setConfirmingId(null);
+      inFlight.current = false;
+      setDesignatingId(null);
+    });
+  };
+  return <ReportCandidatesSection taskId={taskId} eligible={eligible} candidates={candidates} pending={pending} failedAttempt={failedAttempt} message={message} onGenerate={onGenerate}
+    official={official} confirmingId={confirmingId} designatingId={designatingId} onAskDesignate={(id) => { setMessage(null); setConfirmingId(id); }}
+    onCancelDesignate={() => setConfirmingId(null)} onConfirmDesignate={onConfirmDesignate} />;
 }

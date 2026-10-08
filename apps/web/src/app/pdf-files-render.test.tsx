@@ -184,7 +184,11 @@ test("W2 creating state, then « Candidat créé — non officiel » and the PDF
   const list = renderToStaticMarkup(<ReportCandidatesSection taskId={TASK} eligible candidates={[pdfCandidate()]} />);
   const text = decode(list);
   for (const expected of [fr.report.origin.uploadedPdf, fr.report.candidateBadge, fr.report.status.ready, fr.report.download, fr.pdfFile.scanNote]) assert.ok(text.includes(expected), expected);
-  assert.ok(!text.includes(fr.report.status.failed) && !text.includes(fr.report.status.generating) && !text.includes("Désigner"));
+  assert.ok(!text.includes(fr.report.status.failed) && !text.includes(fr.report.status.generating));
+  // Narrowed (11.4): a designation control exists only on a ready candidate while the task has no official report.
+  assert.equal([...text.matchAll(new RegExp(fr.report.designate.button, "g"))].length, 1);
+  const designated = decode(renderToStaticMarkup(<ReportCandidatesSection taskId={TASK} eligible candidates={[pdfCandidate({ status: "official" })]} />));
+  assert.ok(!designated.includes(fr.report.designate.button));
   const word = decode(renderToStaticMarkup(<ReportCandidatesSection taskId={TASK} eligible candidates={[pdfCandidate({ origin: "generated-word", source: null, template: { id: "cetem-paper-report", version: "1.0.0" } })]} />));
   assert.ok(word.includes(fr.report.origin.generatedWord) && !word.includes(fr.report.origin.uploadedPdf));
 });

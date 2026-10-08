@@ -43,6 +43,8 @@ type ConformityDecisionContract = apiV1Operations["recordConformityDecision"]["r
 type ConformityHistoryItemContract = apiV1Components["schemas"]["ConformityHistoryItem"];
 type ReportCandidateRequestContract = apiV1Operations["generateReportCandidate"]["requestBody"]["content"]["application/json"];
 type ReportCandidateContract = apiV1Operations["generateReportCandidate"]["responses"][201]["content"]["application/json"];
+type ReportDesignateRequestContract = apiV1Operations["designateReportCandidate"]["requestBody"]["content"]["application/json"];
+type OfficialReportContract = apiV1Operations["designateReportCandidate"]["responses"][201]["content"]["application/json"];
 type ReportFromPdfRequestContract = apiV1Operations["createReportCandidateFromPdf"]["requestBody"]["content"]["application/json"];
 type ReportCandidateListContract = apiV1Operations["listReportCandidates"]["responses"][200]["content"]["application/json"];
 type StoredFileContract = apiV1Operations["uploadManualPdfFile"]["responses"][201]["content"]["application/json"];
@@ -266,7 +268,7 @@ export const reportCandidateRequestSchema: z.ZodType<ReportCandidateRequestContr
 export const reportFromPdfRequestSchema: z.ZodType<ReportFromPdfRequestContract> = z.object({
   attemptId: z.string().uuid(),
 }).strict();
-export const reportCandidateStatusSchema = z.enum(["generating", "ready", "failed", "outdated"]);
+export const reportCandidateStatusSchema = z.enum(["generating", "ready", "failed", "outdated", "official", "superseded"]);
 export const reportCandidateSchema: z.ZodType<ReportCandidateContract> = z.object({
   id: z.string().uuid(),
   attemptId: z.string().uuid(),
@@ -288,6 +290,28 @@ export const reportCandidateSchema: z.ZodType<ReportCandidateContract> = z.objec
 }).strict();
 export const reportCandidateListSchema: z.ZodType<ReportCandidateListContract> = z.object({
   candidates: z.array(reportCandidateSchema),
+}).strict();
+/** Story 11.4: the single official report of a control. No storage key. */
+export const reportDesignateRequestSchema: z.ZodType<ReportDesignateRequestContract> = z.object({}).strict();
+export const officialReportSchema: z.ZodType<OfficialReportContract> = z.object({
+  id: z.string().uuid(),
+  candidateId: z.string().uuid(),
+  origin: z.enum(["generated-word", "uploaded-pdf"]),
+  designatedAt: z.string().datetime(),
+  designatedBy: summaryActorSchema,
+  taskId: z.string().uuid(),
+  auditId: z.string().uuid(),
+  auditRevision: z.number().int().min(1),
+  submissionId: z.string().uuid(),
+  bindings: z.object({
+    summaryId: z.string().uuid(),
+    summaryVersion: z.number().int().min(1),
+    conformityDecisionId: z.string().uuid(),
+    conformityOutcome: conformityOutcomeSchema,
+  }).strict(),
+  template: z.object({ id: z.string(), version: z.string() }).strict().nullable(),
+  source: z.object({ fileId: z.string().uuid() }).strict().nullable(),
+  file: z.object({ name: z.string(), byteSize: z.number().int().min(0), sha256: z.string().regex(/^[0-9a-f]{64}$/) }).strict(),
 }).strict();
 /** Story 11.2: a manually prepared PDF with its derived status. It is never official: no storage key or report property exists. */
 export const storedFileStatusSchema = z.enum(["rejected", "quarantined", "scan-pending", "scan-failed", "storage-failed", "ready"]);
@@ -449,6 +473,8 @@ export type ConformityDecision = z.infer<typeof conformityDecisionSchema>;
 export type ConformityHistoryItem = z.infer<typeof conformityHistoryItemSchema>;
 export type ReportCandidateRequest = z.infer<typeof reportCandidateRequestSchema>;
 export type ReportFromPdfRequest = z.infer<typeof reportFromPdfRequestSchema>;
+export type ReportDesignateRequest = z.infer<typeof reportDesignateRequestSchema>;
+export type OfficialReport = z.infer<typeof officialReportSchema>;
 export type ReportCandidateStatus = z.infer<typeof reportCandidateStatusSchema>;
 export type ReportCandidate = z.infer<typeof reportCandidateSchema>;
 export type ReportCandidateList = z.infer<typeof reportCandidateListSchema>;

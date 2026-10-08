@@ -5,6 +5,7 @@ import { getAcceptedSubmissionForReview } from "../../audits/queries/accepted-su
 import { getCurrentConformityDecision } from "../../conformity/index.js";
 import { getReadyFile, getStoredFileStatus } from "../../files/index.js";
 import { getSummaryState, lockTaskSummary } from "../../summaries/index.js";
+import { hasOfficialReport } from "../queries/official-report.js";
 import { candidateSelect, presentCandidateRows } from "../queries/report-candidates.js";
 import type { CandidateRow, ReportCandidate } from "../queries/report-candidates.js";
 
@@ -16,6 +17,7 @@ export type AttachPdfReportCandidateOutcome =
   | { type: "attached"; candidate: ReportCandidate }
   | { type: "replayed"; candidate: ReportCandidate }
   | { type: "not-found" }
+  | { type: "official-designated" }
   | { type: "not-confirmed" }
   | { type: "not-decided" }
   | { type: "file-not-ready" }
@@ -53,6 +55,7 @@ export async function attachPdfReportCandidate(
     const replayed = await replay();
     if (replayed) return replayed;
 
+    if (await hasOfficialReport(transaction, evidence.taskId)) return { type: "official-designated" };
     const status = await getStoredFileStatus(transaction, { taskId: evidence.taskId, fileId });
     if (!status) return { type: "not-found" };
     const state = await getSummaryState(transaction, evidence.submissionId);

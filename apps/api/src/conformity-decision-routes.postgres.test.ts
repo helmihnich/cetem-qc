@@ -295,12 +295,12 @@ test("R74 a throwing participant after conformity rolls the reopening back; a de
   });
 });
 
-test("R75 registering the default participants twice does not throw and registers conformity once", () => {
+test("R75 registering the default participants twice does not throw and registers conformity and reports once", () => {
   summaryReopenParticipantTestSeams.clear();
   try {
     registerDefaultSummaryReopenParticipants();
     assert.doesNotThrow(() => registerDefaultSummaryReopenParticipants());
-    assert.deepEqual(listSummaryReopenParticipants().map((entry) => entry.name), ["conformity"]);
+    assert.deepEqual(listSummaryReopenParticipants().map((entry) => entry.name), ["conformity", "reports"]);
   } finally { summaryReopenParticipantTestSeams.clear(); registerDefaultSummaryReopenParticipants(); }
 });
 

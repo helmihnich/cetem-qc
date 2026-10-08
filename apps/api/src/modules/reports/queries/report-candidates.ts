@@ -5,7 +5,7 @@ import type { ConformityOutcome } from "../../conformity/index.js";
 import { getFileScanResults } from "../../files/index.js";
 import { getConfirmedSummary } from "../../summaries/index.js";
 
-export type ReportCandidateStatus = "generating" | "ready" | "failed" | "outdated";
+export type ReportCandidateStatus = "generating" | "ready" | "failed" | "outdated" | "official" | "superseded";
 export type ReportFailureClass = "generation-failed" | "storage-failed";
 export type ReportOrigin = "generated-word" | "uploaded-pdf";
 export type StoredOutcome = "ready" | "failed" | "outdated";
@@ -59,12 +59,20 @@ export const candidateSelect = `
 /**
  * The status derived on every read: no outcome is `generating`; a `failed` outcome is `failed`; a `ready` outcome is
  * `ready` only while its bound summary and decision are still the current ones, otherwise (and for an `outdated`
- * outcome) it is `outdated`.
+ * outcome) it is `outdated`. Once the task has an official report, that candidate is `official` (permanently) and any
+ * other candidate that would read `ready` is `superseded`.
  */
-export function deriveStatus(row: Pick<CandidateRow, "outcome" | "confirmed_summary_id" | "conformity_decision_id">, current: { summaryId: string | null; decisionId: string | null }): ReportCandidateStatus {
+export function deriveStatus(
+  row: Pick<CandidateRow, "id" | "outcome" | "confirmed_summary_id" | "conformity_decision_id">,
+  current: { summaryId: string | null; decisionId: string | null },
+  official: { officialCandidateId: string | null } = { officialCandidateId: null },
+): ReportCandidateStatus {
+  if (official.officialCandidateId !== null && row.id === official.officialCandidateId) return "official";
   if (row.outcome === null) return "generating";
   if (row.outcome === "failed") return "failed";
-  if (row.outcome === "ready" && row.confirmed_summary_id === current.summaryId && row.conformity_decision_id === current.decisionId) return "ready";
+  if (row.outcome === "ready" && row.confirmed_summary_id === current.summaryId && row.conformity_decision_id === current.decisionId) {
+    return official.officialCandidateId !== null ? "superseded" : "ready";
+  }
   return "outdated";
 }
 
@@ -96,15 +104,23 @@ export async function getCurrentBindings(client: Pool | PoolClient, submissionId
   return { summaryId: summary?.id ?? null, decisionId: decision?.id ?? null };
 }
 
+/** The candidate id designated official for the given task(s), or null. Read only. */
+async function getOfficialCandidateId(client: Pool | PoolClient, taskIds: string[]): Promise<string | null> {
+  const result = await client.query<{ candidate_id: string }>("SELECT candidate_id FROM official_reports WHERE task_id = ANY($1::uuid[])", [taskIds]);
+  return result.rows[0]?.candidate_id ?? null;
+}
+
 /** Maps candidate rows to contract candidates, deriving the status against the current bindings of the submission. */
 export async function presentCandidateRows(client: Pool | PoolClient, rows: readonly CandidateRow[], currentSubmissionId: string): Promise<ReportCandidate[]> {
   const current = await getCurrentBindings(client, currentSubmissionId);
+  const taskIds = [...new Set(rows.map((row) => row.task_id))];
+  const official = { officialCandidateId: taskIds.length === 0 ? null : await getOfficialCandidateId(client, taskIds) };
   const outcomes = await getConformityOutcomes(client, [...new Set(rows.map((row) => row.conformity_decision_id))]);
   const scans = await getFileScanResults(client, [...new Set(rows.flatMap((row) => (row.stored_file_id ? [row.stored_file_id] : [])))]);
   return rows.map((row) => {
-    const derived = deriveStatus(row, current);
-    // A candidate of another submission can never be current.
-    const status = derived === "ready" && row.submission_id !== currentSubmissionId ? "outdated" : derived;
+    const derived = deriveStatus(row, current, official);
+    // A candidate of another submission can never be current (an official report is permanent and stays official).
+    const status = (derived === "ready" || derived === "superseded") && row.submission_id !== currentSubmissionId ? "outdated" : derived;
     return toReportCandidate(row, status, outcomes.get(row.conformity_decision_id)!, row.stored_file_id ? scans.get(row.stored_file_id) ?? null : null);
   });
 }
