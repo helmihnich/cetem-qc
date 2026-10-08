@@ -147,6 +147,23 @@ export const fr = {
     // French statement templates by rule ID; empty until CETEM approves a rule.
     rules: {} as Record<string, string>,
   },
+  // Story 10.1 — AI-assisted summary draft (a draft, never a confirmed summary or a conformity decision).
+  summary: {
+    heading: "Synthèse",
+    note: "Ce texte est un brouillon non confirmé. La décision de conformité reste celle du Responsable.",
+    request: "Demander un brouillon IA",
+    pending: "Génération du brouillon en cours…",
+    textLabel: "Texte de la synthèse",
+    draftLabel: "Brouillon IA — non confirmé",
+    draftSource: "Fournisseur {provider}, modèle {model} — {date}",
+    newDraftHeading: "Nouveau brouillon IA",
+    replace: "Remplacer le texte par ce brouillon",
+    unavailable: "Le brouillon IA n’est pas disponible. Réessayez ou rédigez la synthèse manuellement.",
+    apiUnavailable: "Le brouillon IA n’est pas disponible. Réessayez ou rédigez la synthèse manuellement.",
+    invalidRequest: "Cette demande est invalide.",
+    notRecorded: "Le brouillon n’a pas pu être enregistré.",
+    mockDraft: "Brouillon de démonstration : synthèse générée sans fournisseur externe. Relisez et corrigez ce texte avant toute utilisation ; il doit être confirmé par le Responsable.",
+  },
   employeeTasks: {
     title: "Mes tâches",
     description: "Consultez les tâches qui vous sont attribuées.",

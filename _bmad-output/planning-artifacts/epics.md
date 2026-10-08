@@ -816,7 +816,7 @@ So that writing assistance is useful without becoming an authority over the resu
 **And** generated text is an editable draft, not a confirmed summary or conformity decision; failures allow retry or manual entry
 **And** secrets, unnecessary sensitive payloads and duplicated prompt content are excluded from logs; if AI is unavailable, manual completion remains possible.
 
-**Traceability:** FR-032, SEC-011 (AI control), DR-008, DR-009, AD-8, AD-9, UX-DR2 (loading-state, alert-message), UX-DR7, UX-DR8.
+**Traceability:** spec `_bmad-output/specs/spec-10-1-request-an-ai-assisted-summary-draft/SPEC.md`; FR-032, SEC-011 (AI control), DR-008, DR-009, AD-8, AD-9, UX-DR2 (loading-state, alert-message), UX-DR7, UX-DR8. **Dependency:** Stories 9.1–9.4 (done); mock provider by default, Gemini optional.
 
 ### Story 10.2: Write, edit and explicitly confirm a summary
 

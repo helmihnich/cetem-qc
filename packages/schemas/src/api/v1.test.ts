@@ -4,7 +4,7 @@ import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import type { apiV1Components, apiV1Operations } from "@cetem-qc/types";
-import { acceptedEvidenceResponseSchema, insightDecisionRequestSchema, insightDecisionResponseSchema, manualInsightRequestSchema, manualInsightResponseSchema, apiErrorSchema, createEmployeeRequestSchema, createTaskRequestSchema, employeeCredentialResponseSchema, employeeListResponseSchema, employeeTaskListQuerySchema, employeeTaskListResponseSchema, employeeTaskAuditVersionSchema, employeeTaskResponseSchema, graphieDraftPayloadSchema, healthQuerySchema, healthResponseSchema, replacementTaskResponseSchema, syncOperationAcceptedSchema, syncOperationConflictSchema, syncOperationRejectedSchema, syncOperationRequestSchema, taskListQuerySchema, taskListResponseSchema, updateEmployeeStatusRequestSchema, updateEmployeeStatusResponseSchema } from "./v1.js";
+import { summaryDraftRequestSchema, summaryDraftResponseSchema, acceptedEvidenceResponseSchema, insightDecisionRequestSchema, insightDecisionResponseSchema, manualInsightRequestSchema, manualInsightResponseSchema, apiErrorSchema, createEmployeeRequestSchema, createTaskRequestSchema, employeeCredentialResponseSchema, employeeListResponseSchema, employeeTaskListQuerySchema, employeeTaskListResponseSchema, employeeTaskAuditVersionSchema, employeeTaskResponseSchema, graphieDraftPayloadSchema, healthQuerySchema, healthResponseSchema, replacementTaskResponseSchema, syncOperationAcceptedSchema, syncOperationConflictSchema, syncOperationRejectedSchema, syncOperationRequestSchema, taskListQuerySchema, taskListResponseSchema, updateEmployeeStatusRequestSchema, updateEmployeeStatusResponseSchema } from "./v1.js";
 
 const contractPath = fileURLToPath(new URL("../../../types/openapi/cetem-qc-v1.yaml", import.meta.url));
 
@@ -426,4 +426,14 @@ test("K13 manualInsights is required, parses empty and populated, and refuses ex
   assert.equal(manualInsightRequestSchema.safeParse({ text: "x".repeat(1000), justification: "y".repeat(1000) }).success, true);
   assert.deepEqual(manualInsightResponseSchema.parse(insight), insight);
   assert.equal(manualInsightResponseSchema.safeParse({ ...insight, sourceType: "rule" }).success, false);
+});
+
+test("K16 summaryDraftResponseSchema is strict, needs a 64-hex input set identity and the generated status; the request accepts only {}", () => {
+  const draft = { id: "00000000-0000-4000-8000-000000000041", status: "generated", text: "Brouillon.", provider: "mock", model: "mock-fixed-text", requestedAt: "2026-10-08T09:00:00.000Z", requestedBy: { id: "r1", displayName: "Responsable Test" }, summaryInputSetId: "f".repeat(64) };
+  assert.deepEqual(summaryDraftResponseSchema.parse(draft), draft);
+  for (const invalid of [{ ...draft, status: "failed" }, { ...draft, status: "confirmed" }, { ...draft, summaryInputSetId: "F".repeat(64) }, { ...draft, summaryInputSetId: "f".repeat(63) }, { ...draft, text: "" }, { ...draft, extra: 1 }, { ...draft, requestedBy: { id: "r1", displayName: "x", extra: 1 } }]) {
+    assert.equal(summaryDraftResponseSchema.safeParse(invalid).success, false, JSON.stringify(invalid).slice(0, 60));
+  }
+  assert.equal(summaryDraftRequestSchema.safeParse({}).success, true);
+  for (const invalid of [{ text: "x" }, { input: {} }, null, [], "x"]) assert.equal(summaryDraftRequestSchema.safeParse(invalid).success, false);
 });

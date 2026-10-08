@@ -90,6 +90,7 @@ const OTHER_MUTATING_ROUTES = [
   "POST /tasks/:taskId/replacements",
   "POST /tasks/:taskId/insight-decisions",
   "POST /tasks/:taskId/manual-insights",
+  "POST /tasks/:taskId/summary-drafts",
   "POST /employees",
   "POST /employees/:employeeId/credential",
   "POST /employees/:employeeId/password-reset",
@@ -186,6 +187,8 @@ test("F5 every other mutating route, called by both roles, leaves the accepted e
       ["POST", () => `/tasks/${taskId}/insight-decisions`, { proposalId: "inconnue", decision: "retained" }],
       // Story 9.4: a manual insight writes only its own insert-only table; the accepted evidence stays unchanged.
       ["POST", () => `/tasks/${taskId}/manual-insights`, { text: "Observation synthétique." }],
+      // Story 10.1: a summary draft request (mock provider) writes only its own insert-only table; the accepted evidence stays unchanged.
+      ["POST", () => `/tasks/${taskId}/summary-drafts`, {}],
       ["POST", () => `/tasks/${taskId}/deactivated-assignee-reassignment`, { successorId: employee, expectedAssignmentVersion: 1 }],
       ["POST", () => `/tasks/${taskId}/deactivated-assignee-recovery`, { sourceRevision: 1, successorId: employee, establishment: "Établissement B", service: "Radiologie", type: "graphie_mobile" }],
       ["POST", () => "/employees", { firstName: "Nouveau", surname: "Test", email: `${randomUUID()}@example.test` }],

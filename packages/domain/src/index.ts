@@ -5,3 +5,4 @@ export * from "./graphie-inputs.js";
 export * from "./insight-decisions.js";
 export * from "./manual-insights.js";
 export * from "./insight-rules.js";
+export * from "./summary-input.js";

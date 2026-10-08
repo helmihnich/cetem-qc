@@ -1,7 +1,7 @@
 import express from "express";
 import type { Server } from "node:http";
 import type { Pool } from "pg";
-import { acceptedEvidenceResponseSchema, apiErrorSchema, insightDecisionRequestSchema, insightDecisionResponseSchema, manualInsightRequestSchema, manualInsightResponseSchema, authenticationRequestSchema, authenticationResponseSchema, createDeactivatedAssigneeRecoveryRequestSchema, createEmployeeRequestSchema, createTaskRequestSchema, deactivatedAssigneeRecoveryResponseSchema, employeeCredentialResponseSchema, employeeListResponseSchema, employeeTaskAuditVersionSchema, employeeTaskRecoverySeedResponseSchema, employeeTaskListQuerySchema, employeeTaskListResponseSchema, employeeTaskResponseSchema, healthQuerySchema, passwordReplacementRequestSchema, reassignUnstartedTaskRequestSchema, reassignUnstartedTaskResponseSchema, replacementTaskResponseSchema, sessionResponseSchema, syncOperationRequestSchema, taskAssigneeListResponseSchema, taskListQuerySchema, taskListResponseSchema, taskResponseSchema, updateEmployeeStatusRequestSchema, updateEmployeeStatusResponseSchema } from "@cetem-qc/schemas/api/v1";
+import { acceptedEvidenceResponseSchema, apiErrorSchema, insightDecisionRequestSchema, insightDecisionResponseSchema, manualInsightRequestSchema, manualInsightResponseSchema, summaryDraftRequestSchema, summaryDraftResponseSchema, authenticationRequestSchema, authenticationResponseSchema, createDeactivatedAssigneeRecoveryRequestSchema, createEmployeeRequestSchema, createTaskRequestSchema, deactivatedAssigneeRecoveryResponseSchema, employeeCredentialResponseSchema, employeeListResponseSchema, employeeTaskAuditVersionSchema, employeeTaskRecoverySeedResponseSchema, employeeTaskListQuerySchema, employeeTaskListResponseSchema, employeeTaskResponseSchema, healthQuerySchema, passwordReplacementRequestSchema, reassignUnstartedTaskRequestSchema, reassignUnstartedTaskResponseSchema, replacementTaskResponseSchema, sessionResponseSchema, syncOperationRequestSchema, taskAssigneeListResponseSchema, taskListQuerySchema, taskListResponseSchema, taskResponseSchema, updateEmployeeStatusRequestSchema, updateEmployeeStatusResponseSchema } from "@cetem-qc/schemas/api/v1";
 import { getHealth } from "./modules/health/health-query.js";
 import {
   authenticateWithPassword,
@@ -19,6 +19,8 @@ import { readTaskAcceptanceAndLineage } from "./modules/audits/queries/task-audi
 import { openAcceptedEvidenceForReview } from "./modules/audits/commands/record-review-access.js";
 import { recordInsightDecision } from "./modules/audits/commands/record-insight-decision.js";
 import { addManualInsight } from "./modules/audits/commands/add-manual-insight.js";
+import { createSummaryDraftProvider } from "./modules/ai/index.js";
+import { requestSummaryDraft, summaryCommandTestSeams } from "./modules/summaries/commands/request-summary-draft.js";
 import { getAcceptedSubmissionForReview } from "./modules/audits/queries/accepted-submission.js";
 import { createReplacementControl } from "./modules/audits/commands/create-replacement-control.js";
 import { createDeactivatedAssigneeRecovery } from "./modules/audits/commands/create-deactivated-assignee-recovery.js";
@@ -29,6 +31,7 @@ export function createApp(pool?: Pool) {
   const app = express();
   let sharedPool = pool;
   const getPool = () => sharedPool ??= createDatabasePool();
+  let summaryProvider: ReturnType<typeof createSummaryDraftProvider> | undefined;
   app.locals.closeDatabase = async () => { if (sharedPool && sharedPool !== pool) await sharedPool.end(); };
 
   // Synchronization operations carry a whole form snapshot; only their two routes accept up to 256 kB.
@@ -595,6 +598,63 @@ export function createApp(pool?: Pool) {
     } catch {
       // Never log the error: it may carry request values.
       response.status(500).json(apiErrorSchema.parse({ error: { code: "INTERNAL_ERROR", message: "L’insight manuel n’a pas pu être enregistré." } }));
+    }
+  });
+
+  v1.post("/tasks/:taskId/summary-drafts", async (request, response) => {
+    response.set("Cache-Control", "no-store");
+    const session = response.locals.session as NonNullable<Awaited<ReturnType<typeof findActiveSession>>>;
+    // Log lines carry the actor and fixed classes only: never the task ID, prompt, input values, draft text or key.
+    const refuse = (refusalClass: "forbidden-role" | "not-found" | "validation") => console.info(JSON.stringify({ event: "summary.ai_draft_refused", class: refusalClass, actorId: session.id }));
+    if (session.role !== "responsable") {
+      refuse("forbidden-role");
+      response.status(403).json(apiErrorSchema.parse({ error: { code: "FORBIDDEN", message: "Accès réservé au Responsable de l’équipe." } }));
+      return;
+    }
+    const notFound = () => {
+      refuse("not-found");
+      response.status(404).json(apiErrorSchema.parse({ error: { code: "TASK_NOT_FOUND", message: "Tâche introuvable." } }));
+    };
+    const invalid = () => {
+      refuse("validation");
+      response.status(422).json(apiErrorSchema.parse({ error: { code: "VALIDATION_FAILED", message: "Cette demande de brouillon est invalide." } }));
+    };
+    const taskId = String(request.params.taskId ?? "");
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(taskId)) {
+      notFound();
+      return;
+    }
+    const parsed = summaryDraftRequestSchema.safeParse(request.body);
+    try {
+      if (!parsed.success) {
+        // A syntactically valid but unknown or other team's task must stay indistinguishable: check the task first.
+        const probe = await getAcceptedSubmissionForReview(getPool(), session.id, taskId.toLowerCase());
+        if (!probe) notFound();
+        else invalid();
+        return;
+      }
+      const provider = summaryCommandTestSeams.provider ?? (summaryProvider ??= createSummaryDraftProvider(process.env));
+      const outcome = await requestSummaryDraft(getPool(), provider, session.id, taskId.toLowerCase());
+      switch (outcome.type) {
+        case "generated":
+          console.info(JSON.stringify({ event: "summary.ai_draft_generated", actorId: session.id, provider: outcome.draft.provider, durationMs: outcome.durationMs }));
+          response.status(201).json(summaryDraftResponseSchema.parse(outcome.draft));
+          return;
+        case "failed":
+          console.info(JSON.stringify({ event: "summary.ai_draft_failed", actorId: session.id, provider: outcome.provider, class: outcome.failureClass, durationMs: outcome.durationMs }));
+          response.status(502).json(apiErrorSchema.parse({ error: { code: "AI_UNAVAILABLE", message: "Le brouillon IA n’est pas disponible. Réessayez ou rédigez la synthèse manuellement." } }));
+          return;
+        case "not-found":
+          notFound();
+          return;
+        case "inconsistent":
+          console.info(JSON.stringify({ event: "summary.ai_draft_inconsistent", actorId: session.id }));
+          response.status(500).json(apiErrorSchema.parse({ error: { code: "INTERNAL_ERROR", message: "Le brouillon n’a pas pu être enregistré." } }));
+          return;
+      }
+    } catch {
+      // Never log the error: it may carry request values.
+      response.status(500).json(apiErrorSchema.parse({ error: { code: "INTERNAL_ERROR", message: "Le brouillon n’a pas pu être enregistré." } }));
     }
   });
 

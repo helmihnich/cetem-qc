@@ -364,3 +364,25 @@ test("K14 addManualInsight returns typed outcomes for 201, 403, 404, 422 and 500
   await assert.rejects(clientFor({ error: { code: "AUTHENTICATION_FAILED", message: "x" } }, 401).client.addManualInsight(id, { text: "x" }), ApiRequestError);
   await assert.rejects(clientFor({ ...response, sourceType: "rule" }, 201).client.addManualInsight(id, { text: "x" }), ApiRequestError);
 });
+
+test("K17 requestSummaryDraft sends an empty body and returns typed outcomes for 201, 403, 404, 422, 500 and 502", async () => {
+  const id = "00000000-0000-4000-8000-000000000041";
+  const response = { id, status: "generated", text: "Brouillon.", provider: "mock", model: "mock-fixed-text", requestedAt: "2026-10-08T09:00:00.000Z", requestedBy: { id, displayName: "Responsable Test" }, summaryInputSetId: "a".repeat(64) };
+  const ok = clientFor(response, 201);
+  assert.deepEqual(await ok.client.requestSummaryDraft(id), { status: 201, body: response });
+  assert.equal(ok.calls[0]!.url, `https://cetem-qc.example.test/api/v1/tasks/${id}/summary-drafts`);
+  assert.equal(ok.calls[0]!.init?.method, "POST");
+  assert.deepEqual(JSON.parse(String(ok.calls[0]!.init?.body)), {});
+  const outcomes: Array<[number, string, string]> = [
+    [403, "FORBIDDEN", "Accès réservé au Responsable de l’équipe."],
+    [404, "TASK_NOT_FOUND", "Tâche introuvable."],
+    [422, "VALIDATION_FAILED", "Cette demande est invalide."],
+    [500, "INTERNAL_ERROR", "Le brouillon n’a pas pu être enregistré."],
+    [502, "AI_UNAVAILABLE", "Le brouillon IA n’est pas disponible."],
+  ];
+  for (const [status, code, message] of outcomes) {
+    assert.deepEqual(await clientFor({ error: { code, message } }, status).client.requestSummaryDraft(id), { status, code, message });
+  }
+  await assert.rejects(clientFor({ error: { code: "AUTHENTICATION_FAILED", message: "x" } }, 401).client.requestSummaryDraft(id), ApiRequestError);
+  await assert.rejects(clientFor({ ...response, status: "confirmed" }, 201).client.requestSummaryDraft(id), ApiRequestError);
+});

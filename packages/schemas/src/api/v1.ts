@@ -31,6 +31,8 @@ type InsightDecisionRequestContract = apiV1Operations["recordInsightDecision"]["
 type InsightDecisionResponseContract = apiV1Operations["recordInsightDecision"]["responses"][200]["content"]["application/json"];
 type ManualInsightRequestContract = apiV1Operations["addManualInsight"]["requestBody"]["content"]["application/json"];
 type ManualInsightContract = apiV1Operations["addManualInsight"]["responses"][201]["content"]["application/json"];
+type SummaryDraftRequestContract = apiV1Operations["requestSummaryDraft"]["requestBody"]["content"]["application/json"];
+type SummaryDraftResponseContract = apiV1Operations["requestSummaryDraft"]["responses"][201]["content"]["application/json"];
 type EmployeeTaskListResponseContract = apiV1Operations["listAssignedEmployeeTasks"]["responses"][200]["content"]["application/json"];
 type EmployeeTaskResponseContract = apiV1Operations["getAssignedEmployeeTask"]["responses"][200]["content"]["application/json"];
 
@@ -167,6 +169,18 @@ export const manualInsightSchema: z.ZodType<ManualInsightContract> = z.object({
   author: z.object({ id: z.string(), displayName: z.string() }).strict(),
 }).strict();
 export const manualInsightResponseSchema = manualInsightSchema;
+/** Story 10.1: the request carries nothing; the server supplies every input of the summary draft. */
+export const summaryDraftRequestSchema: z.ZodType<SummaryDraftRequestContract> = z.object({}).strict();
+export const summaryDraftResponseSchema: z.ZodType<SummaryDraftResponseContract> = z.object({
+  id: z.string().uuid(),
+  status: z.literal("generated"),
+  text: z.string().min(1),
+  provider: z.string().min(1),
+  model: z.string().min(1),
+  requestedAt: z.string().datetime(),
+  requestedBy: z.object({ id: z.string(), displayName: z.string() }).strict(),
+  summaryInputSetId: z.string().regex(/^[0-9a-f]{64}$/),
+}).strict();
 export const acceptedEvidenceResponseSchema: z.ZodType<AcceptedEvidenceResponseContract> = z.object({
   manualInsights: z.array(manualInsightSchema),
   insights: insightProposalSetSchema,
@@ -290,6 +304,8 @@ export type InsightDecisionRequest = z.infer<typeof insightDecisionRequestSchema
 export type InsightDecisionResponse = z.infer<typeof insightDecisionResponseSchema>;
 export type ManualInsightRequest = z.infer<typeof manualInsightRequestSchema>;
 export type ManualInsightResponse = z.infer<typeof manualInsightResponseSchema>;
+export type SummaryDraftRequest = z.infer<typeof summaryDraftRequestSchema>;
+export type SummaryDraftResponse = z.infer<typeof summaryDraftResponseSchema>;
 export type EmployeeTaskListResponse = z.infer<typeof employeeTaskListResponseSchema>;
 export type EmployeeTaskResponse = z.infer<typeof employeeTaskResponseSchema>;
 export type SessionTokenResponse = z.infer<typeof sessionTokenResponseSchema>;

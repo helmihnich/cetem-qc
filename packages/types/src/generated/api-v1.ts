@@ -420,6 +420,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/tasks/{taskId}/summary-drafts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Request an AI-assisted summary draft for an own-team accepted audit
+         * @description Responsable only. The body is empty: the server builds the exact input set (stored measurements, stored results and the retained insights, no names or IDs) and calls the configured provider once. Every request, successful or failed, inserts one insert-only row. The draft is not a confirmed summary and carries no conformity. A malformed, unknown or another team's task, and an own-team task without accepted submission, all get the same 404.
+         */
+        post: operations["requestSummaryDraft"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -696,6 +716,24 @@ export interface components {
                 displayName: string;
             };
         };
+        /** @description Always empty; the server supplies every input. */
+        SummaryDraftRequest: Record<string, never>;
+        SummaryDraftResponse: {
+            /** Format: uuid */
+            id: string;
+            /** @enum {string} */
+            status: "generated";
+            text: string;
+            provider: string;
+            model: string;
+            /** Format: date-time */
+            requestedAt: string;
+            requestedBy: {
+                id: string;
+                displayName: string;
+            };
+            summaryInputSetId: string;
+        };
         InsightDecisionRequest: {
             proposalId: string;
             /** @enum {string} */
@@ -915,7 +953,7 @@ export interface components {
             /** @constant */
             version: "v1";
         };
-        /** @description Error envelope. Codes include VALIDATION_ERROR, AUTHENTICATION_FAILED, FORBIDDEN, TASK_NOT_FOUND, PAYLOAD_TOO_LARGE, IDEMPOTENCY_KEY_REUSED, AUDIT_NOT_ACCEPTED, REPLACEMENT_ALREADY_EXISTS, TASK_ASSIGNEE_UNAVAILABLE and INTERNAL_ERROR. */
+        /** @description Error envelope. Codes include VALIDATION_ERROR, AUTHENTICATION_FAILED, FORBIDDEN, TASK_NOT_FOUND, PAYLOAD_TOO_LARGE, IDEMPOTENCY_KEY_REUSED, AUDIT_NOT_ACCEPTED, REPLACEMENT_ALREADY_EXISTS, TASK_ASSIGNEE_UNAVAILABLE, AI_UNAVAILABLE and INTERNAL_ERROR. */
         ApiError: {
             error: {
                 code: string;
@@ -2512,6 +2550,86 @@ export interface operations {
             };
             /** @description Evidence inconsistent or insight not recorded (INTERNAL_ERROR) */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+        };
+    };
+    requestSummaryDraft: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                taskId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SummaryDraftRequest"];
+            };
+        };
+        responses: {
+            /** @description Recorded draft (Cache-Control no-store) */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SummaryDraftResponse"];
+                };
+            };
+            /** @description Session rejected */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Responsable role required (FORBIDDEN) */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Malformed */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Non-empty body (VALIDATION_FAILED) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Evidence inconsistent or request not recorded (INTERNAL_ERROR) */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiError"];
+                };
+            };
+            /** @description Provider failed; a failed row is recorded and the request can be sent again (AI_UNAVAILABLE) */
+            502: {
                 headers: {
                     [name: string]: unknown;
                 };

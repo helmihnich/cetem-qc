@@ -7,6 +7,7 @@ import type { CalculationContext } from "@cetem-qc/domain";
 import type { AcceptedEvidenceResponse } from "@cetem-qc/api-client/v1";
 import { fr } from "@cetem-qc/i18n";
 import { AcceptedEvidenceView, InsightProposalsSection, ManualInsightsSection, loadAcceptedEvidence, submitInsightDecision, submitManualInsight } from "./accepted-evidence";
+import { SummaryDraftSection, applyDraft, requestSummaryDraftFromServer } from "./summary-draft";
 import type { EvidenceLoad } from "./accepted-evidence";
 import { TaskListView } from "./task-list";
 import type { TaskListViewProps } from "./task-list";
@@ -117,7 +118,9 @@ test("W3 the back control calls the close handler", () => {
 test("W4 the panel holds no input, textarea, select, form, or button besides « Retour à la liste », and no approval wording", () => {
   // Story 9.4 adds the manual-insight form to the insights area; everything outside that section stays control-free.
   const html = view(ready(evidenceFor(GRAPHIE_CALCULATION_IDENTITY, { lineage: { replacementOf: null, replacedBy: DRAFT, recoverySource: null, recoverySuccessorTaskId: null } })))
-    .replace(/<section class="evidence-manual-insights"[\s\S]*?<\/form><\/section>/, "");
+    .replace(/<section class="evidence-manual-insights"[\s\S]*?<\/form><\/section>/, "")
+    // Story 10.1 adds the summary block (one request button, one text area, no form); it is covered by W24–W28.
+    .replace(/<section class="evidence-summary"[\s\S]*?<\/section>/, "");
   for (const tag of ["input", "textarea", "select", "form"]) assert.ok(!new RegExp(`<${tag}\\b`).test(html), tag);
   const buttons = [...html.matchAll(/<button[^>]*>([\s\S]*?)<\/button>/g)].map((match) => decode(match[1]!).trim());
   assert.deepEqual(buttons, ["Retour à la liste"]);
@@ -386,4 +389,77 @@ test("W22 no approve, reject or conformity wording in the manual section; the co
   const text = decode(manualSection(markup));
   assert.ok(!/approuv|rejet|rejeter|conforme|non conforme|\b(approve|reject|submit|delete|edit|added|author)\b/i.test(text.replace(fr.insights.manualHint, "")));
   assert.equal(decode(markup).split("la conformité finale de l'appareil est décidée par le Responsable").length - 1, 1);
+});
+
+// Story 10.1 (W24–W28): AI summary draft block in the W5 panel.
+const summaryDraft = (text = "Brouillon IA.") => ({
+  id: DRAFT, status: "generated" as const, text, provider: "mock", model: "mock-fixed-text", requestedAt: "2026-10-08T09:00:00.000Z",
+  requestedBy: { id: OTHER, displayName: "Responsable Test" }, summaryInputSetId: "a".repeat(64),
+});
+const summaryBlock = (markup: string) => /<section class="evidence-summary"[\s\S]*?<\/section>/.exec(markup)?.[0] ?? "";
+
+test("W24 the summary block, note, button and always-editable text area render for every accepted audit", () => {
+  const available = ready(evidenceFor(GRAPHIE_CALCULATION_IDENTITY, { insights: { status: "available", registryVersion: "insight-registry-1", proposals: [proposalA()] } }));
+  const empty = ready(evidenceFor(GRAPHIE_CALCULATION_IDENTITY, { insights: { status: "available", registryVersion: "insight-registry-1", proposals: [] } }));
+  for (const load of [ready(), available, empty]) {
+    const block = summaryBlock(view(load));
+    const text = decode(block);
+    for (const label of [fr.summary.heading, fr.summary.note, fr.summary.request, fr.summary.textLabel]) assert.ok(text.includes(label), label);
+    assert.match(block, /<textarea id="summary-text"/);
+    assert.ok(!/<textarea[^>]*(disabled|readonly)/i.test(block));
+    assert.match(block, /<label for="summary-text">/);
+  }
+});
+
+test("W25 pending shows the loading text, disables the button and sets aria-busy; a filled draft is labelled unconfirmed with provider, model and date", () => {
+  const pending = summaryBlock(renderToStaticMarkup(<SummaryDraftSection text="" pending onRequest={noop} />));
+  assert.ok(decode(pending).includes(fr.summary.pending));
+  assert.match(pending, /<button[^>]*aria-busy="true"[^>]*>/);
+  assert.match(pending, /<button[^>]*disabled=""[^>]*>/);
+  const idle = summaryBlock(renderToStaticMarkup(<SummaryDraftSection text="" onRequest={noop} />));
+  assert.ok(!/disabled=""/.test(idle) && !decode(idle).includes(fr.summary.pending));
+  const draft = summaryDraft();
+  const filled = decode(summaryBlock(renderToStaticMarkup(<SummaryDraftSection text={draft.text} filled={draft} onRequest={noop} />)));
+  assert.ok(filled.includes(fr.summary.draftLabel) && filled.includes("Fournisseur mock, modèle mock-fixed-text"));
+  assert.deepEqual(applyDraft("", draft), { text: "Brouillon IA.", offered: null });
+  assert.deepEqual(applyDraft("  \n ", draft), { text: "Brouillon IA.", offered: null });
+});
+
+test("W26 with typed text a new draft is offered in a separate block and only replaces the text through the replace button", () => {
+  const draft = summaryDraft("Nouveau texte.");
+  assert.deepEqual(applyDraft("Mon texte.", draft), { text: "Mon texte.", offered: draft });
+  const markup = renderToStaticMarkup(<SummaryDraftSection text="Mon texte." offered={draft} onRequest={noop} onReplace={noop} />);
+  assert.match(markup, /<textarea[^>]*>Mon texte\.<\/textarea>/);
+  const text = decode(summaryBlock(markup));
+  assert.ok(text.includes(fr.summary.newDraftHeading) && text.includes("Nouveau texte.") && text.includes(fr.summary.replace));
+});
+
+test("W27 a failure shows the French alert, keeps the typed text and leaves the retry button enabled; requests fail soft", async () => {
+  const markup = summaryBlock(renderToStaticMarkup(<SummaryDraftSection text="Mon texte." failed onRequest={noop} />));
+  assert.match(markup, /role="alert"/);
+  assert.ok(decode(markup).includes("Le brouillon IA n’est pas disponible. Réessayez ou rédigez la synthèse manuellement."));
+  assert.match(markup, /<textarea[^>]*>Mon texte\.<\/textarea>/);
+  assert.ok(!/disabled=""/.test(markup));
+  const calls: Array<{ url: string; body: unknown }> = [];
+  const created = summaryDraft();
+  const okFetch = (async (url: string | URL | Request, init?: RequestInit) => { calls.push({ url: String(url), body: init?.body }); return new Response(JSON.stringify(created), { status: 201 }); }) as typeof fetch;
+  assert.deepEqual(await requestSummaryDraftFromServer(TASK, okFetch), { kind: "generated", draft: created });
+  assert.equal(calls[0]!.url, `/api/tasks/${TASK}/summary-drafts`);
+  assert.equal(calls[0]!.body, "{}");
+  for (const status of [200, 403, 404, 422, 500, 502, 503]) assert.deepEqual(await requestSummaryDraftFromServer(TASK, stubFetch(status, {})), { kind: "failed" });
+  assert.deepEqual(await requestSummaryDraftFromServer(TASK, (async () => { throw new Error("offline"); }) as typeof fetch), { kind: "failed" });
+  assert.deepEqual(await requestSummaryDraftFromServer(TASK, stubFetch(201, { ...created, status: "confirmed" })), { kind: "failed" });
+});
+
+test("W28 the block has no save, confirm, conformity or approval control or wording, no English text, and draft markup is shown as text", () => {
+  const draft = summaryDraft("<b>gras</b> & <script>x</script>");
+  const markup = summaryBlock(renderToStaticMarkup(<SummaryDraftSection text="Mon texte." filled={draft} offered={draft} onRequest={noop} onReplace={noop} />));
+  assert.ok(!markup.includes("<b>gras") && !markup.includes("<script>"));
+  const text = decode(markup);
+  assert.ok(text.includes("<b>gras</b>"));
+  const withoutNote = text.replace(fr.summary.note, "");
+  assert.ok(!/enregistrer|confirmer|confirmation|approuv|conforme|valider|verrouill/i.test(withoutNote), withoutNote);
+  assert.ok(!/\b(save|approve|conformity|draft|summary|request|loading)\b/i.test(text.replace(draft.text, "")));
+  assert.deepEqual([...markup.matchAll(/<button[^>]*>([^<]*)<\/button>/g)].map((match) => match[1]), [fr.summary.request, fr.summary.replace]);
+  assert.equal(decode(view(ready())).split("la conformité finale de l'appareil est décidée par le Responsable").length - 1, 1);
 });

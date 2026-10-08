@@ -1054,6 +1054,41 @@ paths:
         '404': { description: Malformed, unknown or another team's task, or no accepted submission (TASK_NOT_FOUND), content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
         '422': { description: Invalid body (VALIDATION_FAILED), content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
         '500': { description: Evidence inconsistent or insight not recorded (INTERNAL_ERROR), content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+  /tasks/{taskId}/summary-drafts:
+    post:
+      operationId: requestSummaryDraft
+      summary: Request an AI-assisted summary draft for an own-team accepted audit
+      description: >-
+        Responsable only. The body is empty: the server builds the exact input set (stored measurements, stored results
+        and the retained insights, no names or IDs) and calls the configured provider once. Every request, successful or
+        failed, inserts one insert-only row. The draft is not a confirmed summary and carries no conformity. A malformed,
+        unknown or another team's task, and an own-team task without accepted submission, all get the same 404.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: taskId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SummaryDraftRequest'
+      responses:
+        '201':
+          description: Recorded draft (Cache-Control no-store)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SummaryDraftResponse'
+        '401': { description: Session rejected, content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+        '403': { description: Responsable role required (FORBIDDEN), content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+        '404': { description: Malformed, unknown or another team's task, or no accepted submission (TASK_NOT_FOUND), content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+        '422': { description: Non-empty body (VALIDATION_FAILED), content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+        '500': { description: Evidence inconsistent or request not recorded (INTERNAL_ERROR), content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
+        '502': { description: Provider failed; a failed row is recorded and the request can be sent again (AI_UNAVAILABLE), content: { application/json: { schema: { $ref: '#/components/schemas/ApiError' } } } }
 components:
   securitySchemes:
     bearerAuth:
@@ -1431,6 +1466,29 @@ components:
           properties:
             id: { type: string }
             displayName: { type: string }
+    SummaryDraftRequest:
+      type: object
+      additionalProperties: false
+      description: Always empty; the server supplies every input.
+    SummaryDraftResponse:
+      type: object
+      additionalProperties: false
+      required: [id, status, text, provider, model, requestedAt, requestedBy, summaryInputSetId]
+      properties:
+        id: { type: string, format: uuid }
+        status: { type: string, enum: [generated] }
+        text: { type: string, minLength: 1 }
+        provider: { type: string, minLength: 1 }
+        model: { type: string, minLength: 1 }
+        requestedAt: { type: string, format: date-time }
+        requestedBy:
+          type: object
+          additionalProperties: false
+          required: [id, displayName]
+          properties:
+            id: { type: string }
+            displayName: { type: string }
+        summaryInputSetId: { type: string, pattern: '^[0-9a-f]{64}$' }
     InsightDecisionRequest:
       type: object
       additionalProperties: false
@@ -1759,7 +1817,7 @@ components:
       description: >-
         Error envelope. Codes include VALIDATION_ERROR, AUTHENTICATION_FAILED, FORBIDDEN, TASK_NOT_FOUND,
         PAYLOAD_TOO_LARGE, IDEMPOTENCY_KEY_REUSED, AUDIT_NOT_ACCEPTED, REPLACEMENT_ALREADY_EXISTS,
-        TASK_ASSIGNEE_UNAVAILABLE and INTERNAL_ERROR.
+        TASK_ASSIGNEE_UNAVAILABLE, AI_UNAVAILABLE and INTERNAL_ERROR.
       required: [error]
       properties:
         error:

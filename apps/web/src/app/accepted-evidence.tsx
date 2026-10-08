@@ -7,6 +7,7 @@ import { GRAPHIE_CALCULATION_FIELD_ID_LIST, GRAPHIE_MOBILE_POV_CATALOGUE } from 
 import type { CatalogueField, CatalogueSection, GraphieCalculationResults } from "@cetem-qc/domain";
 import { fr } from "@cetem-qc/i18n";
 import { GraphieCalculationReview } from "./graphie-calculation-review";
+import { SummaryDraftPanel } from "./summary-draft";
 
 const dateTimeFormatter = new Intl.DateTimeFormat("fr-FR", { dateStyle: "medium", timeStyle: "short" });
 const calculationFieldIds = new Set<string>(GRAPHIE_CALCULATION_FIELD_ID_LIST);
@@ -252,6 +253,7 @@ export function InsightProposalsPanel({ taskId, insights, initialDecisions, init
   return <>
     <InsightProposalsSection insights={insights} decisions={decisions} pendingProposalId={pendingProposalId} failed={failed} onDecide={onDecide} manualInsightCount={manualInsights.length} />
     <ManualInsightsSection insights={manualInsights} pending={manualPending} failed={manualFailed} onAdd={onAddManual} />
+    <SummaryDraftPanel taskId={taskId} />
   </>;
 }
 
