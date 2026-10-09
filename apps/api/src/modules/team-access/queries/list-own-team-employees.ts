@@ -6,6 +6,8 @@ export interface TeamEmployee {
   surname: string;
   email: string;
   active: boolean;
+  /** False until the technician replaces the temporary credential at first login. */
+  activated: boolean;
 }
 
 interface TeamEmployeeRow extends QueryResultRow {
@@ -14,11 +16,12 @@ interface TeamEmployeeRow extends QueryResultRow {
   surname: string;
   email: string;
   is_active: boolean;
+  must_change_password: boolean;
 }
 
 export async function listOwnTeamEmployees(pool: Pool, responsableAccountId: string): Promise<TeamEmployee[]> {
   const result = await pool.query<TeamEmployeeRow>(
-    `SELECT employee.id, employee.first_name, employee.surname, employee.email, employee.is_active
+    `SELECT employee.id, employee.first_name, employee.surname, employee.email, employee.is_active, employee.must_change_password
      FROM identity_teams team
      JOIN identity_accounts employee ON employee.team_id = team.id
      WHERE team.responsable_account_id = $1
@@ -32,5 +35,6 @@ export async function listOwnTeamEmployees(pool: Pool, responsableAccountId: str
     surname: row.surname,
     email: row.email,
     active: row.is_active,
+    activated: row.must_change_password === false,
   }));
 }

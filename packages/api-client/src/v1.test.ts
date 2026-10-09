@@ -275,8 +275,9 @@ test("K2 the audit version throws ApiRequestError on errors and invalid bodies",
 test("employee password reset posts to the versioned endpoint and maps the inactive conflict", async () => {
   const employeeId = "00000000-0000-4000-8000-000000000020";
   const expected = {
-    employee: { id: employeeId, firstName: "Test", surname: "Employe", email: "employe@example.test", active: true },
+    employee: { id: employeeId, firstName: "Test", surname: "Employe", email: "employe@example.test", active: true, activated: false },
     temporaryCredential: "temporary-credential-value",
+    emailSent: true,
   };
   const { client, calls } = clientFor(expected);
   assert.deepEqual(await client.resetEmployeePassword(employeeId), expected);

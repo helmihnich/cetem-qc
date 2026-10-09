@@ -1685,13 +1685,16 @@ components:
             $ref: '#/components/schemas/TeamEmployee'
     TeamEmployee:
       type: object
-      required: [id, firstName, surname, email, active]
+      required: [id, firstName, surname, email, active, activated]
       properties:
         id: { type: string, format: uuid }
         firstName: { type: string }
         surname: { type: string }
         email: { type: string, format: email }
         active: { type: boolean }
+        activated:
+          type: boolean
+          description: False until the technician replaces the temporary credential at first login.
     CreateEmployeeRequest:
       type: object
       required: [firstName, surname, email]
@@ -1702,11 +1705,14 @@ components:
         email: { type: string, format: email, minLength: 3, maxLength: 254 }
     EmployeeCredentialResponse:
       type: object
-      required: [employee, temporaryCredential]
+      required: [employee, temporaryCredential, emailSent]
       properties:
         employee:
           $ref: '#/components/schemas/TeamEmployee'
         temporaryCredential: { type: string, minLength: 1 }
+        emailSent:
+          type: boolean
+          description: True when the temporary credential was e-mailed to the technician; otherwise it must be handed over manually.
     UpdateEmployeeStatusRequest:
       type: object
       additionalProperties: false

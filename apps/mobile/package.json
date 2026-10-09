@@ -3,7 +3,9 @@
   "private": true,
   "main": "expo/AppEntry",
   "scripts": {
-    "start": "expo start --localhost",
+    "start": "expo start --lan",
+    "start:tunnel": "expo start --tunnel",
+    "start:localhost": "expo start --localhost",
     "android": "expo start --android",
     "ios": "expo start --ios",
     "test": "node --experimental-test-module-mocks --import tsx --test \"*.test.ts\" \"*.test.tsx\" \"local-drafts/**/*.test.{ts,tsx}\" \"sync/**/*.test.{ts,tsx}\"",
@@ -14,12 +16,16 @@
     "@cetem-qc/domain": "workspace:*",
     "@cetem-qc/i18n": "workspace:*",
     "expo": "57.0.25",
+    "expo-constants": "~57.0.19",
     "expo-crypto": "~57.0.3",
+    "expo-linear-gradient": "~57.0.2",
     "expo-network": "~57.0.2",
     "expo-secure-store": "~57.0.4",
     "expo-sqlite": "~57.0.3",
+    "expo-status-bar": "~57.0.1",
     "react": "19.2.3",
-    "react-native": "0.86.3"
+    "react-native": "0.86.3",
+    "react-native-safe-area-context": "~5.7.0"
   },
   "devDependencies": {
     "react-test-renderer": "19.2.3",

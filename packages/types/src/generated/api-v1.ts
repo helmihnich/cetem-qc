@@ -771,6 +771,8 @@ export interface components {
             /** Format: email */
             email: string;
             active: boolean;
+            /** @description False until the technician replaces the temporary credential at first login. */
+            activated: boolean;
         };
         CreateEmployeeRequest: {
             firstName: string;
@@ -781,6 +783,8 @@ export interface components {
         EmployeeCredentialResponse: {
             employee: components["schemas"]["TeamEmployee"];
             temporaryCredential: string;
+            /** @description True when the temporary credential was e-mailed to the technician; otherwise it must be handed over manually. */
+            emailSent: boolean;
         };
         UpdateEmployeeStatusRequest: {
             active: boolean;

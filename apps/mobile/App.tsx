@@ -1,7 +1,12 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { ActivityIndicator, AppState, Pressable, SafeAreaView, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View, type StyleProp, type ViewStyle } from "react-native";
+import { ActivityIndicator, AppState, Pressable, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View, type StyleProp, type ViewStyle } from "react-native";
+import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
+import { StatusBar } from "expo-status-bar";
+import { LinearGradient } from "expo-linear-gradient";
 import * as Network from "expo-network";
 import * as Crypto from "expo-crypto";
+import Constants from "expo-constants";
+import { resolveApiBaseUrl } from "./api-base-url";
 import { ApiRequestError, createApiClient } from "@cetem-qc/api-client/v1";
 import type { ApiClient, EmployeeTaskListResponse, EmployeeTaskResponse } from "@cetem-qc/api-client/v1";
 import { fr } from "@cetem-qc/i18n";
@@ -9,7 +14,7 @@ import { GRAPHIE_CALCULATION_IDENTITY, PASSWORD_RULES, checkPasswordRules, isInv
 import { getEmployeeTaskListState } from "./employee-task-list-state";
 import { EmployeeTaskDetailRequests } from "./employee-task-detail-state";
 import type { EmployeeTaskDetailState } from "./employee-task-detail-state";
-import { getEmployeeTaskContentWidth, getEmployeeTaskPresentation } from "./employee-task-layout";
+import { EMPLOYEE_CONTENT_HORIZONTAL_GUTTER, getEmployeeTaskContentWidth, getEmployeeTaskPresentation } from "./employee-task-layout";
 import { createOfflineAuthorizationService, offlineAuthorizationWindowFromDays } from "./offline-authorization-state";
 import type { OfflineAuthorizationState } from "./offline-authorization-state";
 import { expoSecureKeyValueStore } from "./offline-authorization-storage";
@@ -30,13 +35,14 @@ import { GRAPHIE_CALCULATION_RULE_ID, GRAPHIE_CALCULATION_RULE_VERSION, GRAPHIE_
 import type { EmployeeTaskLayout } from "./employee-task-layout";
 import { calculateGraphieResults, type GraphieCalculationResults } from "./graphie-calculation-service";
 import { GRAPHIE_RESULT_BLOCKS_BY_SECTION, GraphieTestResultBlock } from "./graphie-test-result";
+import { BRAND_TAGLINE, colors, elevation, elevationRaised, gradients, radii, space, toneColors, typography, type Tone } from "./theme";
 
 declare const process: { env: { EXPO_PUBLIC_API_URL?: string; EXPO_PUBLIC_OFFLINE_AUTHORIZATION_WINDOW_DAYS?: string } };
 
 type AuthenticatedUser = { id: string; email: string; displayName: string; role: "employe"; mustChangePassword: boolean };
 type Screen = { kind: "list" } | { kind: "detail"; id: string };
 
-const apiBaseUrl = process.env.EXPO_PUBLIC_API_URL ?? "http://127.0.0.1:3001";
+const apiBaseUrl = resolveApiBaseUrl(process.env.EXPO_PUBLIC_API_URL, Constants.expoConfig?.hostUri);
 
 export default function App() {
   const { width: viewportWidth } = useWindowDimensions();
@@ -676,7 +682,8 @@ export default function App() {
   }, [inConflict]);
 
   useEffect(() => {
-    if (!user) { localRefreshGenerationRef.current++; setLocalDrafts([]); setCachedTaskContext(undefined); return; }
+    // Before the temporary password is replaced there is no local grant, so protected local data stays closed.
+    if (!user || user.mustChangePassword) { localRefreshGenerationRef.current++; setLocalDrafts([]); setCachedTaskContext(undefined); return; }
     void refreshLocalDrafts(user.id);
   }, [user?.id, authorization.status]);
 
@@ -732,6 +739,9 @@ export default function App() {
       isOnlineRef.current = connected;
       setIsOnline(connected);
       if (user && activeIdentityRef.current !== user.id) activeIdentityRef.current = user.id;
+      // A first sign-in holds no offline grant until the temporary password is replaced (online, server-checked):
+      // revalidating it would find no grant and sign the Technicien out before the activation screen is usable.
+      if (connected && user?.mustChangePassword) return;
       if (!connected) {
         try {
           const current = await authorizationRef.current.hydrate();
@@ -1274,186 +1284,339 @@ export default function App() {
   const shownSubmissionIssues = submissionIssues && user && submissionIssues.employeeId === user.id && submissionIssues.taskId === detailTaskId
     && error === fr.employeeTasks.submissionInvalid ? rejectionIssueLines(submissionIssues.issues) : undefined;
 
+  const signedIn = Boolean(user && !user.mustChangePassword);
+  const sectionNavigation = <View style={styles.sectionNavigation}>{GRAPHIE_MOBILE_POV_CATALOGUE.sections.map((section) => {
+    const selected = section.id === activeSectionId;
+    return <Pressable key={section.id} accessibilityRole="button" accessibilityState={{ selected }} onPress={() => { setActiveSectionId(section.id); if (draftSaveState === "saving") void saveDraft(); }} style={[styles.sectionChip, selected && styles.sectionChipSelected]}>
+      <Text style={[styles.sectionChipText, selected && styles.sectionChipTextSelected]}>{section.labelFr}</Text>
+    </Pressable>;
+  })}</View>;
+  const activeSectionForm = GRAPHIE_MOBILE_POV_CATALOGUE.sections.filter((section) => section.id === activeSectionId).map((section) => <GraphieSectionForm key={section.id} section={section} layout={layout} values={formValues} results={calculationResults} onChange={changeFormField} editable={formEditable} issues={fieldIssues} copiedFields={new Set(activeDraft?.recoveryProvenance?.fields.map((field) => field.destinationField.replace(/^values\./, "")) ?? [])} />);
+  const saveStateTone: Tone = presentedSaveState === "failed" ? "danger" : presentedSaveState === "saving" ? "info" : presentedSaveState === "saved" ? "success" : "neutral";
+
   return (
-    <SafeAreaView style={styles.safe}>
-      <ScrollView contentContainerStyle={[styles.container, { alignItems: "center" }]} keyboardShouldPersistTaps="handled">
-        <View style={{ width: contentWidth, maxWidth: "100%", gap: 18 }}>
-          <Text style={styles.brand}>CETEM-QC</Text>
-        {!user ? (
-          <View style={[styles.card, layout === "tablet" && styles.tabletCard]}>
-            <Text style={styles.heading}>{fr.auth.employeeTitle}</Text>
-            <Text style={styles.muted}>{fr.auth.employeeDescription}</Text>
-            <Field label={fr.auth.email} value={email} onChangeText={setEmail} autoCapitalize="none" keyboardType="email-address" />
-            <Field label={fr.auth.password} value={password} onChangeText={setPassword} secureTextEntry />
-            {error ? <Text accessibilityRole="alert" style={styles.error}>{error}</Text> : null}
-            <Button title={fr.auth.signIn} onPress={() => void signIn()} disabled={loading || !email || !password} />
-            <Text style={styles.muted}>{fr.auth.forgotPasswordEmployee}</Text>
-          </View>
-        ) : user.mustChangePassword ? (
-          <View style={[styles.card, layout === "tablet" && styles.tabletCard]}>
-            <Text style={styles.heading}>{fr.auth.activationTitle}</Text>
-            <Text style={styles.muted}>{fr.auth.activationDescription}</Text>
-            <Field label={fr.auth.newPassword} value={newPassword} onChangeText={setNewPassword} secureTextEntry />
-            <View accessibilityLiveRegion="polite">
-              <Text style={styles.muted}>{fr.auth.passwordRequirements}</Text>
-              {PASSWORD_RULES.map((rule) => {
-                const met = checkPasswordRules(newPassword)[rule];
-                return <Text key={rule} style={met ? styles.ruleMet : styles.muted}>{met ? "✓" : "○"} {fr.auth.passwordRules[rule]}</Text>;
-              })}
-            </View>
-            {error ? <Text accessibilityRole="alert" style={styles.error}>{error}</Text> : null}
-            <Button title={fr.auth.activate} onPress={() => void activate()} disabled={loading || !isPasswordCompliant(newPassword)} />
-            <Button title={fr.auth.logout} onPress={() => void signOut()} secondary disabled={loading} />
-          </View>
-        ) : (
-          <View style={[styles.card, layout === "tablet" && styles.tabletCard]}>
-            <Text style={styles.muted}>{fr.employeeTasks.connectivity}: {isOnline ? fr.employeeTasks.online : fr.employeeTasks.offline}</Text>
-            {authorization.status === "offline-authorized" ? <Text accessibilityRole="summary" style={styles.muted}>{fr.auth.offlineAuthorized}</Text> : null}
-            {authorization.status === "revalidating" ? (
-              <View style={{ gap: 12 }}>
-                <Text accessibilityRole="alert" style={styles.muted}>{fr.auth.reauthenticateOnline}</Text>
-                <Field label={fr.auth.email} value={email} onChangeText={setEmail} autoCapitalize="none" keyboardType="email-address" />
-                <Field label={fr.auth.password} value={password} onChangeText={setPassword} secureTextEntry />
-                <Button title={fr.auth.signIn} onPress={() => void signIn()} disabled={loading || !email || !password} />
+    <SafeAreaProvider>
+      <View style={styles.root}>
+        <StatusBar style="light" />
+        {signedIn ? (
+          <LinearGradient colors={gradients.navy} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.appBar}>
+            <SafeAreaView edges={["top", "left", "right"]} style={styles.appBarSafe}>
+              <View style={{ ...styles.appBarRow, maxWidth: contentWidth }}>
+                <View style={styles.appBarBrand}>
+                  <BrandMark size="small" />
+                  <Text style={styles.appBarWordmark}>CETEM-QC</Text>
+                </View>
+                <View style={styles.connectivityPill}>
+                  <View style={isOnline ? styles.connectivityDotOnline : styles.connectivityDotOffline} />
+                  <Text style={styles.connectivityText}>{fr.employeeTasks.connectivity}: {isOnline ? fr.employeeTasks.online : fr.employeeTasks.offline}</Text>
+                </View>
               </View>
-            ) : null}
-            {screen.kind === "list" ? (
+            </SafeAreaView>
+          </LinearGradient>
+        ) : (
+          <LinearGradient colors={gradients.navy} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.heroBackdrop}>
+            <View style={styles.heroGlow} />
+          </LinearGradient>
+        )}
+        <SafeAreaView edges={signedIn ? ["left", "right", "bottom"] : ["top", "left", "right", "bottom"]} style={styles.safe}>
+          <ScrollView contentContainerStyle={[styles.container, signedIn ? styles.containerSignedIn : styles.containerSignedOut]} keyboardShouldPersistTaps="handled">
+            <View style={{ width: contentWidth, maxWidth: "100%", gap: 18 }}>
+            {!user ? (
               <>
-                <Text style={styles.heading}>{fr.employeeTasks.title}</Text>
-                <Text style={styles.muted}>{fr.employeeTasks.description}</Text>
-                {listState === "loading" ? <ActivityIndicator accessibilityLabel={fr.common.loading} color="#135c4c" /> : null}
-                {listState === "empty" ? <Text style={styles.muted}>{authorization.status === "offline-authorized" ? fr.employeeTasks.offlineEmpty : fr.employeeTasks.empty}</Text> : null}
-                {listState === "ready" ? <View style={layout === "tablet" ? styles.tabletTaskGrid : styles.phoneTaskList}>{tasks.map((item) => (
-                  <Pressable key={item.id} accessibilityRole="button" onPress={() => void openTask(item.id)} style={[styles.taskRow, layout === "tablet" && styles.tabletTaskRow]}>
-                    <View style={styles.taskCopy}>
-                      <Text style={styles.taskTitle}>{item.establishment}</Text>
-                      <Text style={styles.muted}>{item.service} · {taskListStateLabel(taskSyncStateOf(item.id))}</Text>
-                    </View>
-                    <Text style={styles.chevron}>›</Text>
-                  </Pressable>
-                ))}</View> : null}
-                {listState === "error" ? <Text accessibilityRole="alert" style={styles.error}>{error}</Text> : null}
-                {listState === "error" ? <Button title={fr.common.retry} onPress={() => void loadTasks()} disabled={loading} /> : null}
-                {draftNotice ? <Text accessibilityRole="summary" style={styles.muted}>{draftNotice}</Text> : null}
-                {draftListError ? <View style={{ gap: 8 }}>
-                  <Text accessibilityRole="alert" style={styles.error}>{fr.employeeTasks.draftStorageUnavailable}</Text>
-                  <Button title={fr.common.retry} onPress={() => void refreshLocalDrafts()} />
-                </View> : null}
-                {taskCacheWarning ? <Text accessibilityRole="alert" style={styles.error}>{taskCacheWarning}</Text> : null}
-                {resumableDrafts.length > 0 ? <View style={{ gap: 10 }}>
-                  <Text style={styles.heading}>{fr.employeeTasks.resumeDraft}</Text>
-                  {resumableDrafts.map((draft) => <Pressable key={draft.id} accessibilityRole="button" onPress={() => void openLocalDraft(draft.taskId)} style={styles.taskRow}>
-                    <View style={styles.taskCopy}><Text style={styles.taskTitle}>{draft.taskId}</Text><Text style={styles.muted}>{fr.employeeTasks.savedLocally}</Text><Text style={styles.muted}>{taskListStateLabel(taskSyncStateOf(draft.taskId))}</Text></View>
-                  </Pressable>)}
-                </View> : null}
-                {unavailableOfflineDrafts ? <Text accessibilityRole="summary" style={styles.muted}>{fr.employeeTasks.offlineDraftPreserved}</Text> : null}
-                {cachedTasks.filter((item) => !localDrafts.some((draft) => draft.taskId === item.id)).map((item) => <Pressable key={item.id} accessibilityRole="button" onPress={() => void openCachedTask(item)} style={styles.taskRow}>
-                  <View style={styles.taskCopy}><Text style={styles.taskTitle}>{item.establishment}</Text><Text style={styles.muted}>{taskListStateLabel(taskSyncStateOf(item.id))}</Text></View>
-                </Pressable>)}
+                <AuthHero />
+                <View style={[styles.card, styles.authCard, layout === "tablet" && styles.tabletCard]}>
+                  <View style={styles.cardIntro}>
+                    <Text style={styles.title}>{fr.auth.employeeTitle}</Text>
+                    <Text style={styles.body}>{fr.auth.employeeDescription}</Text>
+                  </View>
+                  <Field label={fr.auth.email} value={email} onChangeText={setEmail} autoCapitalize="none" keyboardType="email-address" />
+                  <Field label={fr.auth.password} value={password} onChangeText={setPassword} secureTextEntry />
+                  {error ? <Notice tone="danger" role="alert">{error}</Notice> : null}
+                  <Button title={fr.auth.signIn} onPress={() => void signIn()} disabled={loading || !email || !password} />
+                  <View style={styles.authFootnote}>
+                    <Text style={styles.footnote}>{fr.auth.forgotPasswordEmployee}</Text>
+                  </View>
+                </View>
+              </>
+            ) : user.mustChangePassword ? (
+              <>
+                <AuthHero />
+                <View style={[styles.card, styles.authCard, layout === "tablet" && styles.tabletCard]}>
+                  <View style={styles.cardIntro}>
+                    <Text style={styles.title}>{fr.auth.activationTitle}</Text>
+                    <Text style={styles.body}>{fr.auth.activationDescription}</Text>
+                  </View>
+                  <Field label={fr.auth.newPassword} value={newPassword} onChangeText={setNewPassword} secureTextEntry />
+                  <View accessibilityLiveRegion="polite" style={styles.rulesBox}>
+                    <Text style={styles.label}>{fr.auth.passwordRequirements}</Text>
+                    {PASSWORD_RULES.map((rule) => {
+                      const met = checkPasswordRules(newPassword)[rule];
+                      return <Text key={rule} style={met ? styles.ruleMet : styles.ruleUnmet}>{met ? "✓" : "○"} {fr.auth.passwordRules[rule]}</Text>;
+                    })}
+                  </View>
+                  {error ? <Notice tone="danger" role="alert">{error}</Notice> : null}
+                  <View style={styles.actionStack}>
+                    <Button title={fr.auth.activate} onPress={() => void activate()} disabled={loading || !isPasswordCompliant(newPassword)} />
+                    <Button title={fr.auth.logout} onPress={() => void signOut()} secondary disabled={loading} />
+                  </View>
+                </View>
               </>
             ) : (
-              <>
-                <Button title={fr.employeeTasks.back} onPress={() => void leaveTaskDetail()} secondary />
-                {loading ? <ActivityIndicator accessibilityLabel={fr.common.loading} color="#135c4c" /> : null}
-                {displayedTask ? <View style={layout === "tablet" ? styles.tabletDetails : styles.phoneDetails}>
-                  <Text style={styles.heading}>{displayedTask.establishment}</Text>
-                  <Detail label={fr.employeeTasks.taskId} value={displayedTask.id} />
-                  <Detail label={fr.employeeTasks.type} value={fr.employeeTasks.graphieMobile} />
-                  <Detail label={fr.employeeTasks.establishment} value={displayedTask.establishment} />
-                  <Detail label={fr.employeeTasks.service} value={displayedTask.service || "—"} />
-                  <Detail label={fr.employeeTasks.state} value={stateLabel(currentSyncState)} />
-                  {acceptedLine ? <Text accessibilityRole="summary" style={styles.muted}>{acceptedLine}</Text> : null}
-                  <Detail label={fr.employeeTasks.createdAt} value={new Date(displayedTask.createdAt).toLocaleDateString("fr-FR")} />
-                  <View style={{ width: "100%", gap: 10, paddingTop: 12 }}>
-                    {taskCacheWarning ? <Text accessibilityRole="alert" style={styles.error}>{taskCacheWarning}</Text> : null}
-                    {currentSyncState ? <TaskSyncStatus state={currentSyncState} running={syncRunningFor === user.id} onRetry={() => void retrySync()} /> : null}
-                    {conflictPanel}
-                    {rejectionPanel}
-                    {correctionInfo}
-                    <Text style={styles.muted}>{fr.employeeTasks.connectivity}: {isOnline ? fr.employeeTasks.online : fr.employeeTasks.offline}</Text>
-                    <Text style={styles.muted}>{fr.employeeTasks.localPersistence}: {presentedSaveState === "saving" ? fr.employeeTasks.savingLocally : presentedSaveState === "saved" ? fr.employeeTasks.savedLocally : presentedSaveState === "failed" ? fr.employeeTasks.saveFailed : fr.employeeTasks.notSavedLocally}</Text>
-                    {locked ? <Text accessibilityRole="summary" style={styles.muted}>{fr.employeeTasks.readOnlyPending}</Text> : null}
-                    <Text style={styles.heading}>{fr.employeeTasks.sectionNavigation}</Text>
-                    <View style={styles.sectionNavigation}>{GRAPHIE_MOBILE_POV_CATALOGUE.sections.map((section) => <Pressable key={section.id} accessibilityRole="button" accessibilityState={{ selected: section.id === activeSectionId }} onPress={() => { setActiveSectionId(section.id); if (draftSaveState === "saving") void saveDraft(); }} style={styles.sectionButton}><Text style={styles.muted}>{section.labelFr}</Text></Pressable>)}</View>
-                    {draftHydration === "loading" ? <Text accessibilityRole="summary" style={styles.muted}>{fr.common.loading}</Text> : null}
-                    {legacyContentMode ? <Field label={fr.employeeTasks.legacyDraftContent} value={draftContent} onChangeText={changeDraftContent} editable={formEditable} multiline /> : null}
-                    {activeDraft?.recoveryProvenance && <RecoveryAttribution provenance={activeDraft.recoveryProvenance} />}
-                    {GRAPHIE_MOBILE_POV_CATALOGUE.sections.filter((section) => section.id === activeSectionId).map((section) => <GraphieSectionForm key={section.id} section={section} layout={layout} values={formValues} results={calculationResults} onChange={changeFormField} editable={formEditable} issues={fieldIssues} copiedFields={new Set(activeDraft?.recoveryProvenance?.fields.map((field) => field.destinationField.replace(/^values\./, "")) ?? [])} />)}
-                    <Text accessibilityRole={presentedSaveState === "failed" ? "alert" : "summary"} style={presentedSaveState === "failed" ? styles.error : styles.muted}>
-                      {presentedSaveState === "failed" ? fr.employeeTasks.saveFailed : presentedSaveState === "saving" ? fr.employeeTasks.savingDraft : presentedSaveState === "saved" ? fr.employeeTasks.savedLocally : fr.workflow.draft}
-                    </Text>
-                    <Button title={fr.employeeTasks.saveDraft} onPress={() => saveDraft()} disabled={draftHydration !== "ready" || draftDeletingRef.current || locked || submitting} />
-                    {activeDraft && !locked && !inConflict ? <Button title={fr.employeeTasks.deleteDraft} secondary onPress={beginDraftDelete} disabled={draftHydration !== "ready" || draftDeletingRef.current || submitting} /> : null}
-                    {deleteDraftConfirmation && activeDraft?.id === deleteDraftConfirmation.draftId ? <View style={styles.confirmation}>
-                      <Text accessibilityRole="alert" style={styles.muted}>{fr.employeeTasks.confirmDeleteDraft}</Text>
-                      <Button title={fr.common.cancel} secondary onPress={cancelDraftDelete} />
-                      <Button title={fr.common.confirm} onPress={confirmDraftDelete} />
-                    </View> : null}
-                    {draftHydration === "ready" && currentSyncState?.canSubmit && !draftDeletingRef.current && !deleteDraftConfirmation ? <Button title={fr.employeeTasks.submit} onPress={beginSubmit} disabled={submitting || Boolean(submitConfirmation)} /> : null}
-                    {submitConfirmation && submitConfirmation.employeeId === user.id && submitConfirmation.taskId === screen.id && !locked ? <View style={styles.confirmation}>
-                      <Text accessibilityRole="alert" style={styles.muted}>{fr.employeeTasks.confirmSubmit}</Text>
-                      <Button title={fr.common.cancel} secondary onPress={() => setSubmitConfirmation(undefined)} />
-                      <Button title={fr.common.confirm} onPress={confirmSubmit} disabled={submitting} />
-                    </View> : null}
+              <View style={[styles.page, layout === "tablet" && styles.tabletPage]}>
+                {authorization.status === "offline-authorized" ? <Notice tone="info" role="summary">{fr.auth.offlineAuthorized}</Notice> : null}
+                {authorization.status === "revalidating" ? (
+                  <View style={styles.revalidateCard}>
+                    <Notice tone="warning" role="alert">{fr.auth.reauthenticateOnline}</Notice>
+                    <Field label={fr.auth.email} value={email} onChangeText={setEmail} autoCapitalize="none" keyboardType="email-address" />
+                    <Field label={fr.auth.password} value={password} onChangeText={setPassword} secureTextEntry />
+                    <Button title={fr.auth.signIn} onPress={() => void signIn()} disabled={loading || !email || !password} />
                   </View>
-                </View> : null}
-                {!presentedTask && activeDraft ? <View style={{ gap: 10, paddingTop: 12 }}>
-                  <Text style={styles.heading}>{fr.employeeTasks.resumeDraft}</Text>
-                  <Detail label={fr.employeeTasks.taskId} value={activeDraft.taskId} />
-                  {draftHydration === "loading" ? <Text accessibilityRole="summary" style={styles.muted}>{fr.common.loading}</Text> : null}
-                  <Detail label={fr.employeeTasks.state} value={stateLabel(currentSyncState)} />
-                  {acceptedLine ? <Text accessibilityRole="summary" style={styles.muted}>{acceptedLine}</Text> : null}
-                  {currentSyncState ? <TaskSyncStatus state={currentSyncState} running={syncRunningFor === user.id} onRetry={() => void retrySync()} /> : null}
-                  {!displayedTask ? conflictPanel : null}
-                  {!displayedTask ? rejectionPanel : null}
-                  {!displayedTask ? correctionInfo : null}
-                  {locked ? <Text accessibilityRole="summary" style={styles.muted}>{fr.employeeTasks.readOnlyPending}</Text> : null}
-                  {legacyContentMode ? <Field label={fr.employeeTasks.legacyDraftContent} value={draftContent} onChangeText={changeDraftContent} editable={formEditable} multiline /> : null}
-                  <Text style={styles.heading}>{fr.employeeTasks.sectionNavigation}</Text>
-                  <View style={styles.sectionNavigation}>{GRAPHIE_MOBILE_POV_CATALOGUE.sections.map((section) => <Pressable key={section.id} accessibilityRole="button" accessibilityState={{ selected: section.id === activeSectionId }} onPress={() => { setActiveSectionId(section.id); if (draftSaveState === "saving") void saveDraft(); }} style={styles.sectionButton}><Text style={styles.muted}>{section.labelFr}</Text></Pressable>)}</View>
-                  {activeDraft?.recoveryProvenance && <RecoveryAttribution provenance={activeDraft.recoveryProvenance} />}
-                  {GRAPHIE_MOBILE_POV_CATALOGUE.sections.filter((section) => section.id === activeSectionId).map((section) => <GraphieSectionForm key={section.id} section={section} layout={layout} values={formValues} results={calculationResults} onChange={changeFormField} editable={formEditable} issues={fieldIssues} copiedFields={new Set(activeDraft?.recoveryProvenance?.fields.map((field) => field.destinationField.replace(/^values\./, "")) ?? [])} />)}
-                  <Text accessibilityRole={presentedSaveState === "failed" ? "alert" : "summary"} style={presentedSaveState === "failed" ? styles.error : styles.muted}>
-                    {presentedSaveState === "failed" ? fr.employeeTasks.saveFailed : presentedSaveState === "saving" ? fr.employeeTasks.savingDraft : fr.employeeTasks.savedLocally}
-                  </Text>
-                  <Button title={fr.employeeTasks.saveDraft} onPress={() => saveDraft()} disabled={draftHydration !== "ready" || draftDeletingRef.current || locked || submitting} />
-                  {!locked && !inConflict ? <Button title={fr.employeeTasks.deleteDraft} secondary onPress={beginDraftDelete} disabled={draftHydration !== "ready" || draftDeletingRef.current || submitting} /> : null}
-                  {deleteDraftConfirmation && activeDraft.id === deleteDraftConfirmation.draftId ? <View style={styles.confirmation}>
-                    <Text accessibilityRole="alert" style={styles.muted}>{fr.employeeTasks.confirmDeleteDraft}</Text>
-                    <Button title={fr.common.cancel} secondary onPress={cancelDraftDelete} />
-                    <Button title={fr.common.confirm} onPress={confirmDraftDelete} />
-                  </View> : null}
-                </View> : null}
-                {draftNotice ? <Text accessibilityRole="summary" style={styles.muted}>{draftNotice}</Text> : null}
-                {error ? <Text accessibilityRole="alert" style={styles.error}>{error}</Text> : null}
-                {shownSubmissionIssues ? <IssueLines lines={shownSubmissionIssues} /> : null}
-                {unreadableDraft && unreadableDraft.employeeId === user.id && screen.id === unreadableDraft.taskId && !inConflict ? <View style={{ gap: 10 }}>
-                  <Button title={fr.employeeTasks.deleteDraft} secondary onPress={beginUnreadableDraftDelete} disabled={draftDeletingRef.current || Boolean(unreadableDeleteConfirmation)} />
-                  {unreadableDeleteConfirmation && unreadableDeleteConfirmation.employeeId === user.id && unreadableDeleteConfirmation.taskId === screen.id ? <View style={styles.confirmation}>
-                    <Text accessibilityRole="alert" style={styles.muted}>{fr.employeeTasks.confirmDeleteDraft}</Text>
-                    <Button title={fr.common.cancel} secondary onPress={() => setUnreadableDeleteConfirmation(undefined)} />
-                    <Button title={fr.common.confirm} onPress={confirmUnreadableDraftDelete} />
-                  </View> : null}
-                </View> : null}
-                {detailState?.status === "error" ? <Button title={fr.common.retry} onPress={() => void retryTaskDetail()} disabled={loading} /> : null}
-              </>
+                ) : null}
+                {screen.kind === "list" ? (
+                  <>
+                    <View style={styles.pageHeader}>
+                      <Text style={styles.title}>{fr.employeeTasks.title}</Text>
+                      <Text style={styles.body}>{fr.employeeTasks.description}</Text>
+                    </View>
+                    {listState === "loading" ? <View style={styles.loadingBox}><ActivityIndicator accessibilityLabel={fr.common.loading} color={colors.primary} size="large" /></View> : null}
+                    {listState === "empty" ? <View style={styles.emptyState}>
+                      <View style={styles.emptyIcon}><DocumentGlyph tone="neutral" /></View>
+                      <Text style={styles.emptyText}>{authorization.status === "offline-authorized" ? fr.employeeTasks.offlineEmpty : fr.employeeTasks.empty}</Text>
+                    </View> : null}
+                    {listState === "ready" ? <View style={layout === "tablet" ? styles.tabletTaskGrid : styles.phoneTaskList}>{tasks.map((item) => (
+                      <Pressable key={item.id} accessibilityRole="button" onPress={() => void openTask(item.id)} style={({ pressed }) => [styles.taskCard, layout === "tablet" && styles.tabletTaskCard, pressed && styles.taskCardPressed]}>
+                        <View style={styles.taskIconTile}><DocumentGlyph tone="primary" /></View>
+                        <View style={styles.taskCopy}>
+                          <Text style={styles.taskTitle} numberOfLines={2}>{item.establishment}</Text>
+                          <Text style={styles.taskMeta}>{item.service} · {taskListStateLabel(taskSyncStateOf(item.id))}</Text>
+                        </View>
+                        <View style={styles.chevronCircle}><Text style={styles.chevron}>›</Text></View>
+                      </Pressable>
+                    ))}</View> : null}
+                    {listState === "error" ? <Notice tone="danger" role="alert">{error}</Notice> : null}
+                    {listState === "error" ? <Button title={fr.common.retry} onPress={() => void loadTasks()} disabled={loading} /> : null}
+                    {draftNotice ? <Notice tone="info" role="summary">{draftNotice}</Notice> : null}
+                    {draftListError ? <View style={styles.stackSm}>
+                      <Notice tone="danger" role="alert">{fr.employeeTasks.draftStorageUnavailable}</Notice>
+                      <Button title={fr.common.retry} onPress={() => void refreshLocalDrafts()} />
+                    </View> : null}
+                    {taskCacheWarning ? <Notice tone="warning" role="alert">{taskCacheWarning}</Notice> : null}
+                    {resumableDrafts.length > 0 ? <View style={styles.listSection}>
+                      <Text style={styles.sectionTitle}>{fr.employeeTasks.resumeDraft}</Text>
+                      {resumableDrafts.map((draft) => <Pressable key={draft.id} accessibilityRole="button" onPress={() => void openLocalDraft(draft.taskId)} style={({ pressed }) => [styles.taskCard, pressed && styles.taskCardPressed]}>
+                        <View style={styles.taskIconTileWarning}><DocumentGlyph tone="warning" /></View>
+                        <View style={styles.taskCopy}><Text style={styles.taskTitle} numberOfLines={1}>{draft.taskId}</Text><Text style={styles.taskMeta}>{fr.employeeTasks.savedLocally}</Text><Text style={styles.taskMeta}>{taskListStateLabel(taskSyncStateOf(draft.taskId))}</Text></View>
+                        <View style={styles.chevronCircle}><Text style={styles.chevron}>›</Text></View>
+                      </Pressable>)}
+                    </View> : null}
+                    {unavailableOfflineDrafts ? <Notice tone="info" role="summary">{fr.employeeTasks.offlineDraftPreserved}</Notice> : null}
+                    {cachedTasks.filter((item) => !localDrafts.some((draft) => draft.taskId === item.id)).map((item) => <Pressable key={item.id} accessibilityRole="button" onPress={() => void openCachedTask(item)} style={({ pressed }) => [styles.taskCard, pressed && styles.taskCardPressed]}>
+                      <View style={styles.taskIconTileNeutral}><DocumentGlyph tone="neutral" /></View>
+                      <View style={styles.taskCopy}><Text style={styles.taskTitle} numberOfLines={2}>{item.establishment}</Text><Text style={styles.taskMeta}>{taskListStateLabel(taskSyncStateOf(item.id))}</Text></View>
+                      <View style={styles.chevronCircle}><Text style={styles.chevron}>›</Text></View>
+                    </Pressable>)}
+                  </>
+                ) : (
+                  <>
+                    <BackButton title={fr.employeeTasks.back} onPress={() => void leaveTaskDetail()} />
+                    {loading ? <View style={styles.loadingBox}><ActivityIndicator accessibilityLabel={fr.common.loading} color={colors.primary} size="large" /></View> : null}
+                    {displayedTask ? <>
+                      <View style={styles.identityCard}>
+                        <View style={styles.identityHeader}>
+                          <View style={styles.taskIconTileLarge}><DocumentGlyph tone="primary" /></View>
+                          <Text style={styles.identityTitle}>{displayedTask.establishment}</Text>
+                        </View>
+                        <View style={layout === "tablet" ? styles.tabletDetails : styles.phoneDetails}>
+                          <Detail label={fr.employeeTasks.taskId} value={displayedTask.id} layout={layout} />
+                          <Detail label={fr.employeeTasks.type} value={fr.employeeTasks.graphieMobile} layout={layout} />
+                          <Detail label={fr.employeeTasks.establishment} value={displayedTask.establishment} layout={layout} />
+                          <Detail label={fr.employeeTasks.service} value={displayedTask.service || "—"} layout={layout} />
+                          <Detail label={fr.employeeTasks.state} value={stateLabel(currentSyncState)} layout={layout} />
+                          <Detail label={fr.employeeTasks.createdAt} value={new Date(displayedTask.createdAt).toLocaleDateString("fr-FR")} layout={layout} />
+                        </View>
+                        {acceptedLine ? <Notice tone="success" role="summary">{acceptedLine}</Notice> : null}
+                      </View>
+                      <View style={styles.panelCard}>
+                        {taskCacheWarning ? <Notice tone="warning" role="alert">{taskCacheWarning}</Notice> : null}
+                        {currentSyncState ? <TaskSyncStatus state={currentSyncState} running={syncRunningFor === user.id} onRetry={() => void retrySync()} /> : null}
+                        {conflictPanel}
+                        {rejectionPanel}
+                        {correctionInfo}
+                        <StatusLine tone={saveStateTone}>{fr.employeeTasks.localPersistence}: {presentedSaveState === "saving" ? fr.employeeTasks.savingLocally : presentedSaveState === "saved" ? fr.employeeTasks.savedLocally : presentedSaveState === "failed" ? fr.employeeTasks.saveFailed : fr.employeeTasks.notSavedLocally}</StatusLine>
+                        {locked ? <Notice tone="warning" role="summary">{fr.employeeTasks.readOnlyPending}</Notice> : null}
+                      </View>
+                      <View style={styles.panelCard}>
+                        <Text style={styles.overline}>{fr.employeeTasks.sectionNavigation}</Text>
+                        {sectionNavigation}
+                        {draftHydration === "loading" ? <Notice tone="info" role="summary">{fr.common.loading}</Notice> : null}
+                        {legacyContentMode ? <Field label={fr.employeeTasks.legacyDraftContent} value={draftContent} onChangeText={changeDraftContent} editable={formEditable} multiline /> : null}
+                        {activeDraft?.recoveryProvenance && <RecoveryAttribution provenance={activeDraft.recoveryProvenance} />}
+                        <View style={styles.formDivider} />
+                        {activeSectionForm}
+                      </View>
+                      <View style={styles.actionCard}>
+                        <StatusLine tone={saveStateTone} role={presentedSaveState === "failed" ? "alert" : "summary"}>
+                          {presentedSaveState === "failed" ? fr.employeeTasks.saveFailed : presentedSaveState === "saving" ? fr.employeeTasks.savingDraft : presentedSaveState === "saved" ? fr.employeeTasks.savedLocally : fr.workflow.draft}
+                        </StatusLine>
+                        <Button title={fr.employeeTasks.saveDraft} secondary onPress={() => saveDraft()} disabled={draftHydration !== "ready" || draftDeletingRef.current || locked || submitting} />
+                        {activeDraft && !locked && !inConflict ? <Button title={fr.employeeTasks.deleteDraft} destructive onPress={beginDraftDelete} disabled={draftHydration !== "ready" || draftDeletingRef.current || submitting} /> : null}
+                        {deleteDraftConfirmation && activeDraft?.id === deleteDraftConfirmation.draftId ? <Confirmation message={fr.employeeTasks.confirmDeleteDraft}>
+                          <Button title={fr.common.cancel} secondary onPress={cancelDraftDelete} style={styles.confirmationButton} />
+                          <Button title={fr.common.confirm} destructiveSolid onPress={confirmDraftDelete} style={styles.confirmationButton} />
+                        </Confirmation> : null}
+                        {draftHydration === "ready" && currentSyncState?.canSubmit && !draftDeletingRef.current && !deleteDraftConfirmation ? <Button title={fr.employeeTasks.submit} onPress={beginSubmit} disabled={submitting || Boolean(submitConfirmation)} /> : null}
+                        {submitConfirmation && submitConfirmation.employeeId === user.id && submitConfirmation.taskId === screen.id && !locked ? <Confirmation message={fr.employeeTasks.confirmSubmit}>
+                          <Button title={fr.common.cancel} secondary onPress={() => setSubmitConfirmation(undefined)} style={styles.confirmationButton} />
+                          <Button title={fr.common.confirm} onPress={confirmSubmit} disabled={submitting} style={styles.confirmationButton} />
+                        </Confirmation> : null}
+                      </View>
+                    </> : null}
+                    {!presentedTask && activeDraft ? <>
+                      <View style={styles.identityCard}>
+                        <View style={styles.identityHeader}>
+                          <View style={styles.taskIconTileWarningLarge}><DocumentGlyph tone="warning" /></View>
+                          <Text style={styles.identityTitle}>{fr.employeeTasks.resumeDraft}</Text>
+                        </View>
+                        <View style={layout === "tablet" ? styles.tabletDetails : styles.phoneDetails}>
+                          <Detail label={fr.employeeTasks.taskId} value={activeDraft.taskId} layout={layout} />
+                          <Detail label={fr.employeeTasks.state} value={stateLabel(currentSyncState)} layout={layout} />
+                        </View>
+                        {draftHydration === "loading" ? <Notice tone="info" role="summary">{fr.common.loading}</Notice> : null}
+                        {acceptedLine ? <Notice tone="success" role="summary">{acceptedLine}</Notice> : null}
+                      </View>
+                      <View style={styles.panelCard}>
+                        {currentSyncState ? <TaskSyncStatus state={currentSyncState} running={syncRunningFor === user.id} onRetry={() => void retrySync()} /> : null}
+                        {!displayedTask ? conflictPanel : null}
+                        {!displayedTask ? rejectionPanel : null}
+                        {!displayedTask ? correctionInfo : null}
+                        {locked ? <Notice tone="warning" role="summary">{fr.employeeTasks.readOnlyPending}</Notice> : null}
+                      </View>
+                      <View style={styles.panelCard}>
+                        {legacyContentMode ? <Field label={fr.employeeTasks.legacyDraftContent} value={draftContent} onChangeText={changeDraftContent} editable={formEditable} multiline /> : null}
+                        <Text style={styles.overline}>{fr.employeeTasks.sectionNavigation}</Text>
+                        {sectionNavigation}
+                        {activeDraft?.recoveryProvenance && <RecoveryAttribution provenance={activeDraft.recoveryProvenance} />}
+                        <View style={styles.formDivider} />
+                        {activeSectionForm}
+                      </View>
+                      <View style={styles.actionCard}>
+                        <StatusLine tone={saveStateTone === "neutral" ? "success" : saveStateTone} role={presentedSaveState === "failed" ? "alert" : "summary"}>
+                          {presentedSaveState === "failed" ? fr.employeeTasks.saveFailed : presentedSaveState === "saving" ? fr.employeeTasks.savingDraft : fr.employeeTasks.savedLocally}
+                        </StatusLine>
+                        <Button title={fr.employeeTasks.saveDraft} onPress={() => saveDraft()} disabled={draftHydration !== "ready" || draftDeletingRef.current || locked || submitting} />
+                        {!locked && !inConflict ? <Button title={fr.employeeTasks.deleteDraft} destructive onPress={beginDraftDelete} disabled={draftHydration !== "ready" || draftDeletingRef.current || submitting} /> : null}
+                        {deleteDraftConfirmation && activeDraft.id === deleteDraftConfirmation.draftId ? <Confirmation message={fr.employeeTasks.confirmDeleteDraft}>
+                          <Button title={fr.common.cancel} secondary onPress={cancelDraftDelete} style={styles.confirmationButton} />
+                          <Button title={fr.common.confirm} destructiveSolid onPress={confirmDraftDelete} style={styles.confirmationButton} />
+                        </Confirmation> : null}
+                      </View>
+                    </> : null}
+                    {draftNotice ? <Notice tone="info" role="summary">{draftNotice}</Notice> : null}
+                    {error ? <Notice tone="danger" role="alert">{error}</Notice> : null}
+                    {shownSubmissionIssues ? <View style={styles.issuesBox}><IssueLines lines={shownSubmissionIssues} /></View> : null}
+                    {unreadableDraft && unreadableDraft.employeeId === user.id && screen.id === unreadableDraft.taskId && !inConflict ? <View style={styles.stackSm}>
+                      <Button title={fr.employeeTasks.deleteDraft} destructive onPress={beginUnreadableDraftDelete} disabled={draftDeletingRef.current || Boolean(unreadableDeleteConfirmation)} />
+                      {unreadableDeleteConfirmation && unreadableDeleteConfirmation.employeeId === user.id && unreadableDeleteConfirmation.taskId === screen.id ? <Confirmation message={fr.employeeTasks.confirmDeleteDraft}>
+                        <Button title={fr.common.cancel} secondary onPress={() => setUnreadableDeleteConfirmation(undefined)} style={styles.confirmationButton} />
+                        <Button title={fr.common.confirm} destructiveSolid onPress={confirmUnreadableDraftDelete} style={styles.confirmationButton} />
+                      </Confirmation> : null}
+                    </View> : null}
+                    {detailState?.status === "error" ? <Button title={fr.common.retry} onPress={() => void retryTaskDetail()} disabled={loading} /> : null}
+                  </>
+                )}
+                <View style={styles.signOutArea}>
+                  <Button title={fr.auth.logout} onPress={() => void signOut()} quiet disabled={loading} />
+                </View>
+              </View>
             )}
-            <Button title={fr.auth.logout} onPress={() => void signOut()} secondary disabled={loading} />
-          </View>
-        )}
-        </View>
-      </ScrollView>
-    </SafeAreaView>
+            </View>
+          </ScrollView>
+        </SafeAreaView>
+      </View>
+    </SafeAreaProvider>
   );
 }
 
+/** The « CQ » brand mark: a rounded square in the primary gradient. */
+function BrandMark(props: { size: "small" | "large" }) {
+  const large = props.size === "large";
+  return <LinearGradient colors={gradients.brandMark} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={large ? styles.brandMarkLarge : styles.brandMarkSmall}>
+    <Text style={large ? styles.brandMarkTextLarge : styles.brandMarkTextSmall}>CQ</Text>
+  </LinearGradient>;
+}
+
+/** Brand block shown over the navy backdrop on the sign-in and activation screens. */
+function AuthHero() {
+  return <View style={styles.hero}>
+    <BrandMark size="large" />
+    <Text style={styles.heroWordmark}>CETEM-QC</Text>
+    <Text style={styles.heroOverline}>{BRAND_TAGLINE}</Text>
+  </View>;
+}
+
+/** A small document drawn with Views (no icon dependency). */
+function DocumentGlyph(props: { tone: "primary" | "warning" | "neutral" }) {
+  const color = props.tone === "primary" ? colors.primary : props.tone === "warning" ? colors.warning : colors.neutral;
+  return <View style={{ ...styles.glyphPage, borderColor: color }}>
+    <View style={{ ...styles.glyphLine, backgroundColor: color }} />
+    <View style={{ ...styles.glyphLine, backgroundColor: color }} />
+    <View style={{ ...styles.glyphLineShort, backgroundColor: color }} />
+  </View>;
+}
+
+/** A tinted message row; the text keeps the given accessibility role. */
+function Notice(props: { tone: Tone; role?: "alert" | "summary"; children: ReactNode }) {
+  const tone = toneColors[props.tone];
+  return <View style={{ ...styles.notice, backgroundColor: tone.bg, borderLeftColor: tone.fg }}>
+    <Text accessibilityRole={props.role} style={{ ...styles.noticeText, color: props.tone === "neutral" ? colors.text : tone.fg }}>{props.children}</Text>
+  </View>;
+}
+
+/** A status badge row: a colored dot and its line. */
+function StatusLine(props: { tone: Tone; role?: "alert" | "summary"; children: ReactNode }) {
+  const tone = toneColors[props.tone];
+  return <View style={{ ...styles.statusLine, backgroundColor: tone.bg, borderColor: tone.border }}>
+    <View style={{ ...styles.statusDot, backgroundColor: tone.fg }} />
+    <Text accessibilityRole={props.role} style={{ ...styles.statusText, color: tone.fg }}>{props.children}</Text>
+  </View>;
+}
+
+/** An attention card asking to confirm an action; its buttons sit side by side when there is room. */
+function Confirmation(props: { message: string; children: ReactNode }) {
+  return <View style={styles.confirmation}>
+    <View style={styles.confirmationHeader}>
+      <View style={styles.confirmationMark}><Text style={styles.confirmationMarkText}>!</Text></View>
+      <Text accessibilityRole="alert" style={styles.confirmationText}>{props.message}</Text>
+    </View>
+    <View style={styles.confirmationActions}>{props.children}</View>
+  </View>;
+}
+
 function Field(props: { label: string; value: string; onChangeText: (value: string) => void; secureTextEntry?: boolean; autoCapitalize?: "none" | "sentences"; keyboardType?: "email-address" | "decimal-pad"; editable?: boolean; multiline?: boolean; accessibilityLabel?: string; helpFr?: string; errorFr?: string; style?: StyleProp<ViewStyle> }) {
+  const [focused, setFocused] = useState(false);
   const hint = [props.helpFr, props.errorFr].filter(Boolean).join(" ");
+  const readOnly = props.editable === false;
   return <View style={[styles.field, props.style]}>
     <Text style={styles.label}>{props.label}</Text>
     {props.helpFr ? <Text style={styles.help}>{props.helpFr}</Text> : null}
-    <TextInput accessibilityLabel={props.accessibilityLabel ?? props.label} accessibilityHint={hint || undefined} style={[styles.input, props.multiline && { minHeight: 84, textAlignVertical: "top" }]} value={props.value} onChangeText={props.onChangeText} editable={props.editable} secureTextEntry={props.secureTextEntry} autoCapitalize={props.autoCapitalize} keyboardType={props.keyboardType} multiline={props.multiline} autoCorrect={false} />
-    {props.errorFr ? <Text style={styles.error}>{props.errorFr}</Text> : null}
+    <TextInput
+      accessibilityLabel={props.accessibilityLabel ?? props.label}
+      accessibilityHint={hint || undefined}
+      style={[styles.input, props.multiline && styles.inputMultiline, readOnly && styles.inputReadOnly, props.errorFr ? styles.inputError : null, focused && styles.inputFocused]}
+      value={props.value}
+      onChangeText={props.onChangeText}
+      onFocus={() => setFocused(true)}
+      onBlur={() => setFocused(false)}
+      editable={props.editable}
+      secureTextEntry={props.secureTextEntry}
+      autoCapitalize={props.autoCapitalize}
+      keyboardType={props.keyboardType}
+      multiline={props.multiline}
+      autoCorrect={false}
+      placeholderTextColor={colors.textTertiary}
+      selectionColor={colors.primary}
+    />
+    {props.errorFr ? <Text style={styles.fieldError}>{props.errorFr}</Text> : null}
   </View>;
 }
 
@@ -1489,6 +1652,17 @@ const TRANSFER_LABELS: Record<TaskSyncState["transfer"], string> = {
   "draft-conflict": fr.employeeTasks.syncConflict,
 };
 const FAILED_TRANSFERS: ReadonlySet<TaskSyncState["transfer"]> = new Set(["retry-paused", "blocked", "draft-rejected", "draft-conflict"]);
+/** Badge tone of each transfer state (presentation only). */
+const TRANSFER_TONES: Record<TaskSyncState["transfer"], Tone> = {
+  "none": "neutral",
+  "queued": "info",
+  "in-flight": "info",
+  "retry-paused": "danger",
+  "blocked": "danger",
+  "draft-synchronized": "success",
+  "draft-rejected": "danger",
+  "draft-conflict": "danger",
+};
 
 /** Task list rows: the lifecycle, plus the transfer state while an item is unresolved or failed. */
 function taskListStateLabel(state: TaskSyncState) {
@@ -1503,9 +1677,9 @@ function TaskSyncStatus(props: { state: TaskSyncState; running: boolean; onRetry
   const unresolved = state.transfer === "queued" || state.transfer === "in-flight" || state.transfer === "retry-paused" || state.transfer === "blocked";
   const transfer = props.running && unresolved ? "in-flight" : state.transfer;
   const failed = FAILED_TRANSFERS.has(transfer);
-  return <View style={{ gap: 10 }}>
-    <Text accessibilityRole={failed ? "alert" : "summary"} style={failed ? styles.error : styles.muted}>{fr.employeeTasks.syncStatus}: {TRANSFER_LABELS[transfer]}</Text>
-    {state.canRetry && !props.running ? <Button title={fr.employeeTasks.retrySync} onPress={props.onRetry} /> : null}
+  return <View style={styles.stackSm}>
+    <StatusLine tone={failed ? "danger" : TRANSFER_TONES[transfer]} role={failed ? "alert" : "summary"}>{fr.employeeTasks.syncStatus}: {TRANSFER_LABELS[transfer]}</StatusLine>
+    {state.canRetry && !props.running ? <Button title={fr.employeeTasks.retrySync} secondary onPress={props.onRetry} /> : null}
   </View>;
 }
 
@@ -1513,8 +1687,8 @@ const fieldLabel = (field: CatalogueField) => `${field.labelFr}${field.unit ? ` 
 
 function RecoveryAttribution({ provenance }: { provenance: NonNullable<LocalDraft["recoveryProvenance"]> }) {
   return <View style={styles.recoveryAttribution}>
-    <Text accessibilityRole="summary" style={styles.muted}>{fr.employeeTasks.recoverySeedAttribution.replace("{source}", provenance.sourceEmployeeName).replace("{taskId}", provenance.sourceTaskId).replace("{revision}", String(provenance.sourceRevision))}</Text>
-    <Text style={styles.muted}>{fr.employeeTasks.recoveryCopiedFieldsRemainAttributed}</Text>
+    <Text accessibilityRole="summary" style={styles.recoveryText}>{fr.employeeTasks.recoverySeedAttribution.replace("{source}", provenance.sourceEmployeeName).replace("{taskId}", provenance.sourceTaskId).replace("{revision}", String(provenance.sourceRevision))}</Text>
+    <Text style={styles.recoveryMeta}>{fr.employeeTasks.recoveryCopiedFieldsRemainAttributed}</Text>
   </View>;
 }
 
@@ -1559,8 +1733,11 @@ function GraphieSectionForm(props: { section: CatalogueSection; layout: Employee
     }
   }
   if (!resultsPlaced) items.push(...resultBlocks);
-  return <View style={{ gap: 10, paddingTop: 8 }}>
-    <Text accessibilityRole="header" style={styles.heading}>{section.labelFr}</Text>
+  return <View style={styles.sectionForm}>
+    <View style={styles.sectionHeadingRow}>
+      <View style={styles.sectionHeadingAccent} />
+      <Text accessibilityRole="header" style={styles.sectionHeading}>{section.labelFr}</Text>
+    </View>
     {items}
   </View>;
 }
@@ -1569,7 +1746,7 @@ function GraphieTable(props: { table: CatalogueTable; fields: readonly Catalogue
   const { table } = props;
   const fieldById = new Map(props.fields.map((field) => [field.id, field]));
   const tablet = props.layout === "tablet";
-  return <View style={{ gap: 10 }}>
+  return <View style={styles.tableGroup}>
     {table.helpFr ? <Text style={styles.help}>{table.helpFr}</Text> : null}
     {table.fieldIds.map((row, rowIndex) => {
       const rowLabel = table.rowLabelsFr[rowIndex]!;
@@ -1591,66 +1768,243 @@ function ChoiceField(props: { field: CatalogueField; value: string; onSelect: (v
       {(props.field.options ?? []).map((option) => {
         const selected = props.value === option;
         return <Pressable key={option} accessibilityRole="button" accessibilityLabel={`${label}: ${option}${selected ? ", sélectionné" : ""}`} accessibilityState={{ selected, disabled: !props.editable }} disabled={!props.editable} onPress={() => props.onSelect(selected ? "" : option)} style={[styles.choiceOption, selected && styles.choiceOptionSelected, !props.editable && styles.disabled]}>
-          <Text style={[styles.buttonText, selected && styles.choiceOptionSelectedText]}>{option}{selected ? " · sélectionné" : ""}</Text>
+          <Text style={[styles.choiceOptionText, selected && styles.choiceOptionSelectedText]}>{option}{selected ? " · sélectionné" : ""}</Text>
         </Pressable>;
       })}
     </View>
     {props.copied ? <Text accessibilityRole="summary" style={styles.help}>{fr.employeeTasks.recoveryCopiedField}</Text> : null}
-    {props.errorFr ? <Text style={styles.error}>{props.errorFr}</Text> : null}
+    {props.errorFr ? <Text style={styles.fieldError}>{props.errorFr}</Text> : null}
   </View>;
 }
 
-function Button(props: { title: string; onPress: () => void; disabled?: boolean; secondary?: boolean }) {
-  return <Pressable accessibilityRole="button" onPress={props.onPress} disabled={props.disabled} style={[styles.button, props.secondary && styles.secondaryButton, props.disabled && styles.disabled]}><Text style={[styles.buttonText, props.secondary && styles.secondaryButtonText]}>{props.title}</Text></Pressable>;
+type ButtonProps = {
+  title: string;
+  onPress: () => void;
+  disabled?: boolean;
+  /** White button with a border. */
+  secondary?: boolean;
+  /** Danger text on a soft danger border, for discarding actions. */
+  destructive?: boolean;
+  /** Solid danger button, for confirming a discarding action. */
+  destructiveSolid?: boolean;
+  /** Low-emphasis text button. */
+  quiet?: boolean;
+  style?: StyleProp<ViewStyle>;
+};
+
+function Button(props: ButtonProps) {
+  const variant = props.destructiveSolid ? "destructiveSolid" : props.destructive ? "destructive" : props.secondary ? "secondary" : props.quiet ? "quiet" : "primary";
+  return <Pressable accessibilityRole="button" onPress={props.onPress} disabled={props.disabled}
+    style={({ pressed }) => [styles.button, BUTTON_VARIANTS[variant].container, pressed && !props.disabled && BUTTON_VARIANTS[variant].pressed, props.disabled && styles.disabled, props.style]}>
+    <Text style={[styles.buttonText, BUTTON_VARIANTS[variant].text]}>{props.title}</Text>
+  </Pressable>;
 }
 
-function Detail({ label, value }: { label: string; value: string }) {
-  return <View style={styles.detail}><Text style={styles.label}>{label}</Text><Text selectable style={styles.detailValue}>{value}</Text></View>;
+function BackButton(props: { title: string; onPress: () => void }) {
+  return <Pressable accessibilityRole="button" onPress={props.onPress} hitSlop={8} style={({ pressed }) => [styles.backButton, pressed && styles.backButtonPressed]}>
+    <View style={styles.backChevron}><Text style={styles.backChevronText}>‹</Text></View>
+    <Text style={styles.backButtonText}>{props.title}</Text>
+  </Pressable>;
+}
+
+function Detail({ label, value, layout }: { label: string; value: string; layout: EmployeeTaskLayout }) {
+  const tablet = layout === "tablet";
+  return <View style={tablet ? styles.detailTablet : styles.detailPhone}>
+    <Text style={tablet ? styles.detailLabel : styles.detailLabelInline}>{label}</Text>
+    <Text selectable style={tablet ? styles.detailValue : styles.detailValueInline}>{value}</Text>
+  </View>;
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: "#f4f7f5" },
-  recoveryAttribution: { gap: 4, padding: 12, borderWidth: 1, borderColor: "#c7d5d0", borderRadius: 8, backgroundColor: "#eef4f1" },
-  sectionNavigation: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
-  sectionButton: { minHeight: 48, justifyContent: "center", borderWidth: 1, borderColor: "#c7d5d0", borderRadius: 10, paddingHorizontal: 12 },
-  container: { flexGrow: 1, justifyContent: "center", paddingHorizontal: 20, paddingVertical: 20 },
-  brand: { color: "#135c4c", fontSize: 17, fontWeight: "800", letterSpacing: 1.4 },
-  card: { backgroundColor: "#fff", borderRadius: 18, padding: 22, gap: 16, borderWidth: 1, borderColor: "#e1e9e4" },
-  tabletCard: { padding: 28, gap: 20 },
-  heading: { color: "#17352c", fontSize: 25, fontWeight: "700" },
-  muted: { color: "#5b6e65", fontSize: 15, lineHeight: 22 },
-  ruleMet: { color: "#067647", fontSize: 15, lineHeight: 22 },
-  field: { gap: 7 },
-  label: { color: "#3e554b", fontSize: 13, fontWeight: "700" },
-  input: { minHeight: 48, borderColor: "#cbd8d0", borderWidth: 1, borderRadius: 10, paddingHorizontal: 12, color: "#17352c", fontSize: 16 },
-  help: { color: "#5b6e65", fontSize: 13, lineHeight: 18, fontStyle: "italic" },
-  tableRow: { gap: 10, borderWidth: 1, borderColor: "#e1e9e4", borderRadius: 12, padding: 12 },
-  tableRowTablet: { flexDirection: "row", alignItems: "flex-start", gap: 14 },
-  tableRowLabel: { color: "#17352c", fontSize: 16, fontWeight: "700" },
-  tableRowLabelTablet: { width: 120, paddingTop: 30 },
-  tableCellsPhone: { gap: 10 },
-  tableCellsTablet: { flex: 1, flexDirection: "row", flexWrap: "wrap", gap: 12 },
-  tableCellTablet: { flexGrow: 1, flexBasis: 140 },
-  choiceOptions: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
-  choiceOption: { flexGrow: 1, minHeight: 44, justifyContent: "center", borderColor: "#cbd8d0", borderWidth: 1, borderRadius: 10, paddingHorizontal: 12, backgroundColor: "#fff" },
-  choiceOptionSelected: { borderColor: "#135c4c", backgroundColor: "#dceee8" },
-  choiceOptionSelectedText: { color: "#135c4c" },
-  button: { minHeight: 48, justifyContent: "center", alignItems: "center", borderRadius: 10, backgroundColor: "#135c4c", paddingHorizontal: 16 },
-  buttonText: { color: "#fff", fontSize: 15, fontWeight: "700" },
-  secondaryButton: { backgroundColor: "#edf3ef", borderWidth: 1, borderColor: "#d5e1d9" },
-  secondaryButtonText: { color: "#135c4c" },
-  disabled: { opacity: 0.55 },
-  error: { color: "#a32424", fontSize: 14, lineHeight: 20 },
+  root: { flex: 1, backgroundColor: colors.canvas },
+  safe: { flex: 1 },
+  container: { flexGrow: 1, alignItems: "center", paddingHorizontal: EMPLOYEE_CONTENT_HORIZONTAL_GUTTER },
+  containerSignedOut: { paddingTop: space.xxl, paddingBottom: space.xxxl },
+  containerSignedIn: { paddingTop: space.xl, paddingBottom: space.xxxl },
+
+  // Signed-in app bar
+  appBar: { paddingHorizontal: EMPLOYEE_CONTENT_HORIZONTAL_GUTTER, borderBottomLeftRadius: radii.lg, borderBottomRightRadius: radii.lg },
+  appBarSafe: { alignItems: "center" },
+  appBarRow: { width: "100%", minHeight: 60, flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 10, paddingVertical: space.md },
+  appBarBrand: { flexDirection: "row", alignItems: "center", gap: 10, flexShrink: 1 },
+  appBarWordmark: { color: colors.textOnNavy, fontSize: 17, fontWeight: "800", letterSpacing: 1.2 },
+  connectivityPill: { flexDirection: "row", alignItems: "center", gap: 6, flexShrink: 1, paddingVertical: 6, paddingHorizontal: 10, borderRadius: radii.pill, backgroundColor: "rgba(255,255,255,0.12)", borderWidth: 1, borderColor: "rgba(255,255,255,0.18)" },
+  connectivityDotOnline: { width: 8, height: 8, borderRadius: 4, backgroundColor: "#34D399" },
+  connectivityDotOffline: { width: 8, height: 8, borderRadius: 4, backgroundColor: "#FBBF24" },
+  connectivityText: { color: colors.textOnNavy, fontSize: 12, fontWeight: "600", flexShrink: 1 },
+
+  // Brand
+  brandMarkSmall: { width: 34, height: 34, borderRadius: radii.sm, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "rgba(255,255,255,0.22)" },
+  brandMarkLarge: { width: 64, height: 64, borderRadius: radii.lg, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "rgba(255,255,255,0.25)" },
+  brandMarkTextSmall: { color: colors.textOnNavy, fontSize: 13, fontWeight: "800", letterSpacing: 0.5 },
+  brandMarkTextLarge: { color: colors.textOnNavy, fontSize: 24, fontWeight: "800", letterSpacing: 0.5 },
+
+  // Signed-out hero
+  heroBackdrop: { position: "absolute", top: 0, left: 0, right: 0, height: 340, overflow: "hidden", borderBottomLeftRadius: 28, borderBottomRightRadius: 28 },
+  heroGlow: { position: "absolute", width: 320, height: 320, borderRadius: 160, top: -140, right: -90, backgroundColor: "rgba(47,91,234,0.28)" },
+  hero: { alignItems: "center", gap: space.sm, paddingTop: space.lg, paddingBottom: space.sm },
+  heroWordmark: { color: colors.textOnNavy, fontSize: 26, fontWeight: "800", letterSpacing: 2, marginTop: space.sm },
+  heroOverline: { color: colors.textOnNavyMuted, fontSize: 12, fontWeight: "600", letterSpacing: 1.4, textTransform: "uppercase" },
+
+  // Cards
+  card: { backgroundColor: colors.surface, borderRadius: radii.lg, padding: space.xxl, gap: space.lg, borderWidth: 1, borderColor: colors.border, ...elevation },
+  authCard: { ...elevationRaised, width: "100%", maxWidth: 520, alignSelf: "center" },
+  tabletCard: { padding: space.xxxl, gap: space.xl },
+  cardIntro: { gap: 6 },
+  authFootnote: { alignItems: "center", paddingTop: space.xs, borderTopWidth: 1, borderTopColor: colors.border, marginTop: space.xs },
+  footnote: { color: colors.textTertiary, fontSize: 13, lineHeight: 19, textAlign: "center", paddingTop: space.md },
+  rulesBox: { gap: 6, padding: 14, borderRadius: radii.md - 2, backgroundColor: colors.surfaceMuted, borderWidth: 1, borderColor: colors.border },
+  ruleMet: { color: colors.success, fontSize: 14, lineHeight: 21, fontWeight: "600" },
+  ruleUnmet: { color: colors.textSecondary, fontSize: 14, lineHeight: 21 },
+  actionStack: { gap: 10 },
+
+  // Signed-in page
+  page: { gap: space.lg },
+  tabletPage: { gap: space.xl },
+  pageHeader: { gap: 6, paddingTop: space.xs, paddingBottom: space.xs },
+  title: typography.title,
+  sectionTitle: { ...typography.sectionTitle, paddingTop: space.sm },
+  body: typography.body,
+  overline: typography.overline,
+  label: { ...typography.label, color: colors.text },
+  help: { color: colors.textTertiary, fontSize: 13, lineHeight: 18 },
+  stackSm: { gap: 10 },
+  loadingBox: { paddingVertical: space.xxxl, alignItems: "center" },
+  revalidateCard: { gap: 14, padding: space.xl, borderRadius: radii.md, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, ...elevation },
+
+  // Empty state
+  emptyState: { alignItems: "center", gap: space.md, paddingVertical: space.xxxl, paddingHorizontal: space.xxl, borderRadius: radii.md, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderStyle: "dashed" },
+  emptyIcon: { width: 56, height: 56, borderRadius: 28, alignItems: "center", justifyContent: "center", backgroundColor: colors.neutralSoft },
+  emptyText: { color: colors.textSecondary, fontSize: 15, lineHeight: 22, textAlign: "center" },
+
+  // Task cards
   phoneTaskList: { gap: 12 },
-  tabletTaskGrid: { flexDirection: "row", flexWrap: "wrap", gap: 12 },
-  taskRow: { minHeight: 56, flexDirection: "row", alignItems: "center", gap: 12, borderWidth: 1, borderColor: "#e1e9e4", borderRadius: 12, padding: 14 },
-  tabletTaskRow: { flexGrow: 1, flexBasis: "46%" },
-  taskCopy: { flex: 1, gap: 5 },
-  taskTitle: { color: "#17352c", fontSize: 17, fontWeight: "700" },
-  chevron: { color: "#135c4c", fontSize: 27 },
-  phoneDetails: { gap: 0 },
-  tabletDetails: { flexDirection: "row", flexWrap: "wrap", columnGap: 20 },
-  detail: { flexGrow: 1, flexBasis: "44%", gap: 4, paddingBottom: 11, borderBottomWidth: 1, borderBottomColor: "#edf1ee" },
-  detailValue: { color: "#17352c", fontSize: 16, lineHeight: 22 },
-  confirmation: { gap: 10, borderWidth: 1, borderColor: "#d5e1d9", borderRadius: 12, padding: 14 },
+  tabletTaskGrid: { flexDirection: "row", flexWrap: "wrap", gap: 14 },
+  listSection: { gap: 10 },
+  taskCard: { minHeight: 76, flexDirection: "row", alignItems: "center", gap: 14, padding: space.lg, borderRadius: radii.md, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, ...elevation },
+  tabletTaskCard: { flexGrow: 1, flexBasis: "46%" },
+  taskCardPressed: { backgroundColor: colors.surfaceMuted, borderColor: colors.borderStrong, transform: [{ scale: 0.99 }] },
+  taskIconTile: { width: 44, height: 44, borderRadius: 12, alignItems: "center", justifyContent: "center", backgroundColor: colors.primarySoft },
+  taskIconTileWarning: { width: 44, height: 44, borderRadius: 12, alignItems: "center", justifyContent: "center", backgroundColor: colors.warningSoft },
+  taskIconTileNeutral: { width: 44, height: 44, borderRadius: 12, alignItems: "center", justifyContent: "center", backgroundColor: colors.neutralSoft },
+  taskIconTileLarge: { width: 48, height: 48, borderRadius: radii.md, alignItems: "center", justifyContent: "center", backgroundColor: colors.primarySoft },
+  taskIconTileWarningLarge: { width: 48, height: 48, borderRadius: radii.md, alignItems: "center", justifyContent: "center", backgroundColor: colors.warningSoft },
+  taskCopy: { flex: 1, gap: 4 },
+  taskTitle: { color: colors.text, fontSize: 16, lineHeight: 22, fontWeight: "700", letterSpacing: -0.1 },
+  taskMeta: { color: colors.textSecondary, fontSize: 13, lineHeight: 19 },
+  chevronCircle: { width: 32, height: 32, borderRadius: 16, alignItems: "center", justifyContent: "center", backgroundColor: colors.primarySoft },
+  chevron: { color: colors.primary, fontSize: 22, lineHeight: 24, fontWeight: "600", marginTop: -2, marginLeft: 1 },
+  glyphPage: { width: 16, height: 20, borderRadius: 4, borderWidth: 2, paddingHorizontal: 2, paddingTop: 3, gap: 2 },
+  glyphLine: { height: 2, borderRadius: 1, width: "100%" },
+  glyphLineShort: { height: 2, borderRadius: 1, width: "60%" },
+
+  // Detail
+  backButton: { alignSelf: "flex-start", minHeight: 44, flexDirection: "row", alignItems: "center", gap: 8, paddingRight: space.md, borderRadius: radii.sm },
+  backButtonPressed: { opacity: 0.6 },
+  backChevron: { width: 32, height: 32, borderRadius: 16, alignItems: "center", justifyContent: "center", backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border },
+  backChevronText: { color: colors.primary, fontSize: 22, lineHeight: 24, fontWeight: "600", marginTop: -2, marginRight: 1 },
+  backButtonText: { color: colors.primaryOnSoft, fontSize: 15, fontWeight: "600" },
+  identityCard: { gap: space.lg, padding: space.xl, borderRadius: radii.lg, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, ...elevation },
+  identityHeader: { flexDirection: "row", alignItems: "center", gap: 14 },
+  identityTitle: { flex: 1, color: colors.text, fontSize: 22, lineHeight: 28, fontWeight: "700", letterSpacing: -0.3 },
+  phoneDetails: { borderTopWidth: 1, borderTopColor: colors.border },
+  tabletDetails: { flexDirection: "row", flexWrap: "wrap", columnGap: 16, rowGap: 12 },
+  detailPhone: { flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", gap: 16, paddingVertical: 11, borderBottomWidth: 1, borderBottomColor: colors.border },
+  detailTablet: { flexGrow: 1, flexBasis: "30%", gap: 4, padding: 14, borderRadius: radii.sm + 2, backgroundColor: colors.surfaceMuted, borderWidth: 1, borderColor: colors.border },
+  detailLabel: { ...typography.overline, color: colors.textTertiary },
+  detailLabelInline: { color: colors.textSecondary, fontSize: 14, lineHeight: 21 },
+  detailValue: { color: colors.text, fontSize: 16, lineHeight: 22, fontWeight: "600" },
+  detailValueInline: { flex: 1, color: colors.text, fontSize: 14, lineHeight: 21, fontWeight: "600", textAlign: "right" },
+  panelCard: { gap: 14, padding: space.xl, borderRadius: radii.lg, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, ...elevation },
+  actionCard: { gap: 10, padding: space.xl, borderRadius: radii.lg, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border, borderTopWidth: 3, borderTopColor: colors.primary, ...elevation },
+  formDivider: { height: 1, backgroundColor: colors.border, marginVertical: space.xs },
+  issuesBox: { padding: 14, borderRadius: radii.sm + 2, backgroundColor: colors.dangerSoft, borderWidth: 1, borderColor: toneColors.danger.border },
+  signOutArea: { alignItems: "center", paddingTop: space.sm },
+
+  // Notices and status lines
+  notice: { borderRadius: radii.sm, borderLeftWidth: 3, paddingVertical: 11, paddingHorizontal: 14 },
+  noticeText: { fontSize: 14, lineHeight: 20, fontWeight: "500" },
+  statusLine: { flexDirection: "row", alignItems: "center", gap: 10, alignSelf: "stretch", paddingVertical: 10, paddingHorizontal: 14, borderRadius: radii.sm, borderWidth: 1 },
+  statusDot: { width: 8, height: 8, borderRadius: 4 },
+  statusText: { flex: 1, fontSize: 14, lineHeight: 20, fontWeight: "600" },
+  recoveryAttribution: { gap: 4, padding: 14, borderRadius: radii.sm + 2, backgroundColor: colors.infoSoft, borderWidth: 1, borderColor: toneColors.info.border },
+  recoveryText: { color: colors.info, fontSize: 14, lineHeight: 20, fontWeight: "600" },
+  recoveryMeta: { color: colors.textSecondary, fontSize: 13, lineHeight: 19 },
+
+  // Confirmation
+  confirmation: { gap: 14, padding: space.lg, borderRadius: radii.md, backgroundColor: colors.warningSoft, borderWidth: 1, borderColor: toneColors.warning.border },
+  confirmationHeader: { flexDirection: "row", alignItems: "flex-start", gap: 10 },
+  confirmationMark: { width: 24, height: 24, borderRadius: 12, alignItems: "center", justifyContent: "center", backgroundColor: colors.warning, marginTop: 1 },
+  confirmationMarkText: { color: colors.textOnNavy, fontSize: 14, fontWeight: "800" },
+  confirmationText: { flex: 1, color: colors.text, fontSize: 15, lineHeight: 22, fontWeight: "600" },
+  confirmationActions: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
+  confirmationButton: { flexGrow: 1, flexBasis: 130 },
+
+  // Section navigation and form
+  sectionNavigation: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  sectionChip: { minHeight: 44, justifyContent: "center", paddingHorizontal: 14, borderRadius: radii.pill, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surfaceMuted },
+  sectionChipSelected: { borderColor: colors.primary, backgroundColor: colors.primarySoft },
+  sectionChipText: { color: colors.textSecondary, fontSize: 14, fontWeight: "600" },
+  sectionChipTextSelected: { color: colors.primaryOnSoft, fontWeight: "700" },
+  sectionForm: { gap: 14 },
+  sectionHeadingRow: { flexDirection: "row", alignItems: "center", gap: 10 },
+  sectionHeadingAccent: { width: 4, height: 20, borderRadius: 2, backgroundColor: colors.primary },
+  sectionHeading: { flex: 1, ...typography.sectionTitle, fontSize: 18 },
+  tableGroup: { gap: 10 },
+  tableRow: { gap: 10, padding: 14, borderRadius: radii.md, backgroundColor: colors.surfaceMuted, borderWidth: 1, borderColor: colors.border },
+  tableRowTablet: { flexDirection: "row", alignItems: "flex-start", gap: 14 },
+  tableRowLabel: { color: colors.primaryOnSoft, fontSize: 13, lineHeight: 18, fontWeight: "700", letterSpacing: 0.6, textTransform: "uppercase" },
+  tableRowLabelTablet: { width: 120, paddingTop: 32 },
+  tableCellsPhone: { gap: 10 },
+  tableCellsTablet: { flex: 1, flexDirection: "row", flexWrap: "wrap", gap: 14 },
+  tableCellTablet: { flexGrow: 1, flexBasis: 140 },
+
+  // Fields
+  field: { gap: 6 },
+  input: { minHeight: 52, borderColor: colors.borderStrong, borderWidth: 1, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, color: colors.text, fontSize: 16, backgroundColor: colors.surface },
+  inputMultiline: { minHeight: 96, textAlignVertical: "top" },
+  inputReadOnly: { backgroundColor: colors.surfaceMuted, color: colors.textSecondary, borderColor: colors.border },
+  inputError: { borderColor: colors.danger },
+  inputFocused: { borderColor: colors.primary, borderWidth: 2, paddingHorizontal: 13, paddingVertical: 11, shadowColor: colors.primary, shadowOpacity: 0.18, shadowRadius: 6, shadowOffset: { width: 0, height: 0 } },
+  fieldError: { color: colors.danger, fontSize: 13, lineHeight: 18, fontWeight: "500" },
+
+  // Choice pills
+  choiceOptions: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+  choiceOption: { flexGrow: 1, minHeight: 44, alignItems: "center", justifyContent: "center", paddingHorizontal: 14, borderRadius: radii.pill, borderWidth: 1, borderColor: colors.borderStrong, backgroundColor: colors.surface },
+  choiceOptionSelected: { borderColor: colors.primary, backgroundColor: colors.primarySoft },
+  choiceOptionText: { color: colors.textSecondary, fontSize: 14, fontWeight: "600" },
+  choiceOptionSelectedText: { color: colors.primaryOnSoft, fontWeight: "700" },
+
+  // Buttons
+  button: { minHeight: 52, justifyContent: "center", alignItems: "center", borderRadius: 12, paddingHorizontal: 18 },
+  buttonText: { fontSize: 16, fontWeight: "700", letterSpacing: 0.1, textAlign: "center" },
+  disabled: { opacity: 0.5 },
 });
+
+const BUTTON_VARIANTS = {
+  primary: StyleSheet.create({
+    container: { backgroundColor: colors.primary, shadowColor: colors.primary, shadowOpacity: 0.25, shadowRadius: 10, shadowOffset: { width: 0, height: 4 }, elevation: 2 },
+    pressed: { backgroundColor: colors.primaryPressed },
+    text: { color: colors.textOnNavy },
+  }),
+  secondary: StyleSheet.create({
+    container: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.borderStrong },
+    pressed: { backgroundColor: colors.surfaceMuted },
+    text: { color: colors.text },
+  }),
+  destructive: StyleSheet.create({
+    container: { backgroundColor: colors.surface, borderWidth: 1, borderColor: toneColors.danger.border },
+    pressed: { backgroundColor: colors.dangerSoft },
+    text: { color: colors.danger },
+  }),
+  destructiveSolid: StyleSheet.create({
+    container: { backgroundColor: colors.danger },
+    pressed: { backgroundColor: "#A32B22" },
+    text: { color: colors.textOnNavy },
+  }),
+  quiet: StyleSheet.create({
+    container: { backgroundColor: "transparent", minHeight: 44, paddingHorizontal: 20 },
+    pressed: { backgroundColor: colors.neutralSoft },
+    text: { color: colors.textSecondary, fontSize: 15, fontWeight: "600" },
+  }),
+};

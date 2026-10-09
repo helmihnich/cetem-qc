@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from "react";
-import { Pressable, StyleSheet, Text, View } from "react-native";
+import { Pressable, StyleSheet, Text, View, type StyleProp, type ViewStyle } from "react-native";
 import { fr } from "@cetem-qc/i18n";
 import type { FetchedServerVersion, LocalDraft } from "../local-drafts/model";
 import { diffGraphieValues } from "./conflict-diff";
 import { localVersionLine, parseServerVersionMetadata, serverVersionLine, type ServerVersionMetadata } from "./conflict-panel-text";
 import type { OpenConflictSummary } from "./task-sync-state";
+import { colors, radii, toneColors } from "../theme";
 
 /** Technical limit, not a CETEM rule: the current-version read is aborted after 30 s, like a synchronization attempt. */
 export const SERVER_VERSION_TIMEOUT_MS = 30_000;
@@ -90,7 +91,10 @@ export function ConflictPanel(props: {
   const actionsEnabled = Boolean(ready) && !busy;
 
   return <View style={styles.panel}>
-    <Text accessibilityRole="alert" style={styles.title}>{fr.employeeTasks.conflictTitle}</Text>
+    <View style={styles.titleRow}>
+      <View style={styles.titleMark}><Text style={styles.titleMarkText}>!</Text></View>
+      <Text accessibilityRole="alert" style={styles.title}>{fr.employeeTasks.conflictTitle}</Text>
+    </View>
     <Text style={styles.muted}>{fr.employeeTasks.conflictExplanation}</Text>
     {localLine ? <Text style={styles.muted}>{localLine}</Text> : null}
     {props.localUnreadable ? <Text style={styles.muted}>{fr.employeeTasks.conflictLocalUnavailable}</Text> : null}
@@ -102,11 +106,11 @@ export function ConflictPanel(props: {
     {fetchState.status === "blocked" || fetchState.status === "failed"
       ? <PanelButton title={fr.employeeTasks.conflictRetryFetch} onPress={() => void load()} /> : null}
     {ready ? <Text accessibilityRole="summary" style={styles.muted}>{serverVersionLine(ready, "current")}</Text> : null}
-    {ready && localValues ? <View style={{ gap: 4 }}>
+    {ready && localValues ? <View style={styles.differences}>
       {differences.length
         ? <>
           <Text style={styles.label}>{fr.employeeTasks.conflictDifferences}</Text>
-          {differences.map((difference) => <Text key={difference.fieldId} style={styles.muted}>{difference.labelFr}</Text>)}
+          {differences.map((difference) => <Text key={difference.fieldId} style={styles.difference}>{difference.labelFr}</Text>)}
         </>
         : <Text style={styles.muted}>{fr.employeeTasks.conflictNoDifference}</Text>}
     </View> : null}
@@ -115,30 +119,44 @@ export function ConflictPanel(props: {
     {keepLocalOffered ? <PanelButton title={fr.employeeTasks.conflictKeepLocal} onPress={() => void act("keep-local")} disabled={!actionsEnabled} /> : null}
     <PanelButton title={fr.employeeTasks.conflictDiscardLocal} secondary onPress={() => { if (actionsEnabled) setConfirmingDiscard(true); }} disabled={!actionsEnabled || confirmingDiscard} />
     {confirmingDiscard ? <View style={styles.confirmation}>
-      <Text accessibilityRole="alert" style={styles.muted}>{fr.employeeTasks.conflictConfirmDiscard}</Text>
-      <PanelButton title={fr.common.cancel} secondary onPress={() => setConfirmingDiscard(false)} />
-      <PanelButton title={fr.employeeTasks.conflictConfirmDiscardAction} onPress={() => void act("discard-local")} disabled={!actionsEnabled} />
+      <Text accessibilityRole="alert" style={styles.confirmationText}>{fr.employeeTasks.conflictConfirmDiscard}</Text>
+      <View style={styles.confirmationActions}>
+        <PanelButton title={fr.common.cancel} secondary onPress={() => setConfirmingDiscard(false)} style={styles.confirmationButton} />
+        <PanelButton title={fr.employeeTasks.conflictConfirmDiscardAction} danger onPress={() => void act("discard-local")} disabled={!actionsEnabled} style={styles.confirmationButton} />
+      </View>
     </View> : null}
   </View>;
 }
 
-function PanelButton(props: { title: string; onPress: () => void; disabled?: boolean; secondary?: boolean }) {
+function PanelButton(props: { title: string; onPress: () => void; disabled?: boolean; secondary?: boolean; danger?: boolean; style?: StyleProp<ViewStyle> }) {
   return <Pressable accessibilityRole="button" accessibilityState={{ disabled: Boolean(props.disabled) }} onPress={props.onPress} disabled={props.disabled}
-    style={[styles.button, props.secondary && styles.secondaryButton, props.disabled && styles.disabled]}>
+    style={({ pressed }) => [styles.button, props.secondary && styles.secondaryButton, props.danger && styles.dangerButton, pressed && !props.disabled && (props.secondary ? styles.secondaryPressed : props.danger ? styles.dangerPressed : styles.buttonPressed), props.disabled && styles.disabled, props.style]}>
     <Text style={[styles.buttonText, props.secondary && styles.secondaryButtonText]}>{props.title}</Text>
   </Pressable>;
 }
 
 const styles = StyleSheet.create({
-  panel: { gap: 10, borderWidth: 1, borderColor: "#e3b7b7", borderRadius: 12, padding: 14, backgroundColor: "#fdf6f6" },
-  title: { color: "#a32424", fontSize: 17, fontWeight: "700" },
-  muted: { color: "#5b6e65", fontSize: 15, lineHeight: 22 },
-  label: { color: "#3e554b", fontSize: 13, fontWeight: "700" },
-  error: { color: "#a32424", fontSize: 14, lineHeight: 20 },
-  confirmation: { gap: 10, borderWidth: 1, borderColor: "#d5e1d9", borderRadius: 12, padding: 14 },
-  button: { minHeight: 48, justifyContent: "center", alignItems: "center", borderRadius: 10, backgroundColor: "#135c4c", paddingHorizontal: 16 },
-  buttonText: { color: "#fff", fontSize: 15, fontWeight: "700" },
-  secondaryButton: { backgroundColor: "#edf3ef", borderWidth: 1, borderColor: "#d5e1d9" },
-  secondaryButtonText: { color: "#135c4c" },
-  disabled: { opacity: 0.55 },
+  panel: { gap: 12, borderWidth: 1, borderColor: toneColors.danger.border, borderRadius: radii.md, padding: 16, backgroundColor: "#FFF8F7" },
+  titleRow: { flexDirection: "row", alignItems: "center", gap: 10 },
+  titleMark: { width: 24, height: 24, borderRadius: 12, alignItems: "center", justifyContent: "center", backgroundColor: colors.danger },
+  titleMarkText: { color: "#FFFFFF", fontSize: 14, fontWeight: "800" },
+  title: { flex: 1, color: colors.danger, fontSize: 17, lineHeight: 23, fontWeight: "700" },
+  muted: { color: colors.textSecondary, fontSize: 14, lineHeight: 21 },
+  label: { color: colors.text, fontSize: 13, fontWeight: "700" },
+  differences: { gap: 6, padding: 12, borderRadius: radii.sm, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border },
+  difference: { color: colors.text, fontSize: 14, lineHeight: 20 },
+  error: { color: colors.danger, fontSize: 14, lineHeight: 20, fontWeight: "600" },
+  confirmation: { gap: 12, borderWidth: 1, borderColor: toneColors.warning.border, borderRadius: radii.md, padding: 14, backgroundColor: colors.warningSoft },
+  confirmationText: { color: colors.text, fontSize: 15, lineHeight: 22, fontWeight: "600" },
+  confirmationActions: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
+  confirmationButton: { flexGrow: 1, flexBasis: 130 },
+  button: { minHeight: 52, justifyContent: "center", alignItems: "center", borderRadius: 12, backgroundColor: colors.primary, paddingHorizontal: 18 },
+  buttonPressed: { backgroundColor: colors.primaryPressed },
+  buttonText: { color: "#FFFFFF", fontSize: 16, fontWeight: "700", textAlign: "center" },
+  secondaryButton: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.borderStrong },
+  secondaryPressed: { backgroundColor: colors.surfaceMuted },
+  secondaryButtonText: { color: colors.text },
+  dangerButton: { backgroundColor: colors.danger },
+  dangerPressed: { backgroundColor: "#A32B22" },
+  disabled: { opacity: 0.5 },
 });

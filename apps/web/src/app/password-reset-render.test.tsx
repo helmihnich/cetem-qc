@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import * as React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { EmployeeManagement, requestPasswordReset } from "./employee-management";
+import { EmployeeManagement, employeeStatusLabel, requestPasswordReset } from "./employee-management";
 import { ResponsableSignInForm } from "./sign-in-form";
 
 // The web tsconfig keeps Next's `jsx: preserve`, so tsx compiles JSX with the classic runtime,
@@ -12,8 +12,8 @@ import { ResponsableSignInForm } from "./sign-in-form";
 test("W2 the roster offers « Réinitialiser le mot de passe » only for the active Employé", () => {
   const html = renderToStaticMarkup(<EmployeeManagement
     employees={[
-      { id: "00000000-0000-4000-8000-000000000021", firstName: "Actif", surname: "Exemple", email: "actif@example.test", active: true },
-      { id: "00000000-0000-4000-8000-000000000022", firstName: "Inactif", surname: "Exemple", email: "inactif@example.test", active: false },
+      { id: "00000000-0000-4000-8000-000000000021", firstName: "Actif", surname: "Exemple", email: "actif@example.test", active: true, activated: true },
+      { id: "00000000-0000-4000-8000-000000000022", firstName: "Inactif", surname: "Exemple", email: "inactif@example.test", active: false, activated: true },
     ]}
     onCreated={() => undefined}
     onRefresh={async () => undefined}
@@ -24,6 +24,18 @@ test("W2 the roster offers « Réinitialiser le mot de passe » only for the act
   assert.doesNotMatch(html, /Regenerer/);
 });
 
+test("W2b a technician who has not replaced the temporary password yet is shown as pending, not active", () => {
+  assert.equal(employeeStatusLabel({ active: true, activated: false }), "En attente de première connexion");
+  assert.equal(employeeStatusLabel({ active: true, activated: true }), "Actif");
+  assert.equal(employeeStatusLabel({ active: false, activated: false }), "Inactif");
+  const html = renderToStaticMarkup(<EmployeeManagement
+    employees={[{ id: "00000000-0000-4000-8000-000000000023", firstName: "Nouveau", surname: "Exemple", email: "nouveau@example.test", active: true, activated: false }]}
+    onCreated={() => undefined}
+    onRefresh={async () => undefined}
+  />);
+  assert.match(html, /Nouveau Exemple<\/span>.*status-pending.*En attente de première connexion/);
+});
+
 test("W3 the Responsable sign-in form shows who to contact for a forgotten password", () => {
   const html = renderToStaticMarkup(<ResponsableSignInForm email="" password="" busy={false} onEmailChange={() => undefined} onPasswordChange={() => undefined} onSubmit={() => undefined} />);
   assert.match(html, /Mot de passe oublié \? Contactez votre administrateur\./);
@@ -31,7 +43,7 @@ test("W3 the Responsable sign-in form shows who to contact for a forgotten passw
 });
 
 const employeeId = "00000000-0000-4000-8000-000000000021";
-const employee = { id: employeeId, firstName: "Actif", surname: "Exemple", email: "actif@example.test", active: true };
+const employee = { id: employeeId, firstName: "Actif", surname: "Exemple", email: "actif@example.test", active: true, activated: true };
 
 function stubFetch(status: number, body: unknown, calls: Array<{ url: string; method?: string }> = []): typeof fetch {
   return (async (input: string | URL | Request, init?: RequestInit) => {
@@ -42,7 +54,7 @@ function stubFetch(status: number, body: unknown, calls: Array<{ url: string; me
 
 test("W4 a successful reset posts to the password-reset proxy and opens the « Mot de passe réinitialisé » hand-over", async () => {
   const calls: Array<{ url: string; method?: string }> = [];
-  const outcome = await requestPasswordReset(employeeId, stubFetch(200, { employee, temporaryCredential: "temp-credential" }, calls));
+  const outcome = await requestPasswordReset(employeeId, stubFetch(200, { employee, temporaryCredential: "temp-credential", emailSent: true }, calls));
   assert.deepEqual(calls, [{ url: `/api/employees/${employeeId}/password-reset`, method: "POST" }]);
   assert.equal(outcome.ok, true);
   if (!outcome.ok) return;

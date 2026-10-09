@@ -83,9 +83,9 @@ export function DeactivatedTaskRecovery({ task, onChanged }: { task: Task; onCha
   return <div className="deactivated-recovery">
     {!task.assigneeActive && <>
     {task.recoveryState === "resolution-required"
-      ? <><span className="status-pill task-state-draft">{fr.tasks.resolutionRequired}</span><p>{warning}</p><p>{fr.tasks.conflictRecoveryUnavailable}</p></>
+      ? <><span className="status-pill task-state-draft task-state-attention">{fr.tasks.resolutionRequired}</span><p>{warning}</p><p>{fr.tasks.conflictRecoveryUnavailable}</p></>
       : task.state !== "submitted" && task.recoveryState !== "recovered"
-        ? <><span className="status-pill task-state-draft">{fr.tasks.actionRequired}</span>{warning && <p>{warning}</p>}
+        ? <><span className="status-pill task-state-draft task-state-attention">{fr.tasks.actionRequired}</span>{warning && <p>{warning}</p>}
           {task.recoveryState === "unstarted" && <><p>{fr.tasks.tabletRecoveryUnavailable}</p><button className="secondary-button" type="button" onClick={() => void start("reassign")}>{fr.tasks.reassignAction}</button></>}
           {(task.recoveryState === "synchronized-draft" || task.recoveryState === "correction-draft")
             && <button className="secondary-button" type="button" onClick={() => void start("recover")}>{fr.tasks.recoveryAction}</button>}

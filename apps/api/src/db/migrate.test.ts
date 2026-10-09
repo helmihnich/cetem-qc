@@ -33,7 +33,7 @@ test("team migration backfills one team for each existing Responsable and preser
   const accountAfter = { ...existing };
   assert.deepEqual(accountAfter, existing);
   assert.equal(teams.get(existing.id), "team-1");
-  assert.deepEqual(await listOwnTeamEmployees(pool, existing.id), [{ id: "employee-1", firstName: "Amel", surname: "Ben Ali", email: "amel@example.com", active: true }]);
+  assert.deepEqual(await listOwnTeamEmployees(pool, existing.id), [{ id: "employee-1", firstName: "Amel", surname: "Ben Ali", email: "amel@example.com", active: true, activated: false }]);
   await pool.query(migration);
   assert.equal(teams.size, 1);
 });

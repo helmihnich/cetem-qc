@@ -90,7 +90,7 @@ export const sessionResponseSchema: z.ZodType<SessionResponseContract> = z.objec
   user: authenticatedUserSchema,
 });
 const teamEmployeeSchema = z.object({
-  id: z.string().uuid(), firstName: z.string(), surname: z.string(), email: z.string().email(), active: z.boolean(),
+  id: z.string().uuid(), firstName: z.string(), surname: z.string(), email: z.string().email(), active: z.boolean(), activated: z.boolean(),
 }).strict();
 export const employeeListResponseSchema: z.ZodType<EmployeeListResponseContract> = z.object({
   employees: z.array(teamEmployeeSchema),
@@ -101,6 +101,7 @@ export const createEmployeeRequestSchema: z.ZodType<CreateEmployeeRequestContrac
 export const employeeCredentialResponseSchema: z.ZodType<EmployeeCredentialResponseContract> = z.object({
   employee: teamEmployeeSchema,
   temporaryCredential: z.string().min(1),
+  emailSent: z.boolean(),
 }).strict();
 export const updateEmployeeStatusRequestSchema: z.ZodType<UpdateEmployeeStatusRequestContract> = z.object({ active: z.boolean() }).strict();
 export const updateEmployeeStatusResponseSchema: z.ZodType<UpdateEmployeeStatusResponseContract> = z.object({ employee: teamEmployeeSchema }).strict();

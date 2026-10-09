@@ -19,7 +19,8 @@ export interface EmployeeDetails {
 }
 
 export interface EmployeeCredentialResult {
-  employee: EmployeeDetails & { id: string; active: boolean };
+  /** `activated` is false until the technician replaces the temporary credential at first login. */
+  employee: EmployeeDetails & { id: string; active: boolean; activated: boolean };
   temporaryCredential: string;
 }
 
@@ -29,6 +30,7 @@ interface CreatedEmployeeRow extends QueryResultRow {
   surname: string;
   email: string;
   is_active: boolean;
+  must_change_password?: boolean;
 }
 
 export async function createOwnTeamEmployee(pool: Pool, responsableAccountId: string, details: EmployeeDetails): Promise<EmployeeCredentialResult> {
@@ -50,7 +52,7 @@ export async function createOwnTeamEmployee(pool: Pool, responsableAccountId: st
         [normalizedEmail, `${details.firstName.trim()} ${details.surname.trim()}`, passwordHash, team.rows[0].team_id, details.firstName.trim(), details.surname.trim()],
       );
       const row = result.rows[0];
-      return { employee: { id: row.id, firstName: row.first_name, surname: row.surname, email: row.email, active: row.is_active }, temporaryCredential: credential };
+      return { employee: { id: row.id, firstName: row.first_name, surname: row.surname, email: row.email, active: row.is_active, activated: false }, temporaryCredential: credential };
     });
     return employee;
   } catch (error) {
@@ -73,7 +75,7 @@ export async function regenerateOwnTeamEmployeeCredential(pool: Pool, responsabl
       [passwordHash, employeeId, responsableAccountId],
     );
     const row = result.rows[0];
-    return row && { id: row.id, firstName: row.first_name, surname: row.surname, email: row.email, active: row.is_active };
+    return row && { id: row.id, firstName: row.first_name, surname: row.surname, email: row.email, active: row.is_active, activated: false };
   });
   return employee ? { employee, temporaryCredential: credential } : undefined;
 }
@@ -99,7 +101,7 @@ export async function resetOwnTeamEmployeePassword(pool: Pool, responsableAccoun
     if (!row) return { outcome: "not_found" };
     if (!row.is_active) return { outcome: "inactive" };
     await applyPasswordReset(transaction, { accountId: row.id, passwordHash, channel: "responsable", resetByAccountId: responsableAccountId });
-    return { outcome: "committed", employee: { id: row.id, firstName: row.first_name, surname: row.surname, email: row.email, active: row.is_active } };
+    return { outcome: "committed", employee: { id: row.id, firstName: row.first_name, surname: row.surname, email: row.email, active: row.is_active, activated: false } };
   });
   if (result.outcome !== "committed") return result;
   logPasswordReset("responsable", result.employee.id, responsableAccountId);
@@ -120,15 +122,15 @@ export async function updateOwnTeamEmployeeStatus(
        FROM identity_teams team
        WHERE employee.id = $2 AND employee.team_id = team.id
          AND team.responsable_account_id = $3 AND employee.role = 'employe'
-       RETURNING employee.id, employee.first_name, employee.surname, employee.email, employee.is_active`,
+       RETURNING employee.id, employee.first_name, employee.surname, employee.email, employee.is_active, employee.must_change_password`,
       [active, employeeId, responsableAccountId],
     );
     const row = result.rows[0];
-    return row && { id: row.id, firstName: row.first_name, surname: row.surname, email: row.email, active: row.is_active };
+    return row && toTeamEmployee(row);
   }
   return withTransaction(pool, async (transaction) => {
     const target = await transaction.query<CreatedEmployeeRow>(
-      `SELECT employee.id, employee.first_name, employee.surname, employee.email, employee.is_active
+      `SELECT employee.id, employee.first_name, employee.surname, employee.email, employee.is_active, employee.must_change_password
        FROM identity_accounts employee JOIN identity_teams team ON employee.team_id = team.id
        WHERE employee.id = $1 AND team.responsable_account_id = $2 AND employee.role = 'employe'
        FOR UPDATE OF employee`,
@@ -141,8 +143,12 @@ export async function updateOwnTeamEmployeeStatus(
       [employeeId, active],
     );
     row.is_active = updated.rows[0]!.is_active;
-    return row && { id: row.id, firstName: row.first_name, surname: row.surname, email: row.email, active: row.is_active };
+    return toTeamEmployee(row);
   });
+}
+
+function toTeamEmployee(row: CreatedEmployeeRow): EmployeeCredentialResult["employee"] {
+  return { id: row.id, firstName: row.first_name, surname: row.surname, email: row.email, active: row.is_active, activated: row.must_change_password === false };
 }
 
 function isUniqueViolation(error: unknown): boolean {

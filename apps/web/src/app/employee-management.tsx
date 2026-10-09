@@ -2,9 +2,15 @@
 
 import { FormEvent, useState } from "react";
 import { fr } from "@cetem-qc/i18n";
+import { Icon } from "./icons";
 
-type Employee = { id: string; firstName: string; surname: string; email: string; active: boolean };
-type Credential = { employee: Employee; temporaryCredential: string; title?: string; subtitle?: string };
+type Employee = { id: string; firstName: string; surname: string; email: string; active: boolean; activated: boolean };
+type Credential = { employee: Employee; temporaryCredential: string; emailSent: boolean; title?: string; subtitle?: string };
+
+export function employeeStatusLabel(employee: Pick<Employee, "active" | "activated">): string {
+  if (!employee.active) return fr.employees.inactive;
+  return employee.activated ? fr.employees.active : fr.employees.pendingActivation;
+}
 export type PasswordResetOutcome = { ok: true; credential: Credential } | { ok: false; message: string; stale: boolean };
 
 export async function requestPasswordReset(employeeId: string, fetchImpl: typeof fetch = fetch): Promise<PasswordResetOutcome> {
@@ -69,27 +75,48 @@ export function EmployeeManagement({ employees, onCreated, onRefresh }: { employ
     finally { setBusy(false); }
   }
 
-  if (credential) return <section className="roster-card" role="dialog" aria-modal="true" aria-labelledby="credential-title">
-    <p className="eyebrow">REMISE MANUELLE</p><h2 id="credential-title">{credential.title ?? "Compte cree"}</h2>
-    <p className="subtitle">{credential.subtitle ?? "Remettez ce mot de passe temporaire en personne. Il devra etre remplace a la premiere connexion."}</p>
-    <p>{credential.employee.firstName} {credential.employee.surname} · {credential.employee.email}</p>
-    <label>Mot de passe temporaire<input readOnly value={credential.temporaryCredential} /></label>
-    <button className="secondary-button" type="button" disabled={busy} onClick={() => void navigator.clipboard.writeText(credential.temporaryCredential).then(() => setCopied(true))}>Copier le mot de passe</button>
-    {copied && <p role="status">Mot de passe copie.</p>}
-    <label><input type="checkbox" checked={acknowledged} onChange={(event) => setAcknowledged(event.target.checked)} /> J’ai enregistre ou remis le mot de passe au technicien</label>
-    <button className="primary-button" type="button" disabled={!acknowledged || busy} onClick={() => { setCredential(undefined); setCopied(false); onCreated(credential.employee); void onRefresh(); }}>Terminer</button>
+  if (credential) return <section className="roster-card credential-card" role="dialog" aria-modal="true" aria-labelledby="credential-title">
+    <div className="credential-header">
+      <span className="credential-icon" aria-hidden="true"><Icon name="shield" size={22} /></span>
+      <div><p className="eyebrow">REMISE MANUELLE</p><h2 id="credential-title">{credential.title ?? "Compte cree"}</h2>
+        <p className="subtitle">{credential.subtitle ?? "Remettez ce mot de passe temporaire en personne. Il devra etre remplace a la premiere connexion."}</p></div>
+    </div>
+    <div className="credential-body">
+      <p role="status" className={credential.emailSent ? "alert alert-info" : "alert alert-error"}>{credential.emailSent ? `${fr.employees.credentialEmailSent} ${credential.employee.email}.` : fr.employees.credentialEmailNotSent}</p>
+      <div className="credential-identity"><span className="avatar" aria-hidden="true">{initialsOf(credential.employee)}</span><span><strong>{credential.employee.firstName} {credential.employee.surname}</strong><small>{credential.employee.email}</small></span></div>
+      <label className="credential-secret">Mot de passe temporaire
+        <span className="credential-secret-row"><input readOnly value={credential.temporaryCredential} onFocus={(event) => event.target.select()} />
+          <button className="secondary-button with-icon" type="button" disabled={busy} onClick={() => void navigator.clipboard.writeText(credential.temporaryCredential).then(() => setCopied(true))}><Icon name="copy" size={16} />Copier le mot de passe</button></span>
+      </label>
+      {copied && <p role="status" className="field-hint">Mot de passe copie.</p>}
+      <label className="checkbox-row"><input type="checkbox" checked={acknowledged} onChange={(event) => setAcknowledged(event.target.checked)} /> J’ai enregistre ou remis le mot de passe au technicien</label>
+    </div>
+    <div className="task-form-actions"><button className="primary-button" type="button" disabled={!acknowledged || busy} onClick={() => { setCredential(undefined); setCopied(false); onCreated(credential.employee); void onRefresh(); }}>Terminer</button></div>
   </section>;
 
   return <section className="roster-card" aria-labelledby="create-employee-title">
-    <div className="card-heading"><div><h2 id="create-employee-title">Ajouter un technicien</h2><p>Creer un compte rattache a votre equipe</p></div><button className="secondary-button" type="button" disabled={busy} onClick={() => setCreating((value) => !value)}>{creating ? "Annuler" : "Ajouter un technicien"}</button></div>
-    {creating && <form className="auth-form" onSubmit={(event) => void submit(event)}>
+    <div className="card-heading"><div><h2 id="create-employee-title">Techniciens</h2><p>Les membres de votre équipe</p></div>
+      <div className="card-heading-actions"><span className="count-badge">{employees.length}</span>
+        <button className={creating ? "secondary-button" : "primary-button with-icon"} type="button" disabled={busy} onClick={() => setCreating((value) => !value)}>{creating ? "Annuler" : <><Icon name="plus" size={16} />Ajouter un technicien</>}</button></div></div>
+    {creating && <form className="auth-form inline-form" onSubmit={(event) => void submit(event)}>
+      <p className="inline-form-title">Ajouter un technicien <span>Creer un compte rattache a votre equipe</span></p>
       <label>Prenom<input required maxLength={100} value={firstName} onChange={(event) => setFirstName(event.target.value)} /></label>
       <label>Nom<input required maxLength={100} value={surname} onChange={(event) => setSurname(event.target.value)} /></label>
       <label>Adresse e-mail<input required type="email" maxLength={254} value={email} onChange={(event) => setEmail(event.target.value)} /></label>
       <button className="primary-button" disabled={busy}>{busy ? "Creation en cours…" : "Creer le compte"}</button>
       {error && <p role="alert" className="error-state">{error}</p>}
     </form>}
-    {error && !creating && <p role="alert" className="error-state">{error}</p>}
-    <ul className="employee-actions">{employees.map((employee) => <li key={employee.email}><span>{employee.firstName} {employee.surname} · {employee.active ? "Actif" : "Inactif"}</span><span>{employee.active && <button className="text-button" disabled={busy} type="button" onClick={() => void resetPassword(employee.id)}>{fr.employees.resetPassword}</button>}<button className="text-button" disabled={busy} type="button" onClick={() => void changeStatus(employee)}>{employee.active ? "Désactiver" : "Activer"}</button></span></li>)}</ul>
+    {error && !creating && <p role="alert" className="alert alert-error card-alert">{error}</p>}
+    {employees.length === 0 ? <div className="state-message empty-state"><span className="empty-icon" aria-hidden="true"><Icon name="team" size={22} /></span><p>{fr.employees.empty}</p></div>
+      : <ul className="employee-list">{employees.map((employee) => <li className="employee-row" key={employee.email}>
+        <span className="avatar" aria-hidden="true">{initialsOf(employee)}</span>
+        <span className="employee-identity"><span className="employee-name">{`${employee.firstName} ${employee.surname}`}</span><span className="employee-email">{employee.email}</span></span>
+        <span className={`status-pill ${!employee.active ? "status-inactive" : employee.activated ? "status-active" : "status-pending"}`}><span className="status-dot" />{employeeStatusLabel(employee)}</span>
+        <span className="employee-row-actions">{employee.active && <button className="text-button" disabled={busy} type="button" onClick={() => void resetPassword(employee.id)}>{fr.employees.resetPassword}</button>}<button className={employee.active ? "text-button danger" : "text-button"} disabled={busy} type="button" onClick={() => void changeStatus(employee)}>{employee.active ? "Désactiver" : "Activer"}</button></span>
+      </li>)}</ul>}
   </section>;
+}
+
+function initialsOf(employee: Pick<Employee, "firstName" | "surname">) {
+  return `${employee.firstName.trim()[0] ?? ""}${employee.surname.trim()[0] ?? ""}`.toUpperCase() || "?";
 }

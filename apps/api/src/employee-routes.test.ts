@@ -13,6 +13,7 @@ import { createAssignedTask, listEligibleTaskAssignees } from "./modules/tasks/t
 import { createSession, findActiveSession } from "./modules/identity-auth/sessions.js";
 import { withPostgresTestSchema } from "./test-support/postgres.js";
 import { employeeCredentialResponseSchema } from "@cetem-qc/schemas/api/v1";
+import type { MailMessage, Mailer } from "./modules/notifications/mailer.js";
 
 const responsable = { id: "responsable-1", email: "lead@example.com", display_name: "Lead User", role: "responsable", password_hash: "", must_change_password: false, is_active: true };
 const employees: Array<{ id: string; first_name: string; surname: string; email: string; display_name: string; is_active: boolean; team_id: string; role: string; must_change_password: boolean; password_hash: string }> = [];
@@ -73,7 +74,7 @@ function testPool(failInsert = false, failStatusUpdate = false): Pool {
       target.must_change_password = true;
       return { rows: [{ id: target.id, first_name: target.first_name, surname: target.surname, email: target.email, is_active: true }], rowCount: 1 };
     }
-    if (statement.startsWith("SELECT employee.id, employee.first_name, employee.surname, employee.email, employee.is_active")) return { rows: employees.map(({ id, first_name, surname, email, is_active }) => ({ id, first_name, surname, email, is_active })), rowCount: employees.length };
+    if (statement.startsWith("SELECT employee.id, employee.first_name, employee.surname, employee.email, employee.is_active")) return { rows: employees.map(({ id, first_name, surname, email, is_active, must_change_password }) => ({ id, first_name, surname, email, is_active, must_change_password })), rowCount: employees.length };
     if (statement.includes("INSERT INTO identity_accounts")) {
       if (failInsert) throw new Error("database failure");
       if (employees.some((employee) => employee.email === values?.[0])) throw Object.assign(new Error("duplicate"), { code: "23505", constraint: "identity_accounts_email_case_insensitive_unique" });
@@ -88,8 +89,8 @@ function testPool(failInsert = false, failStatusUpdate = false): Pool {
   return { query, connect: async () => client } as unknown as Pool;
 }
 
-async function withServer(pool: Pool, run: (root: string) => Promise<void>) {
-  const server = createServer(createApp(pool));
+async function withServer(pool: Pool, run: (root: string) => Promise<void>, mailer?: Mailer) {
+  const server = createServer(createApp(pool, mailer ? { mailer } : {}));
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   try { const address = server.address() as AddressInfo; await run(`http://127.0.0.1:${address.port}/api/v1`); }
   finally { await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve())); }
@@ -124,12 +125,45 @@ test("Responsable creates an employee, sees it in the roster, and roster omits t
     assert.equal((await request(root, token, "POST", { firstName: "Nour", surname: "Ali", email: "nour@example.com", teamId: "other" })).status, 400);
     const created = await request(root, token, "POST", { firstName: "Nour", surname: "Ali", email: "Nour@Example.com" });
     assert.equal(created.status, 201);
-    const payload = await created.json() as { employee: { id: string; email: string }; temporaryCredential: string };
+    const payload = await created.json() as { employee: { id: string; email: string; activated: boolean }; temporaryCredential: string; emailSent: boolean };
     assert.equal(payload.employee.email, "nour@example.com"); assert.match(payload.temporaryCredential, /^[A-Za-z0-9!@#$%*?]{8}$/);
+    assert.equal(payload.employee.activated, false);
+    assert.equal(payload.emailSent, false, "SMTP is not configured in tests");
     const roster = await (await request(root, token, "GET")).json();
-    assert.deepEqual(roster, { employees: [{ id: payload.employee.id, firstName: "Nour", surname: "Ali", email: "nour@example.com", active: true }] });
+    assert.deepEqual(roster, { employees: [{ id: payload.employee.id, firstName: "Nour", surname: "Ali", email: "nour@example.com", active: true, activated: false }] });
+    employees[0]!.must_change_password = false;
+    const activatedRoster = await (await request(root, token, "GET")).json() as { employees: Array<{ activated: boolean }> };
+    assert.equal(activatedRoster.employees[0]!.activated, true);
     assert.doesNotMatch(JSON.stringify(roster), /temporaryCredential|passwordHash|password_hash/);
   });
+});
+
+test("creating a technician e-mails the temporary credential; an SMTP failure still creates the account", async () => {
+  responsable.password_hash = await hashPassword("temporary-secret"); employees.length = 0; accountRows = 0; sessions.clear();
+  const sent: MailMessage[] = [];
+  await withServer(testPool(), async (root) => {
+    const token = await login(root);
+    const created = await request(root, token, "POST", { firstName: "Nour", surname: "Ali", email: "nour@example.com" });
+    assert.equal(created.status, 201);
+    const payload = await created.json() as { temporaryCredential: string; emailSent: boolean };
+    assert.equal(payload.emailSent, true);
+    assert.equal(sent.length, 1);
+    assert.equal(sent[0]!.to, "nour@example.com");
+    assert.ok(sent[0]!.text.includes(payload.temporaryCredential));
+  }, { configured: true, send: async (message) => { sent.push(message); } });
+
+  const originalWarn = console.warn;
+  console.warn = () => undefined;
+  try {
+    await withServer(testPool(), async (root) => {
+      const token = await login(root);
+      const created = await request(root, token, "POST", { firstName: "Sami", surname: "Ali", email: "sami@example.com" });
+      assert.equal(created.status, 201);
+      const payload = await created.json() as { temporaryCredential: string; emailSent: boolean };
+      assert.equal(payload.emailSent, false);
+      assert.match(payload.temporaryCredential, /^[A-Za-z0-9!@#$%*?]{8}$/);
+    }, { configured: true, send: async () => { throw new Error("SMTP down"); } });
+  } finally { console.warn = originalWarn; }
 });
 
 test("employee creation validates names/email and rejects duplicates and anonymous sessions", async () => {
@@ -206,9 +240,9 @@ test("credential regeneration is Responsable-only, own-team-only, one-time in re
     assert.equal(employee.must_change_password, true);
     const rosterText = await (await request(root, responsableToken, "GET")).text();
     const sessionText = await (await fetch(`${root}/session`, { headers: { authorization: `Bearer ${responsableToken}` } })).text();
-    assert.doesNotMatch(rosterText, new RegExp(payload.temporaryCredential));
-    assert.doesNotMatch(sessionText, new RegExp(payload.temporaryCredential));
-    assert.doesNotMatch(JSON.stringify(logged), new RegExp(payload.temporaryCredential));
+    assert.equal(rosterText.includes(payload.temporaryCredential), false);
+    assert.equal(sessionText.includes(payload.temporaryCredential), false);
+    assert.equal(JSON.stringify(logged).includes(payload.temporaryCredential), false);
   });
 });
 

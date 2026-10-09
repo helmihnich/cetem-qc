@@ -41,6 +41,12 @@ services:
       CLAMAV_HOST: ${CLAMAV_HOST:-}
       AI_PROVIDER: ${AI_PROVIDER:-}
       GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      MAIL_FROM: ${MAIL_FROM:-}
+      APP_LOGIN_URL: ${APP_LOGIN_URL:-}
     volumes:
       - files:/var/data/files
     depends_on:

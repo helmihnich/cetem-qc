@@ -7,6 +7,7 @@ import type { GraphieCalculationResults } from "@cetem-qc/domain";
 import { fr } from "@cetem-qc/i18n";
 import { EvidenceInputSections, InsightProposalsSection } from "./accepted-evidence";
 import { GraphieCalculationReview } from "./graphie-calculation-review";
+import { Icon, ShortId } from "./icons";
 
 const dateTimeFormatter = new Intl.DateTimeFormat("fr-FR", { dateStyle: "medium", timeStyle: "short" });
 const when = (iso: string) => dateTimeFormatter.format(new Date(iso));
@@ -112,7 +113,7 @@ export function HistoryListView({ load, onRetry, onOpen, openTaskId }: HistoryLi
   let content: React.ReactNode;
   if (!load) content = <div className="state-message" role="status">{fr.common.loading}</div>;
   else if (load.kind !== "ready") content = <div className="state-message error-state" role="alert">{load.kind === "unavailable" ? fr.api.unavailable : fr.history.loadFailed}<button className="text-button" type="button" onClick={onRetry}>{fr.common.retry}</button></div>;
-  else if (load.records.length === 0) content = <div className="state-message empty-state" role="status"><span className="empty-icon" aria-hidden="true">○</span><p>{fr.history.empty}</p></div>;
+  else if (load.records.length === 0) content = <div className="state-message empty-state" role="status"><span className="empty-icon" aria-hidden="true"><Icon name="inbox" size={22} /></span><p>{fr.history.empty}</p></div>;
   else content = <div className="table-wrap"><table>
     <thead><tr>
       <th scope="col">{fr.history.taskColumn}</th><th scope="col">{fr.history.establishmentColumn}</th><th scope="col">{fr.history.assigneeColumn}</th>
@@ -120,7 +121,7 @@ export function HistoryListView({ load, onRetry, onOpen, openTaskId }: HistoryLi
       <th scope="col"><span className="visually-hidden">{fr.history.actionsColumn}</span></th>
     </tr></thead>
     <tbody>{load.records.map((record) => <tr key={record.taskId}>
-      <td className="task-id-cell">{record.taskId}<HistoryLineageLines lineage={record.lineage} /></td>
+      <td className="task-id-cell"><ShortId id={record.taskId} /><HistoryLineageLines lineage={record.lineage} /></td>
       <td>{record.establishment}</td><td className="name-cell">{record.assignee}</td>
       <td>{when(record.designatedAt)}</td><td>{outcomeLabel(record.conformityOutcome)}</td><td>{originLabel(record.reportOrigin)}</td>
       <td className="task-actions-cell"><button id={`history-open-${record.taskId}`} className="secondary-button" type="button" aria-expanded={openTaskId === record.taskId} onClick={() => onOpen(record.taskId)}>{fr.history.open}</button></td>

@@ -6,7 +6,7 @@ import { createOwnTeamEmployee, DuplicateEmployeeEmailError, regenerateOwnTeamEm
 import type { RouteDeps } from "./route-deps.js";
 
 export function registerEmployeeRoutes(v1: express.Router, deps: RouteDeps): void {
-  const { getPool } = deps;
+  const { getPool, notifyTemporaryCredential } = deps;
   v1.get("/employees", async (_request, response) => {
     const session = response.locals.session as NonNullable<Awaited<ReturnType<typeof findActiveSession>>>;
     if (session.role !== "responsable") {
@@ -38,7 +38,8 @@ export function registerEmployeeRoutes(v1: express.Router, deps: RouteDeps): voi
     }
     try {
       const result = await createOwnTeamEmployee(getPool(), session.id, parsed.data);
-      response.status(201).set("Cache-Control", "no-store").json(employeeCredentialResponseSchema.parse(result));
+      const emailSent = await notifyTemporaryCredential(result.employee, result.temporaryCredential, "created");
+      response.status(201).set("Cache-Control", "no-store").json(employeeCredentialResponseSchema.parse({ ...result, emailSent }));
     } catch (error) {
       if (error instanceof DuplicateEmployeeEmailError) {
         response.status(409).json(apiErrorSchema.parse({ error: { code: "EMAIL_ALREADY_EXISTS", message: "Cette adresse e-mail est dÃ©jÃ  utilisÃ©e." } }));
@@ -64,7 +65,8 @@ export function registerEmployeeRoutes(v1: express.Router, deps: RouteDeps): voi
         response.status(404).json(apiErrorSchema.parse({ error: { code: "EMPLOYEE_NOT_FOUND", message: "EmployÃ© introuvable ou dÃ©jÃ  activÃ©." } }));
         return;
       }
-      response.status(200).set("Cache-Control", "no-store").json(employeeCredentialResponseSchema.parse(result));
+      const emailSent = await notifyTemporaryCredential(result.employee, result.temporaryCredential, "created");
+      response.status(200).set("Cache-Control", "no-store").json(employeeCredentialResponseSchema.parse({ ...result, emailSent }));
     } catch {
       response.status(500).json(apiErrorSchema.parse({ error: { code: "INTERNAL_ERROR", message: "Une erreur est survenue." } }));
     }
@@ -91,7 +93,8 @@ export function registerEmployeeRoutes(v1: express.Router, deps: RouteDeps): voi
         response.status(409).json(apiErrorSchema.parse({ error: { code: "EMPLOYEE_INACTIVE", message: "Ce Technicien est désactivé. Réactivez-le avant de réinitialiser son mot de passe." } }));
         return;
       }
-      response.status(200).set("Cache-Control", "no-store").json(employeeCredentialResponseSchema.parse({ employee: result.employee, temporaryCredential: result.temporaryCredential }));
+      const emailSent = await notifyTemporaryCredential(result.employee, result.temporaryCredential, "reset");
+      response.status(200).set("Cache-Control", "no-store").json(employeeCredentialResponseSchema.parse({ employee: result.employee, temporaryCredential: result.temporaryCredential, emailSent }));
     } catch {
       // Never log here: the generated credential may still be in scope.
       response.status(500).json(apiErrorSchema.parse({ error: { code: "INTERNAL_ERROR", message: "Une erreur est survenue." } }));

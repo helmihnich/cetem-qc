@@ -5,6 +5,7 @@ import { taskListResponseSchema } from "@cetem-qc/api-client/v1";
 import type { TaskListResponse } from "@cetem-qc/api-client/v1";
 import { fr } from "@cetem-qc/i18n";
 import { AcceptedEvidencePanel } from "./accepted-evidence";
+import { Icon, ShortId } from "./icons";
 import { TaskCreation } from "./task-creation";
 import { DeactivatedTaskRecovery } from "./task-recovery";
 
@@ -35,18 +36,29 @@ export type TaskListViewProps = {
 /** A replacement is offered only for an accepted task that has none yet. */
 export const canReplace = (task: TaskListItem) => task.state === "submitted" && task.replacedBy === null;
 
+/** A task whose assignee was deactivated before it was accepted still waits for a Responsable decision. */
+const needsAttention = (task: TaskListItem) => !task.assigneeActive && (task.recoveryState === "resolution-required" || (task.state !== "submitted" && task.recoveryState !== "recovered"));
+
 export function TaskListView(props: TaskListViewProps) {
   const { tasks, loading, error, replacingTaskId, createdReplacementId } = props;
+  const ready = !loading && !error && tasks.length > 0;
+  const stats = [
+    { label: fr.shell.stats.total, value: tasks.length, tone: "neutral" },
+    { label: fr.shell.stats.inProgress, value: tasks.filter((task) => task.state !== "submitted").length, tone: "info" },
+    { label: fr.shell.stats.accepted, value: tasks.filter((task) => task.state === "submitted").length, tone: "success" },
+    { label: fr.shell.stats.attention, value: tasks.filter(needsAttention).length, tone: "warning" },
+  ];
   return <section className="roster-card task-list-card" aria-labelledby="task-list-title">
-    <div className="card-heading"><div><h2 id="task-list-title">{fr.tasks.listTitle}</h2><p>{fr.tasks.listDescription}</p></div></div>
+    <div className="card-heading"><div><h2 id="task-list-title">{fr.tasks.listTitle}</h2><p>{fr.tasks.listDescription}</p></div>{ready && <span className="count-badge">{tasks.length}</span>}</div>
+    {ready && <dl className="stat-strip">{stats.map((stat) => <div key={stat.label} className={`stat stat-${stat.tone}`}><dt>{stat.label}</dt><dd>{stat.value}</dd></div>)}</dl>}
     {createdReplacementId && <div className="task-created" role="status"><strong>{fr.tasks.replacementCreated}</strong><span>{fr.tasks.taskId} : {createdReplacementId}</span><span>{fr.tasks.draft}</span></div>}
     {loading ? <div className="state-message" role="status">{fr.common.loading}</div>
       : error ? <div className="state-message error-state" role="alert">{fr.tasks.listError}<button className="text-button" type="button" onClick={props.onRetry}>{fr.tasks.retry}</button></div>
-        : tasks.length === 0 ? <div className="state-message empty-state" role="status"><span className="empty-icon" aria-hidden="true">○</span><p>{fr.tasks.listEmpty}</p></div>
+        : tasks.length === 0 ? <div className="state-message empty-state" role="status"><span className="empty-icon" aria-hidden="true"><Icon name="inbox" size={22} /></span><p>{fr.tasks.listEmpty}</p></div>
           : <div className="table-wrap"><table>
             <thead><tr><th scope="col">{fr.tasks.taskId}</th><th scope="col">{fr.tasks.type}</th><th scope="col">{fr.tasks.establishment}</th><th scope="col">{fr.tasks.assignee}</th><th scope="col">{fr.tasks.state}</th><th scope="col">{fr.tasks.lastUpdated}</th><th scope="col"><span className="visually-hidden">{fr.tasks.actions}</span></th></tr></thead>
             <tbody>{tasks.map((task) => <tr key={task.id}>
-              <td className="task-id-cell">{task.id}
+              <td className="task-id-cell"><ShortId id={task.id} />
                 {task.replacementOf !== null && <span className="task-lineage">{fr.tasks.replacementOf.replace("{taskId}", task.replacementOf)}</span>}
                 {task.replacedBy !== null && <span className="task-lineage">{fr.tasks.replacedBy.replace("{taskId}", task.replacedBy)}</span>}
               </td>
@@ -54,8 +66,8 @@ export function TaskListView(props: TaskListViewProps) {
               <td>{task.state === "submitted"
                 ? <span className="status-pill task-state-submitted"><span className="status-dot" />{fr.tasks.submittedAccepted}</span>
                 : <span className="status-pill task-state-draft"><span className="status-dot" />{fr.tasks.draft}</span>}
-                {!task.assigneeActive && task.recoveryState === "resolution-required" && <span className="status-pill task-state-draft">{fr.tasks.resolutionRequired}</span>}
-                {!task.assigneeActive && task.state !== "submitted" && task.recoveryState !== "resolution-required" && task.recoveryState !== "recovered" && <span className="status-pill task-state-draft">{fr.tasks.actionRequired}</span>}
+                {!task.assigneeActive && task.recoveryState === "resolution-required" && <span className="status-pill task-state-draft task-state-attention">{fr.tasks.resolutionRequired}</span>}
+                {!task.assigneeActive && task.state !== "submitted" && task.recoveryState !== "resolution-required" && task.recoveryState !== "recovered" && <span className="status-pill task-state-draft task-state-attention">{fr.tasks.actionRequired}</span>}
               </td>
               <td>{dateFormatter.format(new Date(task.lastUpdatedAt))}</td>
               <td className="task-actions-cell">{task.state === "submitted" && props.onViewEvidence && <button id={`evidence-button-${task.id}`} className="secondary-button" type="button" aria-expanded={props.evidenceTaskId === task.id} onClick={() => props.onViewEvidence?.(task.id)}>{fr.tasks.evidenceAction}</button>}

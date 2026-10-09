@@ -22,10 +22,14 @@ import { createObjectStorage } from "./modules/files/index.js";
 import type { ObjectStorage } from "./modules/files/index.js";
 import { reportCommandTestSeams } from "./modules/reports/index.js";
 import { registerFileRoutes } from "./routes/register-file-routes.js";
+import { createDisabledMailer, createMailer, sendTemporaryCredentialEmail } from "./modules/notifications/mailer.js";
+import type { Mailer } from "./modules/notifications/mailer.js";
 
 export interface AppOptions {
   /** Defaults to the process environment (TRUST_PROXY, FORCE_HTTPS); tests pass explicit values. */
   runtime?: Pick<RuntimeConfig, "trustProxy" | "forceHttps">;
+  /** Defaults to the SMTP settings of the process environment (disabled when SMTP_HOST is empty). */
+  mailer?: Mailer;
 }
 
 export function createApp(pool?: Pool, options: AppOptions = {}) {
@@ -105,7 +109,14 @@ export function createApp(pool?: Pool, options: AppOptions = {}) {
 
   let configuredReportStorage: ObjectStorage | undefined;
   const reportStorage = () => reportCommandTestSeams.storage ?? (configuredReportStorage ??= createObjectStorage(process.env));
-  const deps: RouteDeps = { getPool, unauthorized, bearerToken, requireSession, reportStorage };
+  let configuredMailer = options.mailer;
+  const mailer = () => configuredMailer ??= (() => {
+    try { return createMailer(process.env); } catch { console.error("mailer_config_invalid"); return createDisabledMailer(); }
+  })();
+  const loginUrl = process.env.APP_LOGIN_URL?.trim() || undefined;
+  const notifyTemporaryCredential: RouteDeps["notifyTemporaryCredential"] = (employee, temporaryCredential, reason) =>
+    sendTemporaryCredentialEmail(mailer(), { employee, temporaryCredential, reason, loginUrl });
+  const deps: RouteDeps = { getPool, unauthorized, bearerToken, requireSession, reportStorage, notifyTemporaryCredential };
   registerPublicAuthRoutes(v1, deps);
 
   // All server operations registered after the public auth flow require a live session.

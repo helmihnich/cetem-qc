@@ -223,6 +223,16 @@ mock.module("expo-secure-store", {
     deleteItemAsync: async (key: string) => { runtime.__secureValues?.delete(key); },
   },
 });
+mock.module("expo-constants", { defaultExport: { expoConfig: null } });
+mock.module("expo-status-bar", { namedExports: { StatusBar: "StatusBar" } });
+mock.module("expo-linear-gradient", { namedExports: { LinearGradient: "LinearGradient" } });
+mock.module("react-native-safe-area-context", {
+  namedExports: {
+    SafeAreaProvider: ({ children }: { children?: React.ReactNode }) => children,
+    SafeAreaView: "SafeAreaView",
+    useSafeAreaInsets: () => ({ top: 0, bottom: 0, left: 0, right: 0 }),
+  },
+});
 mock.module("expo-crypto", { namedExports: {
   getRandomBytesAsync: async (size: number) => new Uint8Array(size).fill(7),
   randomUUID: () => `test-uuid-${++testUuid}`,
@@ -511,10 +521,6 @@ async function signIn(tree: ReactTestRenderer) {
   });
 }
 
-function getMainCard(tree: ReactTestRenderer) {
-  return tree.root.findAll((node) => node.type === "View" && Array.isArray(node.props.style) && node.props.style.some((style: unknown) => style && typeof style === "object" && "borderRadius" in style))[0]!;
-}
-
 function findTaskRow(tree: ReactTestRenderer, establishment: string) {
   return tree.root.findAll((node) => node.type === "Pressable" && node.findAll((child) => child.type === "Text" && child.children.join("") === establishment).length > 0)[0]!;
 }
@@ -546,7 +552,8 @@ test("phone App renders task list, opens read-only detail, retries failures and 
 
   const listGrid = tree.root.findAll((node) => node.type === "View" && hasStyle(node, "gap") && (Array.isArray(node.props.style) ? node.props.style : [node.props.style]).some((style) => style?.gap === 12))[0];
   assert.ok(listGrid, "phone task list uses its vertical gap container");
-  assert.equal(getMainCard(tree).findAll((node) => node.type === "View" && hasStyle(node, "flexDirection") && (Array.isArray(node.props.style) ? node.props.style : [node.props.style]).some((style) => style?.flexDirection === "row")).length, 0);
+  // The signed-in screens are cards on the canvas rather than one wrapping card: the phone list itself must stack.
+  assert.equal(listGrid!.findAll((node) => node.type === "View" && hasStyle(node, "flexDirection") && (Array.isArray(node.props.style) ? node.props.style : [node.props.style]).some((style) => style?.flexDirection === "row")).length, 0);
 
   await act(async () => { findTaskRow(tree, firstTask.establishment).props.onPress(); });
   assert.ok(findText(tree, firstTask.id));
@@ -3658,5 +3665,20 @@ test("Story 8.2 R36 a payload the shared validator refuses is not submitted; the
   assert.equal(submitRows(firstTask.id).length, 0, "nothing is queued");
   assert.equal(findInput(tree, reportField().labelFr)!.props.editable, true);
   assert.ok(hasButton(tree, fr.employeeTasks.submit));
+  await act(async () => { tree.unmount(); });
+});
+
+test("a first sign-in with a temporary password stays on the activation screen while online", async () => {
+  await loadApp();
+  const api = installMocks();
+  (api as unknown as { authenticate: () => Promise<unknown> }).authenticate = async () => ({
+    user: { id: "employee-1", email: "employee@example.test", displayName: "Employée Test", role: "employe", mustChangePassword: true },
+  });
+  let tree!: ReactTestRenderer;
+  await act(async () => { tree = create(<App />); });
+  await signIn(tree);
+  await act(async () => { await settle(); });
+  assert.ok(findText(tree, fr.auth.activationTitle), "the activation screen is shown");
+  assert.equal(findText(tree, fr.auth.reauthenticateOnline), undefined, "the connection check does not sign the Technicien out");
   await act(async () => { tree.unmount(); });
 });
