@@ -52,7 +52,7 @@ test("W4 a successful reset posts to the password-reset proxy and opens the « M
 });
 
 test("W5 404 and 409 show the API message and ask for a roster refresh", async () => {
-  for (const [status, message] of [[404, "Employé introuvable dans votre équipe."], [409, "Cet Employé est désactivé. Réactivez-le avant de réinitialiser son mot de passe."]] as const) {
+  for (const [status, message] of [[404, "Technicien introuvable dans votre équipe."], [409, "Ce Technicien est désactivé. Réactivez-le avant de réinitialiser son mot de passe."]] as const) {
     const outcome = await requestPasswordReset(employeeId, stubFetch(status, { error: { code: "X", message } }));
     assert.deepEqual(outcome, { ok: false, message, stale: true });
   }

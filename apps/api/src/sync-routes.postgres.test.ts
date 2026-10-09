@@ -233,7 +233,7 @@ test("A11 sessions, roles and assignment are checked before anything is written 
     assert.equal((await send("submissions", taskId, request, null)).status, 401);
     assert.equal((await send("submissions", taskId, request, "x".repeat(43))).status, 401);
     const forbidden = await send("submissions", taskId, request, tokens.owner);
-    assert.deepEqual([forbidden.status, forbidden.body], [403, { error: { code: "FORBIDDEN", message: "Accès réservé à l’Employé." } }]);
+    assert.deepEqual([forbidden.status, forbidden.body], [403, { error: { code: "FORBIDDEN", message: "Accès réservé au Technicien." } }]);
     const notAssigned = await send("submissions", colleagueTask, request);
     const unknown = await send("submissions", randomUUID(), request);
     const notUuid = await send("submissions", "not-a-task", request);

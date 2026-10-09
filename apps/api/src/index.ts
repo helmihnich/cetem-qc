@@ -181,6 +181,10 @@ if (typeof require !== "undefined" && require.main === module) {
   });
   const shutdown = () => {
     void shutdownApplication(server, app.locals.closeDatabase).then(handleShutdownFailures);
+    // server.close() waits for keep-alive connections (the web proxy holds some open), which left the port taken
+    // after Ctrl+C or a watch restart. Idle ones are closed now; requests still running get 5 seconds.
+    server.closeIdleConnections();
+    setTimeout(() => server.closeAllConnections(), 5000).unref();
   };
   process.once("SIGINT", shutdown);
   process.once("SIGTERM", shutdown);

@@ -34,7 +34,7 @@ test("W1 password-reset proxy requires the session cookie", async () => {
 
 test("W1 password-reset proxy forwards the bearer and the API status without caching", async () => {
   const calls: Array<{ url: string; authorization: string | null; cache?: RequestCache; method?: string }> = [];
-  const conflict = { error: { code: "EMPLOYEE_INACTIVE", message: "Cet Employé est désactivé. Réactivez-le avant de réinitialiser son mot de passe." } };
+  const conflict = { error: { code: "EMPLOYEE_INACTIVE", message: "Ce Technicien est désactivé. Réactivez-le avant de réinitialiser son mot de passe." } };
   globalThis.fetch = async (input, init) => {
     calls.push({ url: String(input), authorization: new Headers(init?.headers).get("authorization"), cache: init?.cache, method: init?.method });
     return Response.json(conflict, { status: 409 });

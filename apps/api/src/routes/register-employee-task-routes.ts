@@ -15,7 +15,7 @@ export function registerEmployeeTaskRoutes(v1: express.Router, deps: RouteDeps):
     response.set("Cache-Control", "no-store");
     const session = response.locals.session as NonNullable<Awaited<ReturnType<typeof findActiveSession>>>;
     if (session.role !== "employe") {
-      response.status(403).json(apiErrorSchema.parse({ error: { code: "FORBIDDEN", message: "Accès réservé à l’Employé." } }));
+      response.status(403).json(apiErrorSchema.parse({ error: { code: "FORBIDDEN", message: "Accès réservé au Technicien." } }));
       return;
     }
     if (!employeeTaskListQuerySchema.safeParse(request.query).success) {
@@ -34,7 +34,7 @@ export function registerEmployeeTaskRoutes(v1: express.Router, deps: RouteDeps):
     response.set("Cache-Control", "no-store");
     const session = response.locals.session as NonNullable<Awaited<ReturnType<typeof findActiveSession>>>;
     if (session.role !== "employe") {
-      response.status(403).json(apiErrorSchema.parse({ error: { code: "FORBIDDEN", message: "Accès réservé à l’Employé." } }));
+      response.status(403).json(apiErrorSchema.parse({ error: { code: "FORBIDDEN", message: "Accès réservé au Technicien." } }));
       return;
     }
     if (!employeeTaskListQuerySchema.safeParse(request.query).success) {
@@ -61,7 +61,7 @@ export function registerEmployeeTaskRoutes(v1: express.Router, deps: RouteDeps):
   v1.get("/employee/tasks/:taskId/audit-version", async (request, response) => {
     const session = response.locals.session as NonNullable<Awaited<ReturnType<typeof findActiveSession>>>;
     if (session.role !== "employe") {
-      response.status(403).json(apiErrorSchema.parse({ error: { code: "FORBIDDEN", message: "Accès réservé à l’Employé." } }));
+      response.status(403).json(apiErrorSchema.parse({ error: { code: "FORBIDDEN", message: "Accès réservé au Technicien." } }));
       return;
     }
     const taskNotFound = () => response.status(404).json(apiErrorSchema.parse({ error: { code: "TASK_NOT_FOUND", message: "Tâche introuvable." } }));
@@ -111,7 +111,7 @@ export function registerEmployeeTaskRoutes(v1: express.Router, deps: RouteDeps):
   const syncOperationRoute = (kind: SyncOperationKind) => async (request: express.Request, response: express.Response) => {
     const session = response.locals.session as NonNullable<Awaited<ReturnType<typeof findActiveSession>>>;
     if (session.role !== "employe") {
-      response.status(403).json(apiErrorSchema.parse({ error: { code: "FORBIDDEN", message: "Accès réservé à l’Employé." } }));
+      response.status(403).json(apiErrorSchema.parse({ error: { code: "FORBIDDEN", message: "Accès réservé au Technicien." } }));
       return;
     }
     const taskNotFound = () => response.status(404).json(apiErrorSchema.parse({ error: { code: "TASK_NOT_FOUND", message: "Tâche introuvable." } }));

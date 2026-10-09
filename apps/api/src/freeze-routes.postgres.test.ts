@@ -157,7 +157,7 @@ test("F3 a Responsable, of the team or of another team, gets 403 on both synchro
     for (const token of [tokens.owner, tokens.otherOwner]) {
       for (const kind of ["draft-syncs", "submissions"] as const) {
         const reply = await send(kind, taskId, envelope(2, formPayload(changedValues)), token);
-        assert.deepEqual([reply.status, reply.body], [403, { error: { code: "FORBIDDEN", message: "Accès réservé à l’Employé." } }]);
+        assert.deepEqual([reply.status, reply.body], [403, { error: { code: "FORBIDDEN", message: "Accès réservé au Technicien." } }]);
       }
     }
     assert.equal(await evidenceFingerprint(pool, taskId), before);

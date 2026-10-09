@@ -47,7 +47,7 @@ export function EmployeeManagement({ employees, onCreated, onRefresh }: { employ
 
   async function changeStatus(employee: Employee) {
     const active = !employee.active;
-    if (!active && !window.confirm("Désactiver ce compte ? L’employé ne pourra plus se connecter ni recevoir de nouveau travail. Son historique sera conservé.")) return;
+    if (!active && !window.confirm("Désactiver ce compte ? Le technicien ne pourra plus se connecter ni recevoir de nouveau travail. Son historique sera conservé.")) return;
     setBusy(true); setError("");
     try {
       const response = await fetch(`/api/employees/${encodeURIComponent(employee.id)}/status`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ active }) });
@@ -76,12 +76,12 @@ export function EmployeeManagement({ employees, onCreated, onRefresh }: { employ
     <label>Mot de passe temporaire<input readOnly value={credential.temporaryCredential} /></label>
     <button className="secondary-button" type="button" disabled={busy} onClick={() => void navigator.clipboard.writeText(credential.temporaryCredential).then(() => setCopied(true))}>Copier le mot de passe</button>
     {copied && <p role="status">Mot de passe copie.</p>}
-    <label><input type="checkbox" checked={acknowledged} onChange={(event) => setAcknowledged(event.target.checked)} /> J’ai enregistre ou remis le mot de passe a l’employe</label>
+    <label><input type="checkbox" checked={acknowledged} onChange={(event) => setAcknowledged(event.target.checked)} /> J’ai enregistre ou remis le mot de passe au technicien</label>
     <button className="primary-button" type="button" disabled={!acknowledged || busy} onClick={() => { setCredential(undefined); setCopied(false); onCreated(credential.employee); void onRefresh(); }}>Terminer</button>
   </section>;
 
   return <section className="roster-card" aria-labelledby="create-employee-title">
-    <div className="card-heading"><div><h2 id="create-employee-title">Ajouter un employe</h2><p>Creer un compte rattache a votre equipe</p></div><button className="secondary-button" type="button" disabled={busy} onClick={() => setCreating((value) => !value)}>{creating ? "Annuler" : "Ajouter un employe"}</button></div>
+    <div className="card-heading"><div><h2 id="create-employee-title">Ajouter un technicien</h2><p>Creer un compte rattache a votre equipe</p></div><button className="secondary-button" type="button" disabled={busy} onClick={() => setCreating((value) => !value)}>{creating ? "Annuler" : "Ajouter un technicien"}</button></div>
     {creating && <form className="auth-form" onSubmit={(event) => void submit(event)}>
       <label>Prenom<input required maxLength={100} value={firstName} onChange={(event) => setFirstName(event.target.value)} /></label>
       <label>Nom<input required maxLength={100} value={surname} onChange={(event) => setSurname(event.target.value)} /></label>

@@ -74,7 +74,7 @@ export function TaskListView(props: TaskListViewProps) {
   </section>;
 }
 
-export function TaskList() {
+export function TaskList({ refreshKey }: { refreshKey?: number } = {}) {
   const [tasks, setTasks] = useState<TaskListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
@@ -98,7 +98,8 @@ export function TaskList() {
     }
   }, []);
 
-  useEffect(() => { void loadTasks(); }, [loadTasks]);
+  // A change of `refreshKey` means a task or the team changed elsewhere on the page.
+  useEffect(() => { void loadTasks(); }, [loadTasks, refreshKey]);
 
   return <TaskListView
     tasks={tasks} loading={loading} error={error} replacingTaskId={replacingTaskId} createdReplacementId={createdReplacementId}

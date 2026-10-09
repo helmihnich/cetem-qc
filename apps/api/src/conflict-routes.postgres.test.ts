@@ -92,8 +92,8 @@ test("S4 no session, a Responsable, another Employé, an unknown or invalid task
     const before = await allCounts(pool);
     const cases: Array<[string, string | null, number, unknown]> = [
       [taskId, null, 401, { error: { code: "AUTHENTICATION_FAILED", message: "Email ou mot de passe invalide." } }],
-      [taskId, tokens.owner, 403, { error: { code: "FORBIDDEN", message: "Accès réservé à l’Employé." } }],
-      [taskId, tokens.otherOwner, 403, { error: { code: "FORBIDDEN", message: "Accès réservé à l’Employé." } }],
+      [taskId, tokens.owner, 403, { error: { code: "FORBIDDEN", message: "Accès réservé au Technicien." } }],
+      [taskId, tokens.otherOwner, 403, { error: { code: "FORBIDDEN", message: "Accès réservé au Technicien." } }],
       [taskId, tokens.colleague, 404, { error: { code: "TASK_NOT_FOUND", message: "Tâche introuvable." } }],
       [taskId, tokens.otherEmployee, 404, { error: { code: "TASK_NOT_FOUND", message: "Tâche introuvable." } }],
       [randomUUID(), tokens.employee, 404, { error: { code: "TASK_NOT_FOUND", message: "Tâche introuvable." } }],

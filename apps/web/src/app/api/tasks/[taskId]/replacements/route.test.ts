@@ -39,7 +39,7 @@ test("W1 replacement proxy forwards the bearer, the body, and the API status and
   const outcomes: Array<[number, unknown]> = [
     [201, { task: { id: "00000000-0000-4000-8000-000000000032", state: "draft" }, replacementOf: { taskId, auditId: "00000000-0000-4000-8000-000000000033" } }],
     [409, { error: { code: "REPLACEMENT_ALREADY_EXISTS", message: "Un contrôle de remplacement existe déjà pour cet audit." } }],
-    [422, { error: { code: "TASK_ASSIGNEE_UNAVAILABLE", message: "Cet Employé n’est pas actif ou ne fait pas partie de votre équipe." } }],
+    [422, { error: { code: "TASK_ASSIGNEE_UNAVAILABLE", message: "Ce Technicien n’est pas actif ou ne fait pas partie de votre équipe." } }],
   ];
   for (const [status, payload] of outcomes) {
     const calls: Array<{ url: string; authorization: string | null; contentType: string | null; cache?: RequestCache; method?: string; body?: unknown }> = [];

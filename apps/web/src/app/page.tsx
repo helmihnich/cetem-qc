@@ -28,6 +28,9 @@ export default function HomePage() {
   const [newPassword, setNewPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
+  // Bumped after any creation or team change so the task list and the assignee choices reload without a page refresh.
+  const [dataVersion, setDataVersion] = useState(0);
+  const refreshData = useCallback(() => setDataVersion((version) => version + 1), []);
 
   const loadEmployees = useCallback(async () => {
     const response = await fetch("/api/employees", { cache: "no-store" });
@@ -107,11 +110,11 @@ export default function HomePage() {
             <form onSubmit={(event) => void activateAccount(event)} className="auth-form"><label>{fr.auth.newPassword}<input type="password" autoComplete="new-password" minLength={PASSWORD_MIN_LENGTH} required value={newPassword} onChange={(event) => setNewPassword(event.target.value)} /></label><PasswordRequirements password={newPassword} /><button className="primary-button" disabled={busy || !isPasswordCompliant(newPassword)}>{busy ? fr.common.loading : fr.auth.activate}</button></form>{error && <p className="error-state" role="alert">{error}</p>}</section>
           : session.user.role !== "responsable" ? <section className="auth-card"><p className="error-state" role="alert">{fr.auth.responsableOnly}</p><button className="secondary-button" type="button" onClick={() => void signOut()}>{fr.auth.logout}</button></section>
           : <><div className="page-heading"><div><p className="eyebrow">ESPACE RESPONSABLE</p><h1>{fr.tasks.listTitle}</h1><p className="subtitle">{fr.tasks.listDescription}</p></div></div>
-            <TaskList />
+            <TaskList refreshKey={dataVersion} />
             <HistoryPanel />
-            <EmployeeManagement employees={employees} onCreated={(employee) => setEmployees((current) => current.some((item) => item.email === employee.email) ? current : [...current, employee].sort((a, b) => a.surname.localeCompare(b.surname) || a.firstName.localeCompare(b.firstName)))} onRefresh={loadEmployees} />
-            <TaskCreation />
-            <section className="roster-card" aria-labelledby="roster-title"><div className="card-heading"><div><h2 id="roster-title">Employés</h2><p>Les membres de votre équipe</p></div>{!error && <span className="count-badge">{employees.length}</span>}</div>
+            <EmployeeManagement employees={employees} onCreated={(employee) => setEmployees((current) => current.some((item) => item.email === employee.email) ? current : [...current, employee].sort((a, b) => a.surname.localeCompare(b.surname) || a.firstName.localeCompare(b.firstName)))} onRefresh={async () => { try { await loadEmployees(); } finally { refreshData(); } }} />
+            <TaskCreation refreshKey={dataVersion} onTaskCreated={refreshData} />
+            <section className="roster-card" aria-labelledby="roster-title"><div className="card-heading"><div><h2 id="roster-title">Techniciens</h2><p>Les membres de votre équipe</p></div>{!error && <span className="count-badge">{employees.length}</span>}</div>
               {error ? <div className="state-message error-state" role="alert">{error}</div> : employees.length === 0 ? <div className="state-message empty-state"><span className="empty-icon" aria-hidden="true">○</span><p>{fr.employees.empty}</p></div>
                 : <div className="table-wrap"><table><thead><tr><th>{fr.employees.firstName}</th><th>{fr.employees.surname}</th><th>{fr.employees.email}</th><th>{fr.employees.status}</th></tr></thead><tbody>{employees.map((employee) => <tr key={employee.email}><td className="name-cell">{employee.firstName}</td><td className="name-cell">{employee.surname}</td><td>{employee.email}</td><td><span className={`status-pill ${employee.active ? "status-active" : "status-inactive"}`}><span className="status-dot" />{employee.active ? fr.employees.active : fr.employees.inactive}</span></td></tr>)}</tbody></table></div>}</section>
           </>}

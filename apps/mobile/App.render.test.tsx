@@ -830,7 +830,7 @@ test("offline timer autosave still locks and preserves protected data after auth
     runtime.__testNow += 8 * 24 * 60 * 60 * 1000;
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 650)); });
     assert.equal(runtime.__draftRows!.has(`employee-1/${firstTask.id}`), false, "expired authorization prevents the timer write");
-    assert.ok(findText(tree, "Connexion Employé"), "authorization loss redacts the editor");
+    assert.ok(findText(tree, "Connexion Technicien"), "authorization loss redacts the editor");
     assert.deepEqual({ list: api.listCalls, session: api.sessionCalls, details: api.detailCalls }, callsBeforeOffline);
     await act(async () => { tree.unmount(); });
   } finally {
@@ -1582,7 +1582,7 @@ test("offline restart restores the same employee's authorization and logout pres
   assert.equal(findText(tree, "Accès hors ligne autorisé. Les données locales protégées restent disponibles pendant la période prévue."), undefined);
 
   await act(async () => { findButton(tree, "Se déconnecter").props.onPress(); });
-  assert.ok(findText(tree, "Connexion Employé"));
+  assert.ok(findText(tree, "Connexion Technicien"));
   assert.equal(runtime.__secureValues!.get("cetem-qc.protected-payload.v1.employee-1"), "opaque-protected-evidence");
   await act(async () => { tree.unmount(); });
 });
@@ -1654,7 +1654,7 @@ test("App locks and preserves protected work when reconnect revalidation reports
   assert.equal(api.listCalls, callsBeforeRevalidation, "no protected follow-up task request runs after deactivation is known");
   assert.equal(api.detailCalls.length, 0);
   assert.ok(findText(tree, "Votre compte a été désactivé. Les données locales protégées sont conservées et restent verrouillées."));
-  assert.ok(findText(tree, "Connexion Employé"), "the App clears the active employee screen and returns to sign-in");
+  assert.ok(findText(tree, "Connexion Technicien"), "the App clears the active employee screen and returns to sign-in");
   assert.equal(findText(tree, "Mes tâches"), undefined, "the authorized task screen is no longer accessible through the App UI");
   assert.equal(await localStore.readProtectedPayload("employee-1"), null, "the real authorization service denies payload access after deactivation");
   assert.equal(runtime.__secureValues!.get("cetem-qc.protected-payload.v1.employee-1"), "preserved-deactivated-evidence");
@@ -1664,7 +1664,7 @@ test("App locks and preserves protected work when reconnect revalidation reports
   runtime.__networkOnline = false;
   await act(async () => { tree.unmount(); });
   await act(async () => { tree = create(<App />); await new Promise((resolve) => setTimeout(resolve, 0)); });
-  assert.ok(findText(tree, "Connexion Employé"), "remount does not restore the deactivated employee session");
+  assert.ok(findText(tree, "Connexion Technicien"), "remount does not restore the deactivated employee session");
   assert.equal(findText(tree, "Mes tâches"), undefined);
   const restartedStore = createOfflineAuthorizationService(expoSecureKeyValueStore, { now: () => Date.now() });
   assert.equal((await restartedStore.hydrate()).status, "locked-deactivated", "a fresh service instance restores the persisted deactivation lock");

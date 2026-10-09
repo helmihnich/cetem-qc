@@ -149,7 +149,7 @@ test("C3 sync operations throw ApiRequestError for key reuse, errors and malform
     [{ error: { code: "IDEMPOTENCY_KEY_REUSED", message: "Cette clé d’opération a déjà été utilisée pour une autre requête." } }, 422, "IDEMPOTENCY_KEY_REUSED"],
     [{ error: { code: "VALIDATION_ERROR", message: "Les informations saisies sont invalides." } }, 400, "VALIDATION_ERROR"],
     [{ error: { code: "AUTHENTICATION_FAILED", message: "Email ou mot de passe invalide." } }, 401, "AUTHENTICATION_FAILED"],
-    [{ error: { code: "FORBIDDEN", message: "Accès réservé à l’Employé." } }, 403, "FORBIDDEN"],
+    [{ error: { code: "FORBIDDEN", message: "Accès réservé au Technicien." } }, 403, "FORBIDDEN"],
     [{ error: { code: "TASK_NOT_FOUND", message: "Tâche introuvable." } }, 404, "TASK_NOT_FOUND"],
     [{ error: { code: "INTERNAL_ERROR", message: "Une erreur est survenue." } }, 500, "INTERNAL_ERROR"],
     [{ ...acceptedBody, outcome: "rejected" }, 200, "UNEXPECTED_API_RESPONSE"],
@@ -205,7 +205,7 @@ test("K6 a replacement returns typed 404, 409 and 422 outcomes and throws on any
     [404, "TASK_NOT_FOUND", "Tâche introuvable."],
     [409, "AUDIT_NOT_ACCEPTED", "Cette tâche n’a pas d’audit accepté par le serveur."],
     [409, "REPLACEMENT_ALREADY_EXISTS", "Un contrôle de remplacement existe déjà pour cet audit."],
-    [422, "TASK_ASSIGNEE_UNAVAILABLE", "Cet Employé n’est pas actif ou ne fait pas partie de votre équipe."],
+    [422, "TASK_ASSIGNEE_UNAVAILABLE", "Ce Technicien n’est pas actif ou ne fait pas partie de votre équipe."],
   ];
   for (const [status, code, message] of outcomes) {
     assert.deepEqual(await clientFor({ error: { code, message } }, status).client.createReplacementControl(taskId, replacementInput), { status, code, message });
@@ -252,7 +252,7 @@ test("K2 the audit version is read with the bearer token from the task's route a
 test("K2 the audit version throws ApiRequestError on errors and invalid bodies", async () => {
   const cases: Array<[unknown, number, string]> = [
     [{ error: { code: "AUTHENTICATION_FAILED", message: "Email ou mot de passe invalide." } }, 401, "AUTHENTICATION_FAILED"],
-    [{ error: { code: "FORBIDDEN", message: "Accès réservé à l’Employé." } }, 403, "FORBIDDEN"],
+    [{ error: { code: "FORBIDDEN", message: "Accès réservé au Technicien." } }, 403, "FORBIDDEN"],
     [{ error: { code: "TASK_NOT_FOUND", message: "Tâche introuvable." } }, 404, "TASK_NOT_FOUND"],
     [{ error: { code: "INTERNAL_ERROR", message: "La version du serveur n’a pas pu être chargée." } }, 500, "INTERNAL_ERROR"],
     [{ ...auditVersionBody, extra: true }, 200, "UNEXPECTED_API_RESPONSE"],
@@ -284,7 +284,7 @@ test("employee password reset posts to the versioned endpoint and maps the inact
   assert.equal(calls[0]!.init?.method, "POST");
   assert.equal(calls[0]!.init?.body, undefined);
 
-  const conflict = clientFor({ error: { code: "EMPLOYEE_INACTIVE", message: "Cet Employé est désactivé. Réactivez-le avant de réinitialiser son mot de passe." } }, 409);
+  const conflict = clientFor({ error: { code: "EMPLOYEE_INACTIVE", message: "Ce Technicien est désactivé. Réactivez-le avant de réinitialiser son mot de passe." } }, 409);
   await assert.rejects(conflict.client.resetEmployeePassword(employeeId), (error: unknown) => {
     assert.ok(error instanceof ApiRequestError);
     assert.equal(error.status, 409);

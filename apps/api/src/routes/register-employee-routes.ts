@@ -76,7 +76,7 @@ export function registerEmployeeRoutes(v1: express.Router, deps: RouteDeps): voi
       response.status(403).json(apiErrorSchema.parse({ error: { code: "FORBIDDEN", message: "Action réservée au Responsable de l’équipe." } }));
       return;
     }
-    const employeeNotFound = () => response.status(404).json(apiErrorSchema.parse({ error: { code: "EMPLOYEE_NOT_FOUND", message: "Employé introuvable dans votre équipe." } }));
+    const employeeNotFound = () => response.status(404).json(apiErrorSchema.parse({ error: { code: "EMPLOYEE_NOT_FOUND", message: "Technicien introuvable dans votre équipe." } }));
     if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(request.params.employeeId ?? "")) {
       employeeNotFound();
       return;
@@ -88,7 +88,7 @@ export function registerEmployeeRoutes(v1: express.Router, deps: RouteDeps): voi
         return;
       }
       if (result.outcome === "inactive") {
-        response.status(409).json(apiErrorSchema.parse({ error: { code: "EMPLOYEE_INACTIVE", message: "Cet Employé est désactivé. Réactivez-le avant de réinitialiser son mot de passe." } }));
+        response.status(409).json(apiErrorSchema.parse({ error: { code: "EMPLOYEE_INACTIVE", message: "Ce Technicien est désactivé. Réactivez-le avant de réinitialiser son mot de passe." } }));
         return;
       }
       response.status(200).set("Cache-Control", "no-store").json(employeeCredentialResponseSchema.parse({ employee: result.employee, temporaryCredential: result.temporaryCredential }));
@@ -105,7 +105,7 @@ export function registerEmployeeRoutes(v1: express.Router, deps: RouteDeps): voi
       return;
     }
     if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(request.params.employeeId ?? "")) {
-      response.status(404).json(apiErrorSchema.parse({ error: { code: "EMPLOYEE_NOT_FOUND", message: "Employé introuvable dans votre équipe." } }));
+      response.status(404).json(apiErrorSchema.parse({ error: { code: "EMPLOYEE_NOT_FOUND", message: "Technicien introuvable dans votre équipe." } }));
       return;
     }
     const parsed = updateEmployeeStatusRequestSchema.safeParse(request.body);
@@ -116,7 +116,7 @@ export function registerEmployeeRoutes(v1: express.Router, deps: RouteDeps): voi
     try {
       const employee = await updateOwnTeamEmployeeStatus(getPool(), session.id, request.params.employeeId!, parsed.data.active);
       if (!employee) {
-        response.status(404).json(apiErrorSchema.parse({ error: { code: "EMPLOYEE_NOT_FOUND", message: "Employé introuvable dans votre équipe." } }));
+        response.status(404).json(apiErrorSchema.parse({ error: { code: "EMPLOYEE_NOT_FOUND", message: "Technicien introuvable dans votre équipe." } }));
         return;
       }
       response.status(200).set("Cache-Control", "no-store").json(updateEmployeeStatusResponseSchema.parse({ employee }));

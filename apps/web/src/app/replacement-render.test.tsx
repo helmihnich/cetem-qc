@@ -173,7 +173,7 @@ test("W4 each refusal and failure shows its text and asks for the documented rel
     [409, { error: { code: "REPLACEMENT_ALREADY_EXISTS", message: "x" } }, { message: "Un contrôle de remplacement existe déjà pour cet audit.", reloadList: true, reloadAssignees: false }],
     [409, { error: { code: "AUDIT_NOT_ACCEPTED", message: "x" } }, { message: "Cet audit n’est plus disponible pour un remplacement. Actualisez la liste.", reloadList: true, reloadAssignees: false }],
     [404, { error: { code: "TASK_NOT_FOUND", message: "x" } }, { message: "Cet audit n’est plus disponible pour un remplacement. Actualisez la liste.", reloadList: true, reloadAssignees: false }],
-    [422, { error: { code: "TASK_ASSIGNEE_UNAVAILABLE", message: "x" } }, { message: "Cet Employé n’est plus disponible. Actualisez la page et réessayez.", reloadList: false, reloadAssignees: true }],
+    [422, { error: { code: "TASK_ASSIGNEE_UNAVAILABLE", message: "x" } }, { message: "Ce Technicien n’est plus disponible. Actualisez la page et réessayez.", reloadList: false, reloadAssignees: true }],
     [400, { error: { code: "VALIDATION_ERROR", message: "x" } }, { message: "Le contrôle de remplacement n’a pas pu être créé. L’audit d’origine est inchangé.", reloadList: false, reloadAssignees: false }],
     [500, { error: { code: "INTERNAL_ERROR", message: "détail serveur" } }, { message: "Le contrôle de remplacement n’a pas pu être créé. L’audit d’origine est inchangé.", reloadList: false, reloadAssignees: false }],
     [201, { unexpected: true }, { message: "Le contrôle de remplacement n’a pas pu être créé. L’audit d’origine est inchangé.", reloadList: false, reloadAssignees: false }],

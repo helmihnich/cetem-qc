@@ -55,7 +55,7 @@ export type ReplacementMode = {
 };
 
 /** Normal task creation; with `replacement`, the same form creates a replacement control of an accepted task. */
-export function TaskCreation({ replacement }: { replacement?: ReplacementMode } = {}) {
+export function TaskCreation({ replacement, refreshKey, onTaskCreated }: { replacement?: ReplacementMode; refreshKey?: number; onTaskCreated?: (task: CreatedTask) => void } = {}) {
   const [assignees, setAssignees] = useState<Assignee[]>([]);
   const [assigneesLoading, setAssigneesLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
@@ -83,7 +83,8 @@ export function TaskCreation({ replacement }: { replacement?: ReplacementMode } 
     }
   }
 
-  useEffect(() => { void loadAssignees(); }, []);
+  // A change of `refreshKey` means the team changed elsewhere on the page: the assignees are fetched again.
+  useEffect(() => { void loadAssignees(); }, [refreshKey]);
 
   async function submitReplacement(mode: ReplacementMode) {
     const outcome = await requestReplacementControl(mode.originalTaskId, { establishment, service, type: "graphie_mobile", assigneeId });
@@ -109,6 +110,7 @@ export function TaskCreation({ replacement }: { replacement?: ReplacementMode } 
         return;
       }
       setCreatedTask(payload.task);
+      onTaskCreated?.(payload.task);
       setEstablishment(""); setService(""); setAssigneeId("");
     } catch {
       setError(fr.api.unavailable);

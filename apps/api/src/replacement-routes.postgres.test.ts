@@ -14,7 +14,7 @@ import type { SyncFixture } from "./test-support/sync-fixture.js";
 const NOT_FOUND = { error: { code: "TASK_NOT_FOUND", message: "Tâche introuvable." } };
 const NOT_ACCEPTED = { error: { code: "AUDIT_NOT_ACCEPTED", message: "Cette tâche n’a pas d’audit accepté par le serveur." } };
 const ALREADY_REPLACED = { error: { code: "REPLACEMENT_ALREADY_EXISTS", message: "Un contrôle de remplacement existe déjà pour cet audit." } };
-const ASSIGNEE_UNAVAILABLE = { error: { code: "TASK_ASSIGNEE_UNAVAILABLE", message: "Cet Employé n’est pas actif ou ne fait pas partie de votre équipe." } };
+const ASSIGNEE_UNAVAILABLE = { error: { code: "TASK_ASSIGNEE_UNAVAILABLE", message: "Ce Technicien n’est pas actif ou ne fait pas partie de votre équipe." } };
 
 const taskBody = (assigneeId: string, establishment = "Établissement Remplacement") =>
   ({ establishment, service: "Radiologie", type: "graphie_mobile", assigneeId });
@@ -168,7 +168,7 @@ test("L19 every refusal writes nothing and returns its documented code", async (
       const reply = await replace(fixture, accepted, invalid);
       assert.equal(reply.status, 400, JSON.stringify(invalid));
       assert.equal((reply.body.error as { code: string; message: string }).code, "VALIDATION_ERROR");
-      assert.equal((reply.body.error as { message: string }).message, "L’établissement, le type Graphie Mobile et un Employé responsable sont requis.");
+      assert.equal((reply.body.error as { message: string }).message, "L’établissement, le type Graphie Mobile et un Technicien responsable sont requis.");
     }
     const malformedJson = await replace(fixture, accepted, "{");
     assert.equal(malformedJson.status, 400);

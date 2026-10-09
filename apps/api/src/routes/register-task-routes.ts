@@ -58,7 +58,7 @@ export function registerTaskRoutes(v1: express.Router, deps: RouteDeps): void {
     }
     const parsed = createTaskRequestSchema.safeParse(request.body);
     if (!parsed.success) {
-      response.status(400).json(apiErrorSchema.parse({ error: { code: "VALIDATION_ERROR", message: "L’établissement, le type Graphie Mobile et un Employé responsable sont requis.", details: parsed.error.issues.map((issue) => ({ path: issue.path.join("."), message: "Valeur invalide." })) } }));
+      response.status(400).json(apiErrorSchema.parse({ error: { code: "VALIDATION_ERROR", message: "L’établissement, le type Graphie Mobile et un Technicien responsable sont requis.", details: parsed.error.issues.map((issue) => ({ path: issue.path.join("."), message: "Valeur invalide." })) } }));
       return;
     }
     try {
@@ -66,7 +66,7 @@ export function registerTaskRoutes(v1: express.Router, deps: RouteDeps): void {
       response.status(201).json(taskResponseSchema.parse({ task }));
     } catch (error) {
       if (error instanceof TaskAssigneeUnavailableError) {
-        response.status(422).json(apiErrorSchema.parse({ error: { code: "TASK_ASSIGNEE_UNAVAILABLE", message: "Cet Employé n’est pas actif ou ne fait pas partie de votre équipe." } }));
+        response.status(422).json(apiErrorSchema.parse({ error: { code: "TASK_ASSIGNEE_UNAVAILABLE", message: "Ce Technicien n’est pas actif ou ne fait pas partie de votre équipe." } }));
         return;
       }
       response.status(500).json(apiErrorSchema.parse({ error: { code: "INTERNAL_ERROR", message: "La tâche n’a pas pu être créée." } }));
@@ -88,7 +88,7 @@ export function registerTaskRoutes(v1: express.Router, deps: RouteDeps): void {
     }
     const parsed = createTaskRequestSchema.safeParse(request.body);
     if (!parsed.success) {
-      response.status(400).json(apiErrorSchema.parse({ error: { code: "VALIDATION_ERROR", message: "L’établissement, le type Graphie Mobile et un Employé responsable sont requis.", details: parsed.error.issues.map((issue) => ({ path: issue.path.join("."), message: "Valeur invalide." })) } }));
+      response.status(400).json(apiErrorSchema.parse({ error: { code: "VALIDATION_ERROR", message: "L’établissement, le type Graphie Mobile et un Technicien responsable sont requis.", details: parsed.error.issues.map((issue) => ({ path: issue.path.join("."), message: "Valeur invalide." })) } }));
       return;
     }
     try {
@@ -107,7 +107,7 @@ export function registerTaskRoutes(v1: express.Router, deps: RouteDeps): void {
           response.status(409).json(apiErrorSchema.parse({ error: { code: "REPLACEMENT_ALREADY_EXISTS", message: "Un contrôle de remplacement existe déjà pour cet audit." } }));
           return;
         case "assignee-unavailable":
-          response.status(422).json(apiErrorSchema.parse({ error: { code: "TASK_ASSIGNEE_UNAVAILABLE", message: "Cet Employé n’est pas actif ou ne fait pas partie de votre équipe." } }));
+          response.status(422).json(apiErrorSchema.parse({ error: { code: "TASK_ASSIGNEE_UNAVAILABLE", message: "Ce Technicien n’est pas actif ou ne fait pas partie de votre équipe." } }));
           return;
       }
     } catch {
