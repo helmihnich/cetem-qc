@@ -5,7 +5,7 @@ import * as Crypto from "expo-crypto";
 import { ApiRequestError, createApiClient } from "@cetem-qc/api-client/v1";
 import type { ApiClient, EmployeeTaskListResponse, EmployeeTaskResponse } from "@cetem-qc/api-client/v1";
 import { fr } from "@cetem-qc/i18n";
-import { GRAPHIE_CALCULATION_IDENTITY, isInvalidGraphieReading, type CalculationContext } from "@cetem-qc/domain";
+import { GRAPHIE_CALCULATION_IDENTITY, PASSWORD_RULES, checkPasswordRules, isInvalidGraphieReading, isPasswordCompliant, type CalculationContext } from "@cetem-qc/domain";
 import { getEmployeeTaskListState } from "./employee-task-list-state";
 import { EmployeeTaskDetailRequests } from "./employee-task-detail-state";
 import type { EmployeeTaskDetailState } from "./employee-task-detail-state";
@@ -836,7 +836,7 @@ export default function App() {
     setLoading(true);
     setError(undefined);
     try {
-      const session = await api.replaceTemporaryPassword({ currentPassword: password, newPassword });
+      const session = await api.replaceTemporaryPassword({ newPassword });
       if (session.user.role !== "employe") {
         await api.logout();
         setError(fr.auth.employeeOnly);
@@ -1293,10 +1293,16 @@ export default function App() {
           <View style={[styles.card, layout === "tablet" && styles.tabletCard]}>
             <Text style={styles.heading}>{fr.auth.activationTitle}</Text>
             <Text style={styles.muted}>{fr.auth.activationDescription}</Text>
-            <Field label={fr.auth.currentPassword} value={password} onChangeText={setPassword} secureTextEntry />
             <Field label={fr.auth.newPassword} value={newPassword} onChangeText={setNewPassword} secureTextEntry />
+            <View accessibilityLiveRegion="polite">
+              <Text style={styles.muted}>{fr.auth.passwordRequirements}</Text>
+              {PASSWORD_RULES.map((rule) => {
+                const met = checkPasswordRules(newPassword)[rule];
+                return <Text key={rule} style={met ? styles.ruleMet : styles.muted}>{met ? "✓" : "○"} {fr.auth.passwordRules[rule]}</Text>;
+              })}
+            </View>
             {error ? <Text accessibilityRole="alert" style={styles.error}>{error}</Text> : null}
-            <Button title={fr.auth.activate} onPress={() => void activate()} disabled={loading || !password || newPassword.length < 12} />
+            <Button title={fr.auth.activate} onPress={() => void activate()} disabled={loading || !isPasswordCompliant(newPassword)} />
             <Button title={fr.auth.logout} onPress={() => void signOut()} secondary disabled={loading} />
           </View>
         ) : (
@@ -1613,6 +1619,7 @@ const styles = StyleSheet.create({
   tabletCard: { padding: 28, gap: 20 },
   heading: { color: "#17352c", fontSize: 25, fontWeight: "700" },
   muted: { color: "#5b6e65", fontSize: 15, lineHeight: 22 },
+  ruleMet: { color: "#067647", fontSize: 15, lineHeight: 22 },
   field: { gap: 7 },
   label: { color: "#3e554b", fontSize: 13, fontWeight: "700" },
   input: { minHeight: 48, borderColor: "#cbd8d0", borderWidth: 1, borderRadius: 10, paddingHorizontal: 12, color: "#17352c", fontSize: 16 },

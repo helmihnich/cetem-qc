@@ -125,7 +125,7 @@ test("Responsable creates an employee, sees it in the roster, and roster omits t
     const created = await request(root, token, "POST", { firstName: "Nour", surname: "Ali", email: "Nour@Example.com" });
     assert.equal(created.status, 201);
     const payload = await created.json() as { employee: { id: string; email: string }; temporaryCredential: string };
-    assert.equal(payload.employee.email, "nour@example.com"); assert.match(payload.temporaryCredential, /^[A-Za-z0-9_-]{32}$/);
+    assert.equal(payload.employee.email, "nour@example.com"); assert.match(payload.temporaryCredential, /^[A-Za-z0-9!@#$%*?]{8}$/);
     const roster = await (await request(root, token, "GET")).json();
     assert.deepEqual(roster, { employees: [{ id: payload.employee.id, firstName: "Nour", surname: "Ali", email: "nour@example.com", active: true }] });
     assert.doesNotMatch(JSON.stringify(roster), /temporaryCredential|passwordHash|password_hash/);
@@ -196,7 +196,7 @@ test("credential regeneration is Responsable-only, own-team-only, one-time in re
     assert.equal(response.headers.get("cache-control"), "no-store");
     const payload = await response.json() as { employee: { id: string }; temporaryCredential: string };
     assert.equal(payload.employee.id, createdPayload.employee.id);
-    assert.match(payload.temporaryCredential, /^[A-Za-z0-9_-]{32}$/);
+    assert.match(payload.temporaryCredential, /^[A-Za-z0-9!@#$%*?]{8}$/);
     assert.notEqual(payload.temporaryCredential, oldCredential);
     const employee = employees[0]!;
     assert.match(employee.password_hash, /^scrypt:[A-Za-z0-9_-]+:[A-Za-z0-9_-]+$/);
@@ -512,7 +512,7 @@ test("PostgreSQL password reset: Responsable-only, own-team-only, revokes sessio
           const replaced = await fetch(`${root}/authenticate/password`, {
             method: "POST",
             headers: { authorization: `Bearer ${temporarySession.token}`, "content-type": "application/json" },
-            body: JSON.stringify({ currentPassword: credential, newPassword: "employee-new-password" }),
+            body: JSON.stringify({ currentPassword: credential, newPassword: "Employee-new-passw0rd" }),
           });
           assert.equal(replaced.status, 200);
           const active = await replaced.json() as { token: string };
@@ -520,7 +520,7 @@ test("PostgreSQL password reset: Responsable-only, own-team-only, revokes sessio
         });
 
         await t.test("H2 an Employé session gets 403 without mutation", async () => {
-          const employeeToken = await tokenFor(employeeEmail, "employee-new-password");
+          const employeeToken = await tokenFor(employeeEmail, "Employee-new-passw0rd");
           const before = await state();
           const response = await reset(employeeToken, employee);
           assert.equal(response.status, 403);

@@ -90,7 +90,7 @@ test("regeneration replaces the salted hash, preserves activation requirement, a
 
   const result = await regenerateOwnTeamEmployeeCredential(pool, "responsable", account.id);
   assert.ok(result);
-  assert.match(result.temporaryCredential, /^[A-Za-z0-9_-]{32}$/);
+  assert.match(result.temporaryCredential, /^[A-Za-z0-9!@#$%*?]{8}$/);
   assert.notEqual(result.temporaryCredential, previousCredential);
   assert.match(account.password_hash, /^scrypt:[A-Za-z0-9_-]+:[A-Za-z0-9_-]+$/);
   assert.notEqual(account.password_hash, result.temporaryCredential);

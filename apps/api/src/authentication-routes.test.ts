@@ -135,13 +135,36 @@ test("route replaces mandatory temporary password", async () => {
   await withServer(poolFor(account), async (root) => {
     const login = await post(root, "/authenticate", { email: account.email, password: "temporary-secret" });
     const { token } = await login.json() as { token: string };
-    const response = await sessionRequest(root, "/authenticate/password", token, "POST", { currentPassword: "temporary-secret", newPassword: "new-password" });
+    const response = await sessionRequest(root, "/authenticate/password", token, "POST", { currentPassword: "temporary-secret", newPassword: "New-passw0rd!" });
     assert.equal(response.status, 200);
     const replacement = await response.json() as { user: { mustChangePassword: boolean }; token: string };
     assert.equal(replacement.user.mustChangePassword, false);
     assert.notEqual(replacement.token, token);
     assert.equal((await sessionRequest(root, "/session", token)).status, 401);
     assert.equal((await sessionRequest(root, "/session", replacement.token)).status, 200);
+  });
+});
+
+test("route replaces the temporary password from the activation session without asking for it again", async () => {
+  const account = await fixture({ must_change_password: true });
+  await withServer(poolFor(account), async (root) => {
+    const login = await post(root, "/authenticate", { email: account.email, password: "temporary-secret" });
+    const { token } = await login.json() as { token: string };
+    const response = await sessionRequest(root, "/authenticate/password", token, "POST", { newPassword: "New-passw0rd!" });
+    assert.equal(response.status, 200);
+    assert.equal((await response.json() as { user: { mustChangePassword: boolean } }).user.mustChangePassword, false);
+  });
+});
+
+test("route rejects a replacement password that breaks the password policy", async () => {
+  const account = await fixture({ must_change_password: true });
+  await withServer(poolFor(account), async (root) => {
+    const login = await post(root, "/authenticate", { email: account.email, password: "temporary-secret" });
+    const { token } = await login.json() as { token: string };
+    const response = await sessionRequest(root, "/authenticate/password", token, "POST", { currentPassword: "temporary-secret", newPassword: "lowercase-only" });
+    assert.equal(response.status, 400);
+    assert.equal((await response.json() as { error: { code: string } }).error.code, "PASSWORD_POLICY_VIOLATION");
+    assert.equal(account.must_change_password, true);
   });
 });
 
@@ -162,7 +185,7 @@ test("temporary credential still permits password replacement and replacement to
   await withServer(poolFor(account), async (root) => {
     const login = await post(root, "/authenticate", { email: account.email, password: "temporary-secret" });
     const temporarySession = await login.json() as { token: string };
-    const change = await sessionRequest(root, "/authenticate/password", temporarySession.token, "POST", { currentPassword: "temporary-secret", newPassword: "replacement-secret" });
+    const change = await sessionRequest(root, "/authenticate/password", temporarySession.token, "POST", { currentPassword: "temporary-secret", newPassword: "Pw1!replacement-secret" });
     assert.equal(change.status, 200);
     const active = await change.json() as { token: string; user: { mustChangePassword: boolean } };
     assert.equal(active.user.mustChangePassword, false);
@@ -181,7 +204,7 @@ test("failed replacement session insert preserves original password flag and old
     await withServer(poolFor(account), async (root) => {
       const login = await post(root, "/authenticate", { email: account.email, password: "temporary-secret" });
       const { token } = await login.json() as { token: string };
-      const response = await sessionRequest(root, "/authenticate/password", token, "POST", { currentPassword: "temporary-secret", newPassword: "replacement-secret" });
+      const response = await sessionRequest(root, "/authenticate/password", token, "POST", { currentPassword: "temporary-secret", newPassword: "Pw1!replacement-secret" });
       assert.equal(response.status, 500);
       assert.equal(account.password_hash, originalHash);
       assert.equal(account.must_change_password, true);

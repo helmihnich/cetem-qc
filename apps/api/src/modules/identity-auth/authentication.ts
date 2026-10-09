@@ -63,10 +63,14 @@ export async function authenticateWithPassword(
   return toAccount(account);
 }
 
+/**
+ * Called only behind an authenticated session: logging in with the temporary credential already proved it, so
+ * currentPassword is optional and verified only when a caller still sends it.
+ */
 export async function replacePasswordAfterAuthentication(
   pool: Pool,
   emailInput: string,
-  currentPassword: string,
+  currentPassword: string | undefined,
   newPassword: string,
 ): Promise<import("./sessions.js").AuthenticatedSession> {
   const email = emailInput.trim().toLowerCase();
@@ -78,7 +82,8 @@ export async function replacePasswordAfterAuthentication(
       [email],
     );
     const account = result.rows[0];
-    if (!account || !(await verifyPassword(currentPassword, account.password_hash)) || !account.is_active || !account.must_change_password) {
+    const currentPasswordMatches = currentPassword === undefined || await verifyPassword(currentPassword, account?.password_hash ?? "");
+    if (!account || !currentPasswordMatches || !account.is_active || !account.must_change_password) {
       throw new InvalidCredentialsError();
     }
     if (await verifyPassword(newPassword, account.password_hash)) throw new InvalidCredentialsError();

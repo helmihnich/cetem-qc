@@ -1,4 +1,5 @@
 import type express from "express";
+import { isPasswordCompliant } from "@cetem-qc/domain";
 import { apiErrorSchema, authenticationResponseSchema, passwordReplacementRequestSchema } from "@cetem-qc/schemas/api/v1";
 import { InvalidCredentialsError, replacePasswordAfterAuthentication } from "../modules/identity-auth/authentication.js";
 import { findActiveSession, revokeSession } from "../modules/identity-auth/sessions.js";
@@ -21,6 +22,12 @@ export function registerSessionRoutes(v1: express.Router, deps: RouteDeps): void
     if (!parsed.success) {
       response.status(400).json({
         error: { code: "VALIDATION_ERROR", message: "Les informations saisies sont invalides." },
+      });
+      return;
+    }
+    if (!isPasswordCompliant(parsed.data.newPassword)) {
+      response.status(400).json({
+        error: { code: "PASSWORD_POLICY_VIOLATION", message: "Le nouveau mot de passe ne respecte pas les exigences de sécurité." },
       });
       return;
     }

@@ -46,7 +46,7 @@ async function assertResetApplied(pool: Pool, ownerId: string, employeeId: strin
   assert.equal(result.outcome, "reset");
   if (result.outcome !== "reset") return;
   assert.equal(result.employee.id, employeeId);
-  assert.match(result.temporaryCredential, /^[A-Za-z0-9_-]{32}$/);
+  assert.match(result.temporaryCredential, /^[A-Za-z0-9!@#$%*?]{8}$/);
   const row = (await pool.query<{ password_hash: string; must_change_password: boolean }>(
     "SELECT password_hash, must_change_password FROM identity_accounts WHERE id = $1", [employeeId],
   )).rows[0]!;

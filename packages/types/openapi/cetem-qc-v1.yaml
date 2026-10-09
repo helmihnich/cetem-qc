@@ -1644,7 +1644,8 @@ components:
         password: { type: string, minLength: 1 }
     PasswordReplacementRequest:
       type: object
-      required: [currentPassword, newPassword]
+      required: [newPassword]
+      description: The activation session already proves the temporary credential; currentPassword is optional and checked only when sent.
       properties:
         currentPassword: { type: string, minLength: 1 }
         newPassword: { type: string, minLength: 1 }

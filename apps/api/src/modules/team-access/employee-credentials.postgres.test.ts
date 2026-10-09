@@ -113,7 +113,7 @@ test("PostgreSQL regeneration enforces same-team, role, active, and activation p
       const positiveBefore = await snapshot();
       const result = await regenerateOwnTeamEmployeeCredential(servicePool, ownerId, positiveId);
       assert.ok(result, "active same-team Employé awaiting activation can regenerate");
-      assert.match(result.temporaryCredential, /^[A-Za-z0-9_-]{32}$/);
+      assert.match(result.temporaryCredential, /^[A-Za-z0-9!@#$%*?]{8}$/);
       assert.notEqual(result.temporaryCredential, originalCredential);
       const account = await servicePool.query<{ password_hash: string; must_change_password: boolean }>(
         "SELECT password_hash, must_change_password FROM identity_accounts WHERE id = $1", [positiveId],

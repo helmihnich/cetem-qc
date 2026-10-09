@@ -73,7 +73,7 @@ export const apiErrorSchema: z.ZodType<ApiErrorContract> = z.object({
 
 export const authenticationRequestSchema: z.ZodType<AuthenticationRequestContract> = z.object({ email: z.string().min(1), password: z.string().min(1) });
 export const passwordReplacementRequestSchema: z.ZodType<PasswordReplacementRequestContract> = z.object({
-  currentPassword: z.string().min(1), newPassword: z.string().min(1),
+  currentPassword: z.string().min(1).optional(), newPassword: z.string().min(1),
 });
 const authenticatedUserSchema = z.object({
   id: z.string(), email: z.string(), displayName: z.string(), role: z.enum(["responsable", "employe"]),

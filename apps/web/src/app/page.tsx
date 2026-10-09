@@ -1,9 +1,11 @@
 "use client";
 
 import { FormEvent, useCallback, useEffect, useState } from "react";
+import { PASSWORD_MIN_LENGTH, isPasswordCompliant } from "@cetem-qc/domain";
 import { fr } from "@cetem-qc/i18n";
 import { EmployeeManagement } from "./employee-management";
 import { HistoryPanel } from "./history";
+import { PasswordRequirements } from "./password-requirements";
 import { ResponsableSignInForm } from "./sign-in-form";
 import { TaskCreation } from "./task-creation";
 import { TaskList } from "./task-list";
@@ -72,9 +74,9 @@ export default function HomePage() {
   async function activateAccount(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); setBusy(true); setError("");
     try {
-      const response = await fetch("/api/session/password", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ currentPassword: password, newPassword }) });
+      const response = await fetch("/api/session/password", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ newPassword }) });
       if (!response.ok) { setError(await responseError(response, fr.auth.activationError)); return; }
-      setPassword(""); setNewPassword("");
+      setNewPassword("");
       await restoreSession();
     } catch { setError(fr.api.unavailable); }
     finally { setBusy(false); }
@@ -102,7 +104,7 @@ export default function HomePage() {
             <ResponsableSignInForm email={email} password={password} busy={busy} onEmailChange={setEmail} onPasswordChange={setPassword} onSubmit={(event) => void signIn(event)} />
             {notice && <p className="notice" role="status">{notice}</p>}{error && <p className="error-state" role="alert">{error}</p>}</section>
           : session.user.mustChangePassword ? <section className="auth-card"><p className="eyebrow">ESPACE RESPONSABLE</p><h1>{fr.auth.activationTitle}</h1><p className="subtitle">{fr.auth.activationDescription}</p>
-            <form onSubmit={(event) => void activateAccount(event)} className="auth-form"><label>{fr.auth.currentPassword}<input type="password" autoComplete="current-password" required value={password} onChange={(event) => setPassword(event.target.value)} /></label><label>{fr.auth.newPassword}<input type="password" autoComplete="new-password" minLength={12} required value={newPassword} onChange={(event) => setNewPassword(event.target.value)} /></label><button className="primary-button" disabled={busy}>{busy ? fr.common.loading : fr.auth.activate}</button></form>{error && <p className="error-state" role="alert">{error}</p>}</section>
+            <form onSubmit={(event) => void activateAccount(event)} className="auth-form"><label>{fr.auth.newPassword}<input type="password" autoComplete="new-password" minLength={PASSWORD_MIN_LENGTH} required value={newPassword} onChange={(event) => setNewPassword(event.target.value)} /></label><PasswordRequirements password={newPassword} /><button className="primary-button" disabled={busy || !isPasswordCompliant(newPassword)}>{busy ? fr.common.loading : fr.auth.activate}</button></form>{error && <p className="error-state" role="alert">{error}</p>}</section>
           : session.user.role !== "responsable" ? <section className="auth-card"><p className="error-state" role="alert">{fr.auth.responsableOnly}</p><button className="secondary-button" type="button" onClick={() => void signOut()}>{fr.auth.logout}</button></section>
           : <><div className="page-heading"><div><p className="eyebrow">ESPACE RESPONSABLE</p><h1>{fr.tasks.listTitle}</h1><p className="subtitle">{fr.tasks.listDescription}</p></div></div>
             <TaskList />

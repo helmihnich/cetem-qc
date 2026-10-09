@@ -736,8 +736,9 @@ export interface components {
             email: string;
             password: string;
         };
+        /** @description The activation session already proves the temporary credential; currentPassword is optional and checked only when sent. */
         PasswordReplacementRequest: {
-            currentPassword: string;
+            currentPassword?: string;
             newPassword: string;
         };
         AuthenticatedUser: {

@@ -2,12 +2,12 @@
   "name": "@cetem-qc/api",
   "private": true,
   "scripts": {
-    "dev": "tsx watch src/index.ts",
+    "dev": "tsx watch --env-file-if-exists=../../.env src/index.ts",
     "build": "tsc --noEmit",
     "typecheck": "tsc --noEmit",
-    "db:migrate": "tsx src/db/migrate.ts",
-    "bootstrap:responsable": "tsx src/scripts/bootstrap-responsable.ts",
-    "reset:responsable-password": "tsx src/scripts/reset-responsable-password.ts",
+    "db:migrate": "tsx --env-file-if-exists=../../.env src/db/migrate.ts",
+    "bootstrap:responsable": "tsx --env-file-if-exists=../../.env src/scripts/bootstrap-responsable.ts",
+    "reset:responsable-password": "tsx --env-file-if-exists=../../.env src/scripts/reset-responsable-password.ts",
     "test": "node --import tsx --test \"src/**/*.test.ts\"",
     "test:calculations": "node --import tsx --test src/modules/calculations/calculations.test.ts"
   },

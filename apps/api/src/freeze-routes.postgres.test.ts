@@ -218,7 +218,7 @@ test("F5 every other mutating route, called by both roles, leaves the accepted e
       ["POST", () => `/employees/${createdEmployee}/credential`, undefined],
       ["POST", () => `/employees/${colleague}/password-reset`, undefined],
       ["PATCH", () => `/employees/${employee}/status`, { active: false }],
-      ["POST", () => "/authenticate/password", { currentPassword: "mot-de-passe", newPassword: "nouveau-mot-de-passe" }],
+      ["POST", () => "/authenticate/password", { currentPassword: "mot-de-passe", newPassword: "Nouveau-mot-de-passe1" }],
       ["DELETE", () => "/session", undefined],
     ];
     const statuses: string[] = [];
