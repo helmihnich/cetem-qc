@@ -426,7 +426,9 @@ test("W25 pending shows the loading text, disables the button and sets aria-busy
   assert.ok(!/disabled=""/.test(idle.replace(/<button[^>]*primary-button[^>]*>[\s\S]*?<\/button>/, "")) && !decode(idle).includes(fr.summary.pending));
   const draft = summaryDraft();
   const filled = decode(summaryBlock(renderToStaticMarkup(<SummaryDraftSection text={draft.text} filled={draft} onRequest={noop} />)));
-  assert.ok(filled.includes(fr.summary.draftLabel) && filled.includes("Fournisseur mock, modèle mock-fixed-text"));
+  assert.ok(filled.includes(fr.summary.draftLabel) && filled.includes("Démonstration (sans IA externe)") && !filled.includes("mock-fixed-text"));
+  const external = decode(summaryBlock(renderToStaticMarkup(<SummaryDraftSection text={draft.text} filled={{ ...draft, provider: "gemini", model: "gemini-flash-latest" }} onRequest={noop} />)));
+  assert.ok(external.includes("Fournisseur gemini, modèle gemini-flash-latest") && external.includes(fr.summary.regenerate));
   assert.deepEqual(applyDraft("", draft), { text: "Brouillon IA.", offered: null });
   assert.deepEqual(applyDraft("  \n ", draft), { text: "Brouillon IA.", offered: null });
 });
@@ -466,7 +468,7 @@ test("W28 the block has no save, conformity or approval control or wording (Stor
   const withoutNote = text.replace(fr.summary.note, "").replace(fr.summary.conformityUnavailable, "").replace(fr.summary.confirm, "");
   assert.ok(!/enregistrer|confirmer|confirmation|approuv|conforme|valider|verrouill/i.test(withoutNote), withoutNote);
   assert.ok(!/\b(save|approve|conformity|draft|summary|request|loading)\b/i.test(text.replace(draft.text, "")));
-  assert.deepEqual([...markup.matchAll(/<button[^>]*>([^<]*)<\/button>/g)].map((match) => match[1]), [fr.summary.request, fr.summary.replace, fr.summary.confirm]);
+  assert.deepEqual([...markup.matchAll(/<button[^>]*>([^<]*)<\/button>/g)].map((match) => match[1]), [fr.summary.regenerate, fr.summary.replace, fr.summary.confirm]);
   assert.equal(decode(view(ready())).split("la conformité finale de l'appareil est décidée par le Responsable").length - 1, 1);
 });
 
@@ -513,7 +515,7 @@ test("W32 the confirmed state is read only with the confirmer, the date and the 
   assert.ok(!text.includes(fr.summary.initialDraftLabel) && !/mock/.test(text));
   assert.equal(confirmButton(manual), "");
   const withDraft = decode(section({ summary: confirmed({ initialDraft: initialDraft() }) }));
-  assert.ok(withDraft.includes(fr.summary.initialDraftLabel) && withDraft.includes("Brouillon initial.") && withDraft.includes("Fournisseur mock, modèle mock-fixed-text"));
+  assert.ok(withDraft.includes(fr.summary.initialDraftLabel) && withDraft.includes("Brouillon initial.") && withDraft.includes("Démonstration (sans IA externe)"));
   assert.ok(!withDraft.includes(fr.summary.conformityUnavailable));
 });
 
@@ -552,4 +554,17 @@ test("W35 no conformity or report control or wording, no English text, and the t
   const english = /(?<!\p{L})(save|approve|conformity|draft|summary|request|loading|confirm|report)(?!\p{L})/iu;
   assert.ok(!english.test(unconfirmed.replace(raw, "")));
   assert.ok(!english.test(decode(markup).replace(raw, "")));
+});
+
+test("W29b the AI assistant shows its header, hint and counter, a placeholder while an empty editor waits, and blocks confirmation past 5000 characters", () => {
+  const idle = summaryBlock(renderToStaticMarkup(<SummaryDraftSection text="Abc" onRequest={noop} />));
+  const text = decode(idle);
+  for (const label of [fr.summary.assistantHeading, fr.summary.assistantHint, fr.summary.humanHeading, "3 / 5000 caractères"]) assert.ok(text.includes(label), label);
+  assert.match(idle, /<textarea id="summary-text" aria-describedby="summary-text-count"/);
+  assert.ok(!idle.includes("summary-skeleton"));
+  assert.ok(summaryBlock(renderToStaticMarkup(<SummaryDraftSection text="" pending onRequest={noop} />)).includes("summary-skeleton"));
+  assert.ok(!summaryBlock(renderToStaticMarkup(<SummaryDraftSection text="Texte tapé." pending onRequest={noop} />)).includes("summary-skeleton"), "typed text is never covered");
+  const long = summaryBlock(renderToStaticMarkup(<SummaryDraftSection text={"a".repeat(5001)} onRequest={noop} />));
+  assert.ok(decode(long).includes(fr.summary.charOver.replace("{max}", "5000")));
+  assert.match(confirmButton(long), /disabled=""/);
 });

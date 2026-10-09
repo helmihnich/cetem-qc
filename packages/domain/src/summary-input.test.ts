@@ -5,7 +5,10 @@ import type { CurrentInsightDecision } from "./insight-decisions.js";
 import type { InsightProposal } from "./insight-rules.js";
 import { collectRetainedInsights } from "./manual-insights.js";
 import type { ManualInsight } from "./manual-insights.js";
-import { buildSummaryInputSet, buildSummaryPrompt, canonicalJson, summaryInputSetPlainObject } from "./summary-input.js";
+import { buildSummaryInputSet, buildSummaryPrompt, canonicalJson, SUMMARY_DRAFT_SECTIONS, SUMMARY_SYSTEM_INSTRUCTION, summaryInputSetPlainObject } from "./summary-input.js";
+import { buildSummaryDemoDraft, renderSummaryFacts } from "./summary-facts.js";
+import { GRAPHIE_CALCULATION_IDENTITY } from "./graphie-identity.js";
+import { calculateGraphieResults } from "./graphie-inputs.js";
 
 const SUBMISSION = "00000000-0000-4000-8000-000000000501";
 const identity = { catalogueId: "graphie-mobile-pov", catalogueVersion: "2.0.0", schemaVersion: 3, ruleId: "cetem-paper-form", ruleVersion: "2.0.0" };
@@ -68,4 +71,56 @@ test("D4 the prompt holds the French instruction and the input set only, and for
   assert.match(prompt, /N’indique aucune conformité globale/);
   assert.match(prompt, /indisponible/);
   assert.ok(!prompt.includes("account-secret-id") && !prompt.includes(SUBMISSION));
+});
+
+const realValues = {
+  "header.reportNumber": "R-091", "header.interventionNature": "Convention", "header.etablissement": "  ",
+  "equipment.equipment.brand": "MarqueSynth", "visual.integrity": "Oui", "visual.cleanliness": "Non", "mechanical.brakes": "N.A",
+  "voltage.accuracy.row1.kvDisplayed": "50", "voltage.accuracy.row1.kvMeasured": "49,2", "voltage.accuracy.comments": "Câble à surveiller.",
+  "controlPerformedBy.nom": "Technicien Secret",
+};
+const realSet = () => buildSummaryInputSet(
+  { identity: GRAPHIE_CALCULATION_IDENTITY, values: realValues, results: calculateGraphieResults(GRAPHIE_CALCULATION_IDENTITY, realValues) },
+  collectRetainedInsights([proposal("a")], [decide("a", "retained")], [manual("Câble usé.", "Constat visuel.")]),
+);
+
+test("D5 the prompt adds a readable rendering with catalogue labels, units and French test names, before the unchanged input set", () => {
+  const set = realSet();
+  const before = canonicalJson(set);
+  const prompt = buildSummaryPrompt(set);
+  assert.equal(canonicalJson(set), before, "rendering never changes the input set");
+  const facts = renderSummaryFacts(set);
+  assert.ok(prompt.includes(facts) && prompt.indexOf(facts) < prompt.lastIndexOf(before));
+  assert.match(facts, /- En-tête › N° rapport : R-091/);
+  assert.match(facts, /- Exactitude de la tension › KV min — kV mesuré \(kV\) : 49,2/);
+  assert.match(facts, /- Contrôles visuels › Propreté générale : Non/);
+  assert.match(facts, /- Contrôle de sécurité mécanique › Contrôle des freins : N\.A/);
+  assert.match(facts, /- Exactitude de la tension : verdict suggéré/);
+  assert.match(facts, /- Répétabilité de la tension : verdict suggéré indisponible \(mesure manquante\)/);
+  assert.match(facts, /\[Constat issu d’une règle\] Texte a\./);
+  assert.match(facts, /\[Constat manuel\] Câble usé\. \(justification : Constat visuel\.\)/);
+  assert.ok(!facts.includes("Établissement") && !facts.includes("Technicien Secret"), "blank values and personal sections are omitted");
+  for (const heading of SUMMARY_DRAFT_SECTIONS) assert.ok(prompt.includes(heading), heading);
+  assert.match(prompt, /sans Markdown/);
+  assert.match(SUMMARY_SYSTEM_INSTRUCTION, /conformité globale/);
+});
+
+test("D6 the demonstration draft follows the five-part format, is labelled as a demonstration and states no overall conformity", () => {
+  const draft = buildSummaryDemoDraft(realSet());
+  assert.ok(draft.startsWith("Brouillon de démonstration"));
+  let position = -1;
+  for (const heading of SUMMARY_DRAFT_SECTIONS) {
+    const next = draft.indexOf(`\n${heading}\n`);
+    assert.ok(next > position, heading);
+    position = next;
+  }
+  assert.match(draft, /Rapport n° R-091/);
+  assert.match(draft, /Points signalés « Non » : propreté générale/);
+  assert.match(draft, /Verdict indisponible pour : /);
+  assert.match(draft, /Câble à surveiller\./);
+  assert.match(draft, /- Câble usé\./);
+  assert.ok(!/machine conforme|non conforme|approuv|\*\*|#/i.test(draft), draft);
+  assert.ok(!draft.includes("Technicien Secret"));
+  assert.equal(buildSummaryDemoDraft(realSet()), draft, "deterministic");
+  assert.ok(buildSummaryDemoDraft(buildSummaryInputSet({ identity, values: {}, results }, [])).includes("Aucune donnée renseignée."));
 });

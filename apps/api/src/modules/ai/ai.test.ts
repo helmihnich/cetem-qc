@@ -2,6 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { fr } from "@cetem-qc/i18n";
 import { SummaryProviderError, createSummaryDraftProvider } from "./index.js";
+import { buildSummaryDemoDraft, buildSummaryInputSet, calculateGraphieResults, GRAPHIE_CALCULATION_IDENTITY, SUMMARY_SYSTEM_INSTRUCTION } from "@cetem-qc/domain";
+import { SUMMARY_TEXT_MAX } from "@cetem-qc/schemas/api/v1";
+import { normalizeDraftText } from "./draft-text.js";
 import { createGeminiSummaryProvider } from "./gemini-provider.js";
 import { createMockSummaryProvider } from "./mock-provider.js";
 
@@ -50,17 +53,21 @@ test("A2 the mock returns the fixed French text with model mock-fixed-text, make
   } finally { globalThis.fetch = original; }
 });
 
-test("A3 gemini sends the key as a header only, the prompt in the body, joins and trims the text parts, and uses the default or configured model", async () => {
-  const body = { candidates: [{ content: { parts: [{ text: "  Début. " }, { text: "Fin.  " }] } }] };
+test("A3 gemini sends the key as a header only, the system instruction, the prompt and the generation settings in the body, joins and cleans the text parts, and uses the default or configured model", async () => {
+  const body = { candidates: [{ content: { parts: [{ text: "Raisonnement interne.", thought: true }, { text: "  **Début.** " }, { text: "Fin.  " }] } }] };
   const { calls, fetchImpl } = fakeFetch(() => Response.json(body));
   const provider = createGeminiSummaryProvider({ GEMINI_API_KEY: KEY } as NodeJS.ProcessEnv, fetchImpl);
-  assert.deepEqual([provider.name, provider.model], ["gemini", "gemini-2.5-flash"]);
+  assert.deepEqual([provider.name, provider.model], ["gemini", "gemini-flash-latest"]);
   assert.equal(await provider.generate(PROMPT, { signal: signal() }), "Début. Fin.");
   assert.equal(calls.length, 1);
-  assert.equal(calls[0]!.url, "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent");
+  assert.equal(calls[0]!.url, "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent");
   assert.equal(calls[0]!.init.method, "POST");
   assert.equal((calls[0]!.init.headers as Record<string, string>)["x-goog-api-key"], KEY);
-  assert.deepEqual(JSON.parse(String(calls[0]!.init.body)), { contents: [{ parts: [{ text: PROMPT }] }] });
+  assert.deepEqual(JSON.parse(String(calls[0]!.init.body)), {
+    systemInstruction: { parts: [{ text: SUMMARY_SYSTEM_INSTRUCTION }] },
+    contents: [{ role: "user", parts: [{ text: PROMPT }] }],
+    generationConfig: { temperature: 0.2, topP: 0.8, maxOutputTokens: 4096, responseMimeType: "text/plain" },
+  });
   assert.ok(!calls[0]!.url.includes(KEY) && !String(calls[0]!.init.body).includes(KEY));
   const custom = createGeminiSummaryProvider({ GEMINI_API_KEY: KEY, GEMINI_MODEL: "gemini-test-model" } as NodeJS.ProcessEnv, fetchImpl);
   assert.equal(custom.model, "gemini-test-model");
@@ -101,4 +108,21 @@ test("A4 gemini failures map to fixed classes and never echo the provider body, 
     return Response.json({});
   }) as typeof fetch);
   assert.equal((await failureOf(() => aborting.generate(PROMPT, { signal: controller.signal }))).failureClass, "timeout");
+});
+
+test("A5 draft text is cleaned of Markdown markers and clamped so it can always be confirmed", () => {
+  assert.equal(normalizeDraftText("## Contexte de l’intervention\r\n\r\n\r\n**Rapport** n° `R-1`.\n* Point un\n- Point deux  \n"),
+    "Contexte de l’intervention\n\nRapport n° R-1.\n- Point un\n- Point deux");
+  const long = normalizeDraftText(`${"Phrase de mesure complète. ".repeat(400)}`);
+  assert.ok(long.length <= SUMMARY_TEXT_MAX && long.endsWith("…"));
+  assert.equal(normalizeDraftText("Texte court."), "Texte court.");
+});
+
+test("A6 with an input set the mock returns the demonstration draft built from it, without network", async () => {
+  const values = { "header.reportNumber": "R-091", "visual.integrity": "Oui" };
+  const set = buildSummaryInputSet({ identity: GRAPHIE_CALCULATION_IDENTITY, values, results: calculateGraphieResults(GRAPHIE_CALCULATION_IDENTITY, values) }, []);
+  const text = await createMockSummaryProvider().generate(PROMPT, { signal: signal(), inputSet: set });
+  assert.equal(text, buildSummaryDemoDraft(set));
+  assert.ok(text.startsWith("Brouillon de démonstration") && text.includes("R-091") && text.length <= SUMMARY_TEXT_MAX);
+  assert.ok(!/machine conforme|non conforme|approuv/i.test(text));
 });

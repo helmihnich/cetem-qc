@@ -1,4 +1,5 @@
 import { buildSummaryPrompt, summaryInputSetPlainObject } from "@cetem-qc/domain";
+import type { SummaryInputSet } from "@cetem-qc/domain";
 import type { Pool } from "pg";
 import { withTransaction } from "../../../db/transaction.js";
 import { AI_REQUEST_TIMEOUT_MS, SummaryProviderError } from "../../ai/index.js";
@@ -42,13 +43,13 @@ interface DraftRow {
 }
 
 /** Runs the provider with a hard time bound; a provider that ignores the signal is still cut off. */
-async function callProvider(provider: SummaryDraftProvider, prompt: string): Promise<{ text: string } | { failureClass: SummaryFailureClass }> {
+async function callProvider(provider: SummaryDraftProvider, prompt: string, inputSet: SummaryInputSet): Promise<{ text: string } | { failureClass: SummaryFailureClass }> {
   const signal = AbortSignal.timeout(summaryCommandTestSeams.timeoutMs ?? AI_REQUEST_TIMEOUT_MS);
   const cutOff = new Promise<never>((_resolve, reject) => {
     signal.addEventListener("abort", () => reject(new SummaryProviderError("timeout")), { once: true });
   });
   try {
-    const text = await Promise.race([provider.generate(prompt, { signal }), cutOff]);
+    const text = await Promise.race([provider.generate(prompt, { signal, inputSet }), cutOff]);
     if (typeof text !== "string" || text.trim() === "") return { failureClass: "empty-output" };
     return { text: text.trim() };
   } catch (error) {
@@ -80,7 +81,7 @@ export async function requestSummaryDraft(
   const prompt = buildSummaryPrompt(inputSet);
   await summaryCommandTestSeams.beforeProviderCall?.(prompt);
   const started = Date.now();
-  const result = await callProvider(provider, prompt);
+  const result = await callProvider(provider, prompt, inputSet);
   const durationMs = Date.now() - started;
 
   const status = "text" in result ? "generated" : "failed";

@@ -3682,3 +3682,22 @@ test("a first sign-in with a temporary password stays on the activation screen w
   assert.equal(findText(tree, fr.auth.reauthenticateOnline), undefined, "the connection check does not sign the Technicien out");
   await act(async () => { tree.unmount(); });
 });
+
+test("an unrealistic reading is flagged on its field with its range and blocks Soumettre without queueing anything", async () => {
+  await loadApp();
+  installMocks();
+  let tree!: ReactTestRenderer;
+  await act(async () => { tree = create(<App />); });
+  await signIn(tree);
+  await openFirstTask(tree);
+  await act(async () => { findButton(tree, "Exactitude de la tension").props.onPress(); await settle(2); });
+  const input = findInput(tree, "KV min — kV mesuré (kV)");
+  assert.ok(input, "the kV mesuré cell of the first row is shown");
+  await act(async () => { input.props.onChangeText("900"); await settle(2); });
+  assert.ok(findText(tree, "Valeur hors de la plage réaliste (20 à 150 kV)."), "the field shows the realistic range");
+  await act(async () => { findButton(tree, fr.employeeTasks.submit).props.onPress(); await settle(); });
+  assert.equal(findText(tree, fr.common.confirm), undefined, "no confirmation opens");
+  assert.equal(findText(tree, fr.employeeTasks.submissionInvalid)?.props.accessibilityRole, "alert");
+  assert.equal(submitRows(firstTask.id).length, 0, "nothing is queued");
+  await act(async () => { tree.unmount(); });
+});

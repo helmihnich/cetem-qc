@@ -47,10 +47,87 @@ export type InsightProposalSet =
 /** French statement templates by rule ID, filled from the finding params only (`{name}` placeholders). */
 export type InsightTemplates = Readonly<Record<string, string>>;
 
-/** Empty until CETEM approves an insight rule (DEP-01R). A rule is added only with its approval reference and a fixture test. */
-export const INSIGHT_RULE_REGISTRY: readonly InsightRule[] = [];
-
 const RESULT_KEYS: readonly string[] = ["voltageAccuracy", "voltageRepeatability", "outputRepeatability", "outputLinearity", "lightFieldCorrespondence"];
+
+/**
+ * Project rules for the PoV. They only restate what the stored results and paper-form checks already say —
+ * the per-test verdict against the tolerance printed on the signed CETEM paper form, an impossible calculation,
+ * or a visual/mechanical check answered « Non » — and invent no tolerance. CETEM validation is still pending,
+ * which the approval reference says. A rule is added only with its French template and a fixture test.
+ */
+export const PROJECT_RULE_REFERENCE = "Règle projet PoV — tolérances du formulaire papier CETEM signé ; validation CETEM en attente";
+
+const TEST_LABELS_FR: Readonly<Record<string, string>> = {
+  voltageAccuracy: "Exactitude de la tension",
+  voltageRepeatability: "Répétabilité de la tension",
+  outputRepeatability: "Reproductibilité et répétabilité du rayonnement de sortie",
+  outputLinearity: "Linéarité du rayonnement de sortie",
+  lightFieldCorrespondence: "Correspondance champ lumineux / champ de rayons X",
+};
+const resultSources = RESULT_KEYS.map((key) => ({ kind: "result" as const, key }));
+const formatPercent = (value: number) => value.toLocaleString("fr-FR", { maximumFractionDigits: 2 });
+
+type StoredVerdict = { status: string; reason?: string; tolerance?: { limitPercent: number; comparison: string } };
+/** The stored suggested verdict of one result, or undefined for an unsupported-version result. */
+function verdictOf(results: InsightInput["results"], key: string): StoredVerdict | undefined {
+  const result = (results as unknown as Record<string, { suggestedVerdict?: StoredVerdict } | undefined>)[key];
+  return result?.suggestedVerdict;
+}
+const toleranceText = (tolerance: { limitPercent: number; comparison: string }) =>
+  `${tolerance.comparison === "abs-lt" ? "<" : "≤"} ${formatPercent(tolerance.limitPercent)} %`;
+
+const outsideTolerance: InsightRule = {
+  ruleId: "test-outside-paper-tolerance",
+  ruleVersion: 1,
+  approvalReference: PROJECT_RULE_REFERENCE,
+  sources: resultSources,
+  evaluate: ({ results }) => RESULT_KEYS.flatMap((key) => {
+    const verdict = verdictOf(results, key);
+    return verdict?.status === "non-conforme" && verdict.tolerance
+      ? [{ sourceKeys: [{ kind: "result", key }], params: { test: TEST_LABELS_FR[key]!, tolerance: toleranceText(verdict.tolerance) } }] : [];
+  }),
+};
+
+const withinTolerance: InsightRule = {
+  ruleId: "test-within-paper-tolerance",
+  ruleVersion: 1,
+  approvalReference: PROJECT_RULE_REFERENCE,
+  sources: resultSources,
+  evaluate: ({ results }) => RESULT_KEYS.flatMap((key) => {
+    const verdict = verdictOf(results, key);
+    return verdict?.status === "conforme" && verdict.tolerance
+      ? [{ sourceKeys: [{ kind: "result", key }], params: { test: TEST_LABELS_FR[key]!, tolerance: toleranceText(verdict.tolerance) } }] : [];
+  }),
+};
+
+const calculationUnavailable: InsightRule = {
+  ruleId: "test-calculation-unavailable",
+  ruleVersion: 1,
+  approvalReference: PROJECT_RULE_REFERENCE,
+  sources: resultSources,
+  evaluate: ({ results }) => RESULT_KEYS.flatMap((key) => {
+    const verdict = verdictOf(results, key);
+    if (verdict?.status !== "indisponible" || verdict.reason === "no-tolerance") return [];
+    const cause = verdict.reason === "invalid-input" ? "valeurs illisibles" : verdict.reason === "zero-denominator" ? "division par zéro (valeur nulle)" : "mesures manquantes";
+    return [{ sourceKeys: [{ kind: "result", key }], params: { test: TEST_LABELS_FR[key]!, cause } }];
+  }),
+};
+
+const checkFields = GRAPHIE_MOBILE_POV_CATALOGUE.sections
+  .filter((section) => section.id === "visual" || section.id === "mechanical")
+  .flatMap((section) => section.fields.map((field) => ({ id: field.id, labelFr: field.labelFr, sectionFr: section.labelFr })));
+const checkAnswerNo: InsightRule = {
+  ruleId: "check-answered-no",
+  ruleVersion: 1,
+  approvalReference: PROJECT_RULE_REFERENCE,
+  sources: checkFields.map((field) => ({ kind: "field" as const, key: field.id })),
+  evaluate: ({ values }) => checkFields
+    .filter((field) => values[field.id] === "Non")
+    .map((field) => ({ sourceKeys: [{ kind: "field", key: field.id }], params: { section: field.sectionFr, check: field.labelFr } })),
+};
+
+/** The rules evaluated for every accepted audit. */
+export const INSIGHT_RULE_REGISTRY: readonly InsightRule[] = [outsideTolerance, withinTolerance, calculationUnavailable, checkAnswerNo];
 
 const workbookOnlyFields = new Set(
   GRAPHIE_MOBILE_POV_CATALOGUE.sections.flatMap((section) => section.fields)

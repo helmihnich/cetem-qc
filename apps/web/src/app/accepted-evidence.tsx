@@ -135,6 +135,14 @@ export type InsightProposalsSectionProps = {
   locked?: boolean;
 };
 
+/** Visual tone of a proposal by rule: attention for an exceeded tolerance or a failed check, success within tolerance. */
+const INSIGHT_TONES: Record<string, "warning" | "success" | "neutral"> = {
+  "test-outside-paper-tolerance": "warning",
+  "check-answered-no": "warning",
+  "test-within-paper-tolerance": "success",
+  "test-calculation-unavailable": "neutral",
+};
+
 /** W5 slot: renders the proposal set exactly as received, with retain/discard controls. It never evaluates. */
 export function InsightProposalsSection({ insights, decisions = [], pendingProposalId = null, failed = false, onDecide, manualInsightCount = 0, locked = false }: InsightProposalsSectionProps) {
   const currentOf = (proposalId: string) => decisions.find((decision) => decision.proposalId === proposalId);
@@ -146,7 +154,7 @@ export function InsightProposalsSection({ insights, decisions = [], pendingPropo
       const current = currentOf(proposal.proposalId);
       const pending = locked || pendingProposalId === proposal.proposalId;
       const state = current ? (current.decision === "retained" ? fr.insights.retained : fr.insights.discarded) : fr.insights.undecided;
-      return <li className="insight-item" key={proposal.proposalId}>
+      return <li className={`insight-item insight-tone-${INSIGHT_TONES[proposal.ruleId] ?? "neutral"}`} key={proposal.proposalId}>
         <p>{proposal.statement}</p>
         <p>{fr.insights.rule.replace("{ruleId}", proposal.ruleId).replace("{ruleVersion}", String(proposal.ruleVersion))}</p>
         <p>{fr.insights.approval.replace("{approvalReference}", proposal.approvalReference)}</p>

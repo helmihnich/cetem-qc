@@ -4,6 +4,7 @@ import { GRAPHIE_CALCULATION_IDENTITY } from "./graphie-identity.js";
 import { calculateGraphieResults } from "./graphie-inputs.js";
 import { INSIGHT_REGISTRY_VERSION, INSIGHT_RULE_REGISTRY, evaluateInsightProposals, validateInsightRegistry } from "./insight-rules.js";
 import type { InsightInput, InsightRule, InsightSourceKey } from "./insight-rules.js";
+import { fr } from "../../i18n/src/fr.js";
 
 // Story 9.2: synthetic rules are built here and passed as the registry argument; they are never exported.
 const SUBMISSION = "00000000-0000-4000-8000-000000000301";
@@ -18,13 +19,17 @@ const rule = (ruleId: string, overrides: Partial<InsightRule> = {}): InsightRule
 });
 const templates = { "regle-a": "Rapport {numero} ({marque}).", "regle-b": "Seconde observation {numero}.", "regle-silencieuse": "Jamais." };
 
-test("I1 the production registry is empty and valid", () => {
-  assert.equal(INSIGHT_RULE_REGISTRY.length, 0);
-  assert.doesNotThrow(() => validateInsightRegistry(INSIGHT_RULE_REGISTRY));
+test("I1 the production registry holds the project rules and is valid with the French templates", () => {
+  assert.deepEqual(INSIGHT_RULE_REGISTRY.map((rule) => rule.ruleId), ["test-outside-paper-tolerance", "test-within-paper-tolerance", "test-calculation-unavailable", "check-answered-no"]);
+  assert.doesNotThrow(() => validateInsightRegistry(INSIGHT_RULE_REGISTRY, fr.insights.rules));
 });
 
-test("I2 the production registry gives unavailable / no-approved-rules", () => {
-  assert.deepEqual(evaluateInsightProposals(input()), { status: "unavailable", reason: "no-approved-rules", registryVersion: INSIGHT_REGISTRY_VERSION, proposals: [] });
+test("I2 the production registry is available; an empty form only reports calculations that cannot be made", () => {
+  const set = evaluateInsightProposals(input(), INSIGHT_RULE_REGISTRY, fr.insights.rules);
+  assert.equal(set.status, "available");
+  assert.ok(set.proposals.length > 0);
+  assert.ok(set.proposals.every((proposal) => proposal.ruleId === "test-calculation-unavailable"));
+  assert.ok(set.proposals.every((proposal) => /calcul impossible \(mesures manquantes\)/.test(proposal.statement)));
 });
 
 test("I3 registry validation refuses every invalid entry", () => {

@@ -330,12 +330,16 @@ const syntheticInsightRule = (ruleId: string, evaluate: (input: { values: Readon
   ruleId, ruleVersion: 1, approvalReference: "Document de test synthétique", sources: [{ kind: "field" as const, key: "header.reportNumber" }], evaluate,
 });
 
-test("R12 with the production registry an own-team open returns unavailable insights and exactly one access row", async () => {
+test("R12 with the production registry an own-team open returns the project-rule proposals and exactly one access row", async () => {
   await withSyncFixture(async (fixture) => {
     const { taskId } = await acceptedTask(fixture);
     const reply = await evidence(fixture, taskId);
     assert.equal(reply.status, 200);
-    assert.deepEqual(acceptedEvidenceResponseSchema.parse(reply.body).insights, { status: "unavailable", reason: "no-approved-rules", registryVersion: "insight-registry-1", proposals: [] });
+    const insights = acceptedEvidenceResponseSchema.parse(reply.body).insights;
+    assert.equal(insights.status, "available");
+    // An accepted form without measurements: every proposal says a calculation cannot be made.
+    assert.ok(insights.proposals.length > 0);
+    assert.ok(insights.proposals.every((proposal) => proposal.ruleId === "test-calculation-unavailable"));
     assert.equal((await accessRows(fixture.pool)).length, 1);
   });
 });

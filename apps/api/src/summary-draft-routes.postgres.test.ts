@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import test from "node:test";
-import { canonicalJson } from "@cetem-qc/domain";
-import { fr } from "@cetem-qc/i18n";
+import { buildSummaryDemoDraft, canonicalJson } from "@cetem-qc/domain";
+import type { SummaryInputSet } from "@cetem-qc/domain";
 import { summaryDraftResponseSchema } from "@cetem-qc/schemas/api/v1";
 import type { Pool } from "pg";
 import { SummaryProviderError } from "./modules/ai/index.js";
@@ -96,7 +96,7 @@ test("R32 a request returns 201 and inserts exactly one generated row with every
     const row = rows[0]!;
     const audit = (await pool.query<{ id: string }>("SELECT id FROM audits WHERE task_id = $1", [taskId])).rows[0]!;
     assert.deepEqual([row.id, row.requested_by, row.task_id, row.audit_id, row.submission_id, row.revision, row.provider, row.model, row.status, row.failure_class, row.draft_text],
-      [body.id, owner, taskId, audit.id, submissionId, 1, "mock", "mock-fixed-text", "generated", null, fr.summary.mockDraft]);
+      [body.id, owner, taskId, audit.id, submissionId, 1, "mock", "mock-fixed-text", "generated", null, buildSummaryDemoDraft(row.input_set as unknown as SummaryInputSet)]);
     assert.deepEqual(row.revision_identity, { catalogueId: "graphie-mobile-pov", catalogueVersion: "2.0.0", schemaVersion: 3, ruleId: "cetem-paper-form", ruleVersion: "2.0.0" });
     assert.ok(Math.abs(row.requested_at.getTime() - before) < 60_000, "the date is the server date");
     assert.equal(row.summary_input_set_id, createHash("sha256").update(canonicalJson(row.input_set)).digest("hex"), "the identity is the hash of the stored input set");

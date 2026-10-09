@@ -114,3 +114,10 @@ test("I6 each test lists its formula inputs only, in paper order, with the paper
 test("I7 GRAPHIE_RESULT_ORDER lists the five paper tests in paper order", () => {
   assert.deepEqual(GRAPHIE_RESULT_ORDER, ["voltageAccuracy", "voltageRepeatability", "outputRepeatability", "outputLinearity", "lightFieldCorrespondence"]);
 });
+
+test("I8 the summary prompt names the tests with the same French wording, in paper order", async () => {
+  const { SUMMARY_TEST_LABELS_FR } = await import("@cetem-qc/domain");
+  const { fr } = await import("./fr.js");
+  assert.deepEqual(SUMMARY_TEST_LABELS_FR, fr.graphieResults.tests);
+  assert.deepEqual(Object.keys(SUMMARY_TEST_LABELS_FR), GRAPHIE_RESULT_ORDER);
+});

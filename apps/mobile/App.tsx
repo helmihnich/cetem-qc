@@ -10,7 +10,7 @@ import { resolveApiBaseUrl } from "./api-base-url";
 import { ApiRequestError, createApiClient } from "@cetem-qc/api-client/v1";
 import type { ApiClient, EmployeeTaskListResponse, EmployeeTaskResponse } from "@cetem-qc/api-client/v1";
 import { fr } from "@cetem-qc/i18n";
-import { GRAPHIE_CALCULATION_IDENTITY, PASSWORD_RULES, checkPasswordRules, isInvalidGraphieReading, isPasswordCompliant, type CalculationContext } from "@cetem-qc/domain";
+import { GRAPHIE_CALCULATION_IDENTITY, PASSWORD_RULES, checkGraphiePlausibility, checkPasswordRules, graphieFieldRange, isInvalidGraphieReading, isPasswordCompliant, localIsoDay, type CalculationContext, type PlausibilityContext } from "@cetem-qc/domain";
 import { getEmployeeTaskListState } from "./employee-task-list-state";
 import { EmployeeTaskDetailRequests } from "./employee-task-detail-state";
 import type { EmployeeTaskDetailState } from "./employee-task-detail-state";
@@ -137,6 +137,10 @@ export default function App() {
   const listState = getEmployeeTaskListState({ loading, error: Boolean(error), taskCount: tasks.length });
   const activeIdentityRef = useRef<string | null>(null);
   const activeScreenRef = useRef<Screen>(screen);
+  const scrollRef = useRef<ScrollView | null>(null);
+  const scrollOffsetRef = useRef(0);
+  const pageOffsetRef = useRef(0);
+  const formOffsetRef = useRef(0);
   const pendingCachedOpenRef = useRef<{ employeeId: string; taskId: string; generation: number } | undefined>(undefined);
   activeScreenRef.current = screen;
   if (user) activeIdentityRef.current = user.id;
@@ -170,6 +174,11 @@ export default function App() {
     ? outboxItems.find((item) => item.operationId === currentSyncState.correction!.rejectedOperationId) : undefined;
   const correctionIssues = correctedItem ? rejectionIssues(correctedItem) : [];
   const fieldIssues = fieldIssueTexts(correctionIssues);
+  // Plausibility (date, physical ranges, mandatory fields) is checked while typing and again on Soumettre.
+  const plausibilityContext = (): PlausibilityContext => {
+    const createdAt = displayedTask?.createdAt ? new Date(displayedTask.createdAt) : undefined;
+    return { today: localIsoDay(new Date()), ...(createdAt && !Number.isNaN(createdAt.getTime()) ? { earliestDate: localIsoDay(createdAt) } : {}) };
+  };
   const acceptedLine = screen.kind === "detail" ? submissionAcceptedLine(outboxItems.filter((item) => item.taskId === screen.id)) : undefined;
   const locked = currentSyncState?.locked ?? false;
   // An open conflict pauses the task: no Soumettre, Supprimer or retry until an explicit resolution (Story 8.1).
@@ -300,6 +309,20 @@ export default function App() {
 
   function beginSubmit() {
     if (!user || screen.kind !== "detail" || draftHydration !== "ready" || !currentSyncState?.canSubmit || submittingRef.current || draftDeletingRef.current) return;
+    // Realistic values (date, physical ranges) are checked before the confirmation; the structural rules run on submission.
+    const issues = legacyContentModeRef.current ? [] : checkGraphiePlausibility(formValuesRef.current, plausibilityContext());
+    if (issues.length > 0) {
+      // Nothing is queued: the form stays editable, the first section with a problem opens and the issues are listed.
+      setError(fr.employeeTasks.submissionInvalid);
+      setSubmissionIssues({ employeeId: user.id, taskId: screen.id, issues });
+      const firstField = issues[0]!.path.replace(/^values\./, "");
+      const section = GRAPHIE_MOBILE_POV_CATALOGUE.sections.find((candidate) => candidate.fields.some((field) => field.id === firstField));
+      if (section) setActiveSectionId(section.id);
+      revealForm();
+      return;
+    }
+    setSubmissionIssues(undefined);
+    if (error === fr.employeeTasks.submissionInvalid) setError(undefined);
     setSubmitConfirmation({ employeeId: user.id, taskId: screen.id });
   }
 
@@ -364,8 +387,21 @@ export default function App() {
   }
 
   function selectScreen(next: Screen) {
+    const previous = activeScreenRef.current;
     activeScreenRef.current = next;
     setScreen(next);
+    // A new screen starts at its top instead of inheriting the previous scroll offset.
+    if (previous.kind !== next.kind || (previous.kind === "detail" && next.kind === "detail" && previous.id !== next.id)) scrollToTop();
+  }
+
+  /** After a section change, brings the top of the form back into view if the reader had scrolled past it. */
+  function revealForm() {
+    const formTop = pageOffsetRef.current + formOffsetRef.current;
+    if (scrollOffsetRef.current > formTop) scrollRef.current?.scrollTo?.({ y: Math.max(0, formTop - 12), animated: true });
+  }
+
+  function scrollToTop() {
+    scrollRef.current?.scrollTo?.({ y: 0, animated: false });
   }
 
   function updateCachedTasks(employeeId: string, update: (previous: EmployeeTaskResponse["task"][]) => EmployeeTaskResponse["task"][]) {
@@ -1287,11 +1323,26 @@ export default function App() {
   const signedIn = Boolean(user && !user.mustChangePassword);
   const sectionNavigation = <View style={styles.sectionNavigation}>{GRAPHIE_MOBILE_POV_CATALOGUE.sections.map((section) => {
     const selected = section.id === activeSectionId;
-    return <Pressable key={section.id} accessibilityRole="button" accessibilityState={{ selected }} onPress={() => { setActiveSectionId(section.id); if (draftSaveState === "saving") void saveDraft(); }} style={[styles.sectionChip, selected && styles.sectionChipSelected]}>
+    return <Pressable key={section.id} accessibilityRole="button" accessibilityState={{ selected }} onPress={() => { setActiveSectionId(section.id); if (draftSaveState === "saving") void saveDraft(); revealForm(); }} style={[styles.sectionChip, selected && styles.sectionChipSelected]}>
       <Text style={[styles.sectionChipText, selected && styles.sectionChipTextSelected]}>{section.labelFr}</Text>
     </Pressable>;
   })}</View>;
-  const activeSectionForm = GRAPHIE_MOBILE_POV_CATALOGUE.sections.filter((section) => section.id === activeSectionId).map((section) => <GraphieSectionForm key={section.id} section={section} layout={layout} values={formValues} results={calculationResults} onChange={changeFormField} editable={formEditable} issues={fieldIssues} copiedFields={new Set(activeDraft?.recoveryProvenance?.fields.map((field) => field.destinationField.replace(/^values\./, "")) ?? [])} />);
+  const plausibilityTexts: Record<string, string> = {};
+  if (formEditable && !legacyContentMode) {
+    for (const issue of checkGraphiePlausibility(formValues, plausibilityContext())) {
+      const fieldId = issue.path.replace(/^values\./, "");
+      const field = GRAPHIE_FIELD_BY_ID.get(fieldId);
+      const range = field ? graphieFieldRange(field) : undefined;
+      // An unreadable number already has its own hint on the field.
+      if (issue.code === "invalid-number") continue;
+      plausibilityTexts[fieldId] = issue.code === "out-of-range" && range && field
+        ? fr.employeeTasks.outOfRangeDetail.replace("{min}", formatNumber(range.min)).replace("{max}", formatNumber(range.max)).replace("{unit}", field.unit ?? "")
+        : fr.employeeTasks.issueCodes[issue.code] ?? fr.employeeTasks.issueCodeUnknown;
+    }
+  }
+  const shownFieldIssues: Record<string, string> = { ...plausibilityTexts };
+  for (const [fieldId, text] of Object.entries(fieldIssues)) shownFieldIssues[fieldId] = shownFieldIssues[fieldId] ? `${text} ; ${shownFieldIssues[fieldId]}` : text;
+  const activeSectionForm = GRAPHIE_MOBILE_POV_CATALOGUE.sections.filter((section) => section.id === activeSectionId).map((section) => <GraphieSectionForm key={section.id} section={section} layout={layout} values={formValues} results={calculationResults} onChange={changeFormField} editable={formEditable} issues={shownFieldIssues} copiedFields={new Set(activeDraft?.recoveryProvenance?.fields.map((field) => field.destinationField.replace(/^values\./, "")) ?? [])} />);
   const saveStateTone: Tone = presentedSaveState === "failed" ? "danger" : presentedSaveState === "saving" ? "info" : presentedSaveState === "saved" ? "success" : "neutral";
 
   return (
@@ -1319,7 +1370,7 @@ export default function App() {
           </LinearGradient>
         )}
         <SafeAreaView edges={signedIn ? ["left", "right", "bottom"] : ["top", "left", "right", "bottom"]} style={styles.safe}>
-          <ScrollView contentContainerStyle={[styles.container, signedIn ? styles.containerSignedIn : styles.containerSignedOut]} keyboardShouldPersistTaps="handled">
+          <ScrollView ref={scrollRef} contentContainerStyle={[styles.container, signedIn ? styles.containerSignedIn : styles.containerSignedOut]} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" automaticallyAdjustKeyboardInsets scrollEventThrottle={64} onScroll={(event) => { scrollOffsetRef.current = event.nativeEvent.contentOffset.y; }}>
             <View style={{ width: contentWidth, maxWidth: "100%", gap: 18 }}>
             {!user ? (
               <>
@@ -1362,9 +1413,9 @@ export default function App() {
                 </View>
               </>
             ) : (
-              <View style={[styles.page, layout === "tablet" && styles.tabletPage]}>
+              <View style={[styles.page, layout === "tablet" && styles.tabletPage]} onLayout={(event) => { pageOffsetRef.current = event.nativeEvent.layout.y; }}>
                 {authorization.status === "offline-authorized" ? <Notice tone="info" role="summary">{fr.auth.offlineAuthorized}</Notice> : null}
-                {authorization.status === "revalidating" ? (
+                {authorization.status === "revalidating" && error === fr.auth.reauthenticateOnline ? (
                   <View style={styles.revalidateCard}>
                     <Notice tone="warning" role="alert">{fr.auth.reauthenticateOnline}</Notice>
                     <Field label={fr.auth.email} value={email} onChangeText={setEmail} autoCapitalize="none" keyboardType="email-address" />
@@ -1419,7 +1470,7 @@ export default function App() {
                 ) : (
                   <>
                     <BackButton title={fr.employeeTasks.back} onPress={() => void leaveTaskDetail()} />
-                    {loading ? <View style={styles.loadingBox}><ActivityIndicator accessibilityLabel={fr.common.loading} color={colors.primary} size="large" /></View> : null}
+                    {loading && !displayedTask ? <View style={styles.loadingBox}><ActivityIndicator accessibilityLabel={fr.common.loading} color={colors.primary} size="large" /></View> : null}
                     {displayedTask ? <>
                       <View style={styles.identityCard}>
                         <View style={styles.identityHeader}>
@@ -1445,7 +1496,7 @@ export default function App() {
                         <StatusLine tone={saveStateTone}>{fr.employeeTasks.localPersistence}: {presentedSaveState === "saving" ? fr.employeeTasks.savingLocally : presentedSaveState === "saved" ? fr.employeeTasks.savedLocally : presentedSaveState === "failed" ? fr.employeeTasks.saveFailed : fr.employeeTasks.notSavedLocally}</StatusLine>
                         {locked ? <Notice tone="warning" role="summary">{fr.employeeTasks.readOnlyPending}</Notice> : null}
                       </View>
-                      <View style={styles.panelCard}>
+                      <View style={styles.panelCard} onLayout={(event) => { formOffsetRef.current = event.nativeEvent.layout.y; }}>
                         <Text style={styles.overline}>{fr.employeeTasks.sectionNavigation}</Text>
                         {sectionNavigation}
                         {draftHydration === "loading" ? <Notice tone="info" role="summary">{fr.common.loading}</Notice> : null}
@@ -1592,7 +1643,7 @@ function Confirmation(props: { message: string; children: ReactNode }) {
   </View>;
 }
 
-function Field(props: { label: string; value: string; onChangeText: (value: string) => void; secureTextEntry?: boolean; autoCapitalize?: "none" | "sentences"; keyboardType?: "email-address" | "decimal-pad"; editable?: boolean; multiline?: boolean; accessibilityLabel?: string; helpFr?: string; errorFr?: string; style?: StyleProp<ViewStyle> }) {
+function Field(props: { label: string; value: string; onChangeText: (value: string) => void; secureTextEntry?: boolean; autoCapitalize?: "none" | "sentences"; keyboardType?: "email-address" | "decimal-pad" | "number-pad"; editable?: boolean; multiline?: boolean; accessibilityLabel?: string; helpFr?: string; errorFr?: string; style?: StyleProp<ViewStyle>; maxLength?: number; placeholder?: string; accessory?: ReactNode }) {
   const [focused, setFocused] = useState(false);
   const hint = [props.helpFr, props.errorFr].filter(Boolean).join(" ");
   const readOnly = props.editable === false;
@@ -1612,6 +1663,8 @@ function Field(props: { label: string; value: string; onChangeText: (value: stri
       autoCapitalize={props.autoCapitalize}
       keyboardType={props.keyboardType}
       multiline={props.multiline}
+      maxLength={props.maxLength}
+      placeholder={props.placeholder}
       autoCorrect={false}
       placeholderTextColor={colors.textTertiary}
       selectionColor={colors.primary}
@@ -1683,6 +1736,21 @@ function TaskSyncStatus(props: { state: TaskSyncState; running: boolean; onRetry
   </View>;
 }
 
+const GRAPHIE_FIELD_BY_ID = new Map(GRAPHIE_MOBILE_POV_CATALOGUE.sections.flatMap((section) => section.fields).map((field) => [field.id, field]));
+const formatNumber = (value: number) => value.toLocaleString("fr-FR");
+
+/** Types digits as JJ/MM/AAAA: slashes are inserted, anything else is dropped; an already formatted value is kept. */
+function formatDateInput(raw: string): string {
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw.trim())) return raw.trim();
+  const digits = raw.replace(/\D/g, "").slice(0, 8);
+  return [digits.slice(0, 2), digits.slice(2, 4), digits.slice(4, 8)].filter(Boolean).join("/");
+}
+
+function todayAsFrenchDate(): string {
+  const now = new Date();
+  return `${String(now.getDate()).padStart(2, "0")}/${String(now.getMonth() + 1).padStart(2, "0")}/${now.getFullYear()}`;
+}
+
 const fieldLabel = (field: CatalogueField) => `${field.labelFr}${field.unit ? ` (${field.unit})` : ""}`;
 
 function RecoveryAttribution({ provenance }: { provenance: NonNullable<LocalDraft["recoveryProvenance"]> }) {
@@ -1697,6 +1765,22 @@ function CatalogueInput(props: { field: CatalogueField; value: string; onChange:
   if (field.type === "choice") return <ChoiceField field={field} value={props.value} onSelect={(value) => props.onChange(field.id, value)} editable={props.editable} errorFr={props.issueFr} copied={props.copied} />;
   const label = fieldLabel(field);
   const errorFr = [field.type === "number" && isInvalidGraphieReading(props.value) ? fr.graphieResults.invalidNumber : undefined, props.issueFr].filter(Boolean).join(" ");
+  if (field.type === "date") return <View style={[styles.dateField, props.style]}>
+    <Field
+      label={label}
+      accessibilityLabel={props.rowLabelFr ? `${props.rowLabelFr} — ${label}` : label}
+      helpFr={[fr.employeeTasks.dateFieldHelp, props.copied ? fr.employeeTasks.recoveryCopiedField : undefined].filter(Boolean).join(" ")}
+      errorFr={props.issueFr || undefined}
+      value={props.value}
+      onChangeText={(value) => props.onChange(field.id, formatDateInput(value))}
+      editable={props.editable}
+      keyboardType="number-pad"
+      maxLength={10}
+      placeholder="JJ/MM/AAAA"
+    />
+    {props.editable ? <Button title={fr.employeeTasks.dateToday} secondary onPress={() => props.onChange(field.id, todayAsFrenchDate())} style={styles.dateTodayButton} /> : null}
+  </View>;
+  const range = graphieFieldRange(field);
   return <Field
     label={label}
     accessibilityLabel={props.rowLabelFr ? `${props.rowLabelFr} — ${label}` : label}
@@ -1705,6 +1789,7 @@ function CatalogueInput(props: { field: CatalogueField; value: string; onChange:
     value={props.value}
     onChangeText={(value) => props.onChange(field.id, value)}
     editable={props.editable}
+    placeholder={range ? `${formatNumber(range.min)} – ${formatNumber(range.max)}` : undefined}
     keyboardType={field.type === "number" ? "decimal-pad" : undefined}
     multiline={field.type === "textarea"}
     style={props.style}
@@ -1961,6 +2046,8 @@ const styles = StyleSheet.create({
 
   // Fields
   field: { gap: 6 },
+  dateField: { gap: 8 },
+  dateTodayButton: { alignSelf: "flex-start", minHeight: 44, paddingHorizontal: 16 },
   input: { minHeight: 52, borderColor: colors.borderStrong, borderWidth: 1, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, color: colors.text, fontSize: 16, backgroundColor: colors.surface },
   inputMultiline: { minHeight: 96, textAlignVertical: "top" },
   inputReadOnly: { backgroundColor: colors.surfaceMuted, color: colors.textSecondary, borderColor: colors.border },

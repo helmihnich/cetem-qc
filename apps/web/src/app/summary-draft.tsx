@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { confirmedSummarySchema, summaryDraftResponseSchema, summaryReopeningSchema } from "@cetem-qc/api-client/v1";
+import { SUMMARY_TEXT_MAX, confirmedSummarySchema, summaryDraftResponseSchema, summaryReopeningSchema } from "@cetem-qc/api-client/v1";
 import type { ConfirmedSummary, SummaryDraftResponse, SummaryHistoryItem, SummaryReopening } from "@cetem-qc/api-client/v1";
 import { fr } from "@cetem-qc/i18n";
 
@@ -125,8 +125,17 @@ function SummaryHistory({ history }: { history: SummaryHistoryItem[] }) {
   </section>;
 }
 
-const sourceLine = (draft: { provider: string; model: string; requestedAt: string }) =>
-  fr.summary.draftSource.replace("{provider}", draft.provider).replace("{model}", draft.model).replace("{date}", dateTimeFormatter.format(new Date(draft.requestedAt)));
+/** Where a draft comes from: the demonstration provider is named as such, an external one by provider and model. */
+const sourceLine = (draft: { provider: string; model: string; requestedAt: string }) => {
+  const date = dateTimeFormatter.format(new Date(draft.requestedAt));
+  return draft.provider === "mock"
+    ? fr.summary.draftSourceMock.replace("{date}", date)
+    : fr.summary.draftSource.replace("{provider}", draft.provider).replace("{model}", draft.model).replace("{date}", date);
+};
+
+/** Discreet provenance chip of a draft. */
+const SourceChip = ({ draft }: { draft: { provider: string; model: string; requestedAt: string } }) =>
+  <p className="summary-source-chip">{sourceLine(draft)}</p>;
 
 /** W5 block: a request button, an always-editable text area and the explicit two-step confirmation. Once confirmed it is read only. */
 export function SummaryDraftSection({
@@ -143,8 +152,8 @@ export function SummaryDraftSection({
       <textarea id="summary-text" readOnly value={summary.text} />
       {summary.initialDraft && <div className="insight-item summary-initial-draft">
         <p className="insight-state">{fr.summary.initialDraftLabel}</p>
-        <p>{summary.initialDraft.text}</p>
-        <p>{sourceLine(summary.initialDraft)}</p>
+        <p className="summary-draft-text">{summary.initialDraft.text}</p>
+        <SourceChip draft={summary.initialDraft} />
       </div>}
       {reopenMessage && <p className="field-error" role="alert">{reopenMessage}</p>}
       {reopenPrompt
@@ -157,7 +166,10 @@ export function SummaryDraftSection({
       <SummaryHistory history={history} />
     </section>;
   }
-  const canConfirm = text.trim() !== "" && !confirmPending && !pending;
+  const length = text.trim().length;
+  const tooLong = length > SUMMARY_TEXT_MAX;
+  const canConfirm = length > 0 && !tooLong && !confirmPending && !pending;
+  const hasDraft = filled !== null || offered !== null;
   return <section className="evidence-summary" aria-labelledby="evidence-summary-heading">
     <h3 id="evidence-summary-heading">{fr.summary.heading}</h3>
     <p className="field-hint">{fr.summary.note}</p>
@@ -165,27 +177,44 @@ export function SummaryDraftSection({
     {version?.state === "open" && version.number >= 2 && <p className="field-hint summary-version-note">{fr.summary.versionNote.replace("{n}", String(version.number)).replace("{previous}", String(version.number - 1))}</p>}
     {version?.state === "open" && history[0] && <button className="secondary-button" type="button" onClick={onResumeText}>{fr.summary.resumeText.replace("{n}", String(history[0].version))}</button>}
     {reopenMessage && <p className="field-error" role="alert">{reopenMessage}</p>}
-    <button className="secondary-button" type="button" disabled={pending} aria-busy={pending} onClick={onRequest}>{fr.summary.request}</button>
-    {pending && <p className="state-message" role="status">{fr.summary.pending}</p>}
-    {failed && <p className="field-error" role="alert">{fr.summary.unavailable}</p>}
+    <div className="summary-assistant" role="group" aria-labelledby="summary-assistant-heading">
+      <div className="summary-assistant-header">
+        <span className="summary-ai-badge" aria-hidden="true">{fr.summary.assistantBadge}</span>
+        <h4 id="summary-assistant-heading">{fr.summary.assistantHeading}</h4>
+      </div>
+      <p className="field-hint">{fr.summary.assistantHint}</p>
+      <button className="secondary-button summary-ai-button" type="button" disabled={pending} aria-busy={pending} onClick={onRequest}>{hasDraft ? fr.summary.regenerate : fr.summary.request}</button>
+      {pending && <p className="state-message" role="status">{fr.summary.pending}</p>}
+      {failed && <p className="field-error" role="alert">{fr.summary.unavailable}</p>}
+    </div>
     <label htmlFor="summary-text">{fr.summary.textLabel}</label>
-    <textarea id="summary-text" value={text} onChange={(event) => onTextChange?.(event.target.value)} />
-    {filled && <p className="insight-state">{fr.summary.draftLabel}<br />{sourceLine(filled)}</p>}
+    <div className={`summary-editor${pending && text.trim() === "" ? " is-generating" : ""}`}>
+      <textarea id="summary-text" aria-describedby="summary-text-count" value={text} onChange={(event) => onTextChange?.(event.target.value)} />
+      {pending && text.trim() === "" && <div className="summary-skeleton" aria-hidden="true"><span /><span /><span /><span /><span /></div>}
+    </div>
+    <div className="summary-editor-footer">
+      {filled ? <div className="summary-draft-meta"><span className="insight-state">{fr.summary.draftLabel}</span><SourceChip draft={filled} /></div> : <span />}
+      <p id="summary-text-count" className={`summary-char-count${tooLong ? " is-over" : ""}`}>{fr.summary.charCount.replace("{count}", String(length)).replace("{max}", String(SUMMARY_TEXT_MAX))}</p>
+    </div>
+    {tooLong && <p className="field-error">{fr.summary.charOver.replace("{max}", String(SUMMARY_TEXT_MAX))}</p>}
     {offered && <div className="insight-item summary-new-draft">
       <h4>{fr.summary.newDraftHeading}</h4>
       <p className="insight-state">{fr.summary.draftLabel}</p>
-      <p>{offered.text}</p>
-      <p>{sourceLine(offered)}</p>
+      <p className="summary-draft-text">{offered.text}</p>
+      <SourceChip draft={offered} />
       <button className="secondary-button" type="button" onClick={onReplace}>{fr.summary.replace}</button>
     </div>}
-    {confirmFailed && <p className="field-error" role="alert">{fr.summary.confirmFailed}</p>}
-    {confirming
-      ? <div className="summary-confirm-prompt" role="alertdialog" aria-labelledby="summary-confirm-prompt-text">
-        <p id="summary-confirm-prompt-text">{fr.summary.confirmPrompt}</p>
-        <button className="primary-button" type="button" disabled={confirmPending} aria-busy={confirmPending} onClick={onConfirmYes}>{confirmPending ? fr.summary.confirming : fr.summary.confirmYes}</button>
-        <button className="secondary-button" type="button" disabled={confirmPending} onClick={onConfirmCancel}>{fr.summary.confirmCancel}</button>
-      </div>
-      : <button className="primary-button" type="button" disabled={!canConfirm} onClick={onConfirmStart}>{fr.summary.confirm}</button>}
+    <div className="summary-human">
+      <h4>{fr.summary.humanHeading}</h4>
+      {confirmFailed && <p className="field-error" role="alert">{fr.summary.confirmFailed}</p>}
+      {confirming
+        ? <div className="summary-confirm-prompt" role="alertdialog" aria-labelledby="summary-confirm-prompt-text">
+          <p id="summary-confirm-prompt-text">{fr.summary.confirmPrompt}</p>
+          <button className="primary-button" type="button" disabled={confirmPending} aria-busy={confirmPending} onClick={onConfirmYes}>{confirmPending ? fr.summary.confirming : fr.summary.confirmYes}</button>
+          <button className="secondary-button" type="button" disabled={confirmPending} onClick={onConfirmCancel}>{fr.summary.confirmCancel}</button>
+        </div>
+        : <button className="primary-button" type="button" disabled={!canConfirm} onClick={onConfirmStart}>{fr.summary.confirm}</button>}
+    </div>
     <SummaryHistory history={history} />
   </section>;
 }
