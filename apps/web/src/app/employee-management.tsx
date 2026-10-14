@@ -117,22 +117,28 @@ export function EmployeeManagement({ employees, onCreated, onRefresh }: { employ
 
   if (credential) return <section className="roster-card credential-card" role="dialog" aria-modal="true" aria-labelledby="credential-title">
     <div className="credential-header">
-      <span className="credential-icon" aria-hidden="true"><Icon name="shield" size={22} /></span>
-      <div><p className="eyebrow">Remise manuelle</p><h2 id="credential-title">{credential.title ?? "Compte créé"}</h2>
-        <p className="subtitle">{credential.subtitle ?? "Remettez ce mot de passe temporaire en personne. Il devra être remplacé à la première connexion."}</p></div>
+      <span className={credential.emailSent ? "credential-icon" : "credential-icon credential-icon-warning"} aria-hidden="true"><Icon name={credential.emailSent ? "check" : "shield"} size={22} /></span>
+      <div><h2 id="credential-title">{credential.title ?? "Compte créé"}</h2>
+        <p className="subtitle">{credential.emailSent ? fr.employees.credentialSentSubtitle : credential.subtitle ?? "Remettez ce mot de passe temporaire en personne. Il devra être remplacé à la première connexion."}</p></div>
     </div>
     <div className="credential-body">
-      <p role="status" className={credential.emailSent ? "alert alert-info" : "alert alert-error"}>{credential.emailSent ? `${fr.employees.credentialEmailSent} ${credential.employee.email}.` : fr.employees.credentialEmailNotSent}</p>
-      <div className="credential-identity"><span className="avatar" aria-hidden="true">{initialsOf(credential.employee)}</span><span><strong>{credential.employee.firstName} {credential.employee.surname}</strong><small>{credential.employee.email}</small></span></div>
-      <label className="credential-secret">Mot de passe temporaire
-        <span className="credential-secret-row"><input ref={secretRef} readOnly value={credential.temporaryCredential} spellCheck={false} autoComplete="off" onFocus={(event) => event.target.select()} />
-          <button className={copied ? "secondary-button with-icon is-copied" : "secondary-button with-icon"} type="button" disabled={busy} onClick={() => copySecret(credential.temporaryCredential)}><Icon name={copied ? "check" : "copy"} size={16} />Copier le mot de passe</button></span>
-      </label>
-      {copied && <p role="status" className="field-hint copy-feedback">Mot de passe copié.</p>}
-      {copyFailed && <p role="status" className="field-hint">{fr.shell.copyFailed}</p>}
-      <label className="checkbox-row"><input type="checkbox" checked={acknowledged} onChange={(event) => setAcknowledged(event.target.checked)} /> J’ai enregistré ou remis le mot de passe au technicien</label>
+      <div className="credential-identity"><span className="avatar" aria-hidden="true">{initialsOf(credential.employee)}</span>
+        <span className="credential-identity-copy"><strong>{credential.employee.firstName} {credential.employee.surname}</strong><small>{credential.employee.email}</small></span>
+        <span role="status" className={credential.emailSent ? "status-pill status-active" : "status-pill status-pending"}><span className="status-dot" />{credential.emailSent ? fr.employees.credentialEmailBadge : fr.employees.credentialEmailFailedBadge}</span>
+      </div>
+      {!credential.emailSent && <p role="alert" className="alert alert-error">{fr.employees.credentialEmailNotSent}</p>}
+      <div className="credential-secret">
+        <label htmlFor="credential-secret-input">Mot de passe temporaire</label>
+        <span className="credential-secret-row"><input id="credential-secret-input" ref={secretRef} readOnly value={credential.temporaryCredential} spellCheck={false} autoComplete="off" onFocus={(event) => event.target.select()} />
+          <button className={copied ? "secondary-button with-icon is-copied" : "secondary-button with-icon"} type="button" disabled={busy} onClick={() => copySecret(credential.temporaryCredential)}><Icon name={copied ? "check" : "copy"} size={16} />{copied ? "Copié" : "Copier"}</button></span>
+        {copyFailed && <p role="status" className="field-hint">{fr.shell.copyFailed}</p>}
+        <p className="field-hint">Ce mot de passe ne sera plus affiché après la fermeture de cette fenêtre.</p>
+      </div>
     </div>
-    <div className="task-form-actions">{!acknowledged && <p className="field-hint credential-gate">Cochez la confirmation ci-dessus pour terminer.</p>}<button className="primary-button" type="button" disabled={!acknowledged || busy} onClick={() => { setCredential(undefined); setCopied(false); setCopyFailed(false); onCreated(credential.employee); void onRefresh(); }}>Terminer</button></div>
+    <div className="credential-footer">
+      <label className="checkbox-row"><input type="checkbox" checked={acknowledged} onChange={(event) => setAcknowledged(event.target.checked)} /> J’ai enregistré ou remis le mot de passe au technicien</label>
+      <button className="primary-button" type="button" disabled={!acknowledged || busy} title={acknowledged ? undefined : "Cochez la confirmation pour terminer."} onClick={() => { setCredential(undefined); setCopied(false); setCopyFailed(false); onCreated(credential.employee); void onRefresh(); }}>Terminer</button>
+    </div>
   </section>;
 
   return <section className="roster-card" aria-labelledby="create-employee-title">

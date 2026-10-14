@@ -268,18 +268,25 @@ td:has(.status-pill), td:has(.deactivated-recovery) { white-space: normal; min-w
 .inline-form-title { grid-column: 1 / -1; color: var(--ink); font-weight: 650; }
 .inline-form-title span { margin-left: 8px; color: var(--ink-2); font-weight: 400; font-size: 13px; }
 .inline-form .error-state { grid-column: 1 / -1; }
-.credential-card { max-width: 640px; }
-.credential-header { display: flex; gap: 16px; padding: 24px 24px 20px; border-bottom: 1px solid var(--border); }
-.credential-header h2 { font-size: 18px; margin: 4px 0; }
-.credential-icon { flex: none; display: grid; place-items: center; width: 44px; height: 44px; border-radius: 12px; color: var(--primary); background: var(--primary-soft); }
-.credential-body { display: grid; gap: 18px; padding: 20px 24px; }
-.credential-identity { display: flex; align-items: center; gap: 12px; }
-.credential-identity strong, .credential-identity small { display: block; }
+.credential-card { max-width: 600px; }
+.credential-header { display: flex; align-items: flex-start; gap: 16px; padding: 24px 28px; border-bottom: 1px solid var(--border); }
+.credential-header h2 { margin: 2px 0 6px; font-size: 19px; }
+.credential-header .subtitle { margin: 0; color: var(--ink-2); font-size: 14px; line-height: 1.5; }
+.credential-icon { flex: none; display: grid; place-items: center; width: 44px; height: 44px; border-radius: 12px; color: var(--success); background: var(--success-soft); }
+.credential-icon-warning { color: var(--warning); background: var(--warning-soft); }
+.credential-body { display: grid; gap: 20px; padding: 24px 28px; }
+.credential-identity { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border: 1px solid var(--border); border-radius: var(--radius-lg); }
+.credential-identity-copy { flex: 1; min-width: 0; }
+.credential-identity strong, .credential-identity small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .credential-identity small { color: var(--ink-2); font-size: 13px; }
-.credential-secret { display: grid; gap: 8px; color: #344054; font-size: 13px; font-weight: 600; }
+.credential-identity .status-pill { flex: none; }
+.credential-secret { display: grid; gap: 8px; padding: 16px; border-radius: var(--radius-lg); background: var(--surface-muted); border: 1px dashed var(--border-strong); }
+.credential-secret label { color: #344054; font-size: 13px; font-weight: 600; }
+.credential-secret .field-hint { margin: 0; }
 .credential-secret-row { display: flex; gap: 10px; }
-.credential-secret input { flex: 1; font-family: var(--mono); font-size: 16px; letter-spacing: .06em; background: var(--surface-muted); }
-.credential-card .task-form-actions { justify-content: flex-end; }
+.credential-secret input { flex: 1; min-width: 0; font-family: var(--mono); font-size: 20px; font-weight: 600; letter-spacing: .12em; color: var(--ink); background: var(--surface) !important; }
+.credential-footer { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px 20px; padding: 16px 28px; border-top: 1px solid var(--border); background: var(--surface-muted); }
+.credential-footer .checkbox-row { flex: 1; min-width: 220px; }
 
 /* ---------- Task creation ---------- */
 .task-create-card { max-width: 760px; }
