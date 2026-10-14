@@ -2,6 +2,7 @@
 
 import { FormEvent, useEffect, useRef, useState } from "react";
 import { fr } from "@cetem-qc/i18n";
+import { Icon } from "./icons";
 
 type Assignee = { id: string; firstName: string; surname: string };
 type CreatedTask = { id: string; state: "draft" };
@@ -55,7 +56,8 @@ export type ReplacementMode = {
 };
 
 /** Normal task creation; with `replacement`, the same form creates a replacement control of an accepted task. */
-export function TaskCreation({ replacement, refreshKey, onTaskCreated }: { replacement?: ReplacementMode; refreshKey?: number; onTaskCreated?: (task: CreatedTask) => void } = {}) {
+/** `onShowTasks` (optional) adds a « Voir les tâches » shortcut to the creation confirmation. */
+export function TaskCreation({ replacement, refreshKey, onTaskCreated, onShowTasks }: { replacement?: ReplacementMode; refreshKey?: number; onTaskCreated?: (task: CreatedTask) => void; onShowTasks?: () => void } = {}) {
   const [assignees, setAssignees] = useState<Assignee[]>([]);
   const [assigneesLoading, setAssigneesLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
@@ -137,7 +139,8 @@ export function TaskCreation({ replacement, refreshKey, onTaskCreated }: { repla
       <h2 id={titleId}>{replacement ? fr.tasks.replacementTitle : fr.tasks.title}</h2>
       <p>{replacement ? fr.tasks.replacementContext.replace("{taskId}", replacement.originalTaskId) : fr.tasks.description}</p>
     </div></div>
-    {!replacement && createdTask && <div className="task-created" role="status"><strong>{fr.tasks.created}</strong><span>{fr.tasks.taskId} : {createdTask.id}</span><span>{fr.tasks.draft}</span></div>}
+    {!replacement && createdTask && <div className="task-created" role="status"><strong>{fr.tasks.created}</strong><span>{fr.tasks.taskId} : {createdTask.id}</span><span>{fr.tasks.draft}</span>
+      {onShowTasks && <button className="secondary-button with-icon task-created-action" type="button" onClick={onShowTasks}>{fr.shell.viewTasks}<Icon name="arrowRight" size={16} /></button>}</div>}
     <form className="auth-form task-form" onSubmit={(event) => void submit(event)}>
       <label>{fr.tasks.establishment}<input required maxLength={200} value={establishment} onChange={(event) => setEstablishment(event.target.value)} /></label>
       <label>{fr.tasks.service}<input maxLength={200} value={service} onChange={(event) => setService(event.target.value)} /></label>
@@ -150,7 +153,7 @@ export function TaskCreation({ replacement, refreshKey, onTaskCreated }: { repla
         : <label>{fr.tasks.assignee}<select required disabled={assigneesLoading || busy || assignees.length === 0} value={assigneeId} onChange={(event) => setAssigneeId(event.target.value)}><option value="">{assigneesLoading ? fr.common.loading : assignees.length === 0 ? fr.tasks.noAssignees : fr.tasks.selectAssignee}</option>{assignees.map((assignee) => <option key={assignee.id} value={assignee.id}>{assignee.firstName} {assignee.surname}</option>)}</select></label>}
       {replacement
         ? <div className="task-form-actions">
-          <button className="primary-button" disabled={busy || assigneesLoading || loadError || assignees.length === 0}>{busy ? fr.tasks.creating : fr.tasks.replacementSubmit}</button>
+          <button className="primary-button" disabled={busy || assigneesLoading || loadError || assignees.length === 0} aria-busy={busy}>{busy ? fr.tasks.creating : fr.tasks.replacementSubmit}</button>
           <button className="secondary-button" type="button" disabled={busy} onClick={replacement.onCancel}>{fr.common.cancel}</button>
         </div>
         : <button className="primary-button" disabled={busy || assigneesLoading || loadError || assignees.length === 0}>{busy ? fr.tasks.creating : fr.tasks.create}</button>}

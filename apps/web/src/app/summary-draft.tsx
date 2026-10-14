@@ -157,7 +157,7 @@ export function SummaryDraftSection({
       </div>}
       {reopenMessage && <p className="field-error" role="alert">{reopenMessage}</p>}
       {reopenPrompt
-        ? <div className="summary-confirm-prompt" role="alertdialog" aria-labelledby="summary-reopen-prompt-text">
+        ? <div className="summary-confirm-prompt" role="alertdialog" aria-labelledby="summary-reopen-prompt-text" onKeyDown={(event) => { if (event.key === "Escape" && !reopenPending) onReopenCancel?.(); }}>
           <p id="summary-reopen-prompt-text">{fr.summary.reopenPrompt}</p>
           <button className="primary-button" type="button" disabled={reopenPending} aria-busy={reopenPending} onClick={onReopenYes}>{reopenPending ? fr.summary.reopening : fr.summary.reopenYes}</button>
           <button className="secondary-button" type="button" disabled={reopenPending} onClick={onReopenCancel}>{fr.summary.reopenCancel}</button>
@@ -208,7 +208,7 @@ export function SummaryDraftSection({
       <h4>{fr.summary.humanHeading}</h4>
       {confirmFailed && <p className="field-error" role="alert">{fr.summary.confirmFailed}</p>}
       {confirming
-        ? <div className="summary-confirm-prompt" role="alertdialog" aria-labelledby="summary-confirm-prompt-text">
+        ? <div className="summary-confirm-prompt" role="alertdialog" aria-labelledby="summary-confirm-prompt-text" onKeyDown={(event) => { if (event.key === "Escape" && !confirmPending) onConfirmCancel?.(); }}>
           <p id="summary-confirm-prompt-text">{fr.summary.confirmPrompt}</p>
           <button className="primary-button" type="button" disabled={confirmPending} aria-busy={confirmPending} onClick={onConfirmYes}>{confirmPending ? fr.summary.confirming : fr.summary.confirmYes}</button>
           <button className="secondary-button" type="button" disabled={confirmPending} onClick={onConfirmCancel}>{fr.summary.confirmCancel}</button>

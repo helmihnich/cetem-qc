@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useCallback, useEffect, useState, type ReactNode } from "react";
+import { FormEvent, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { PASSWORD_MIN_LENGTH, isPasswordCompliant } from "@cetem-qc/domain";
 import { fr } from "@cetem-qc/i18n";
 import { EmployeeManagement } from "./employee-management";
@@ -10,6 +10,7 @@ import { PasswordRequirements } from "./password-requirements";
 import { ResponsableSignInForm } from "./sign-in-form";
 import { TaskCreation } from "./task-creation";
 import { TaskList } from "./task-list";
+import { PasswordField } from "./ui";
 
 type Session = { user: { id: string; email: string; displayName: string; role: "responsable" | "employe"; mustChangePassword: boolean }; sessionExpiresAt: string };
 type Employee = { id: string; firstName: string; surname: string; email: string; active: boolean; activated: boolean };
@@ -67,6 +68,22 @@ export default function HomePage() {
   // Bumped after any creation or team change so the task list and the assignee choices reload without a page refresh.
   const [dataVersion, setDataVersion] = useState(0);
   const refreshData = useCallback(() => setDataVersion((version) => version + 1), []);
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  const previousView = useRef<View>(view);
+
+  // Each view names the browser tab, so history entries and tabs stay recognisable.
+  useEffect(() => {
+    const label = !session ? fr.auth.title : session.user.mustChangePassword ? fr.auth.activationTitle : VIEWS.find((item) => item.id === view)!.title;
+    document.title = fr.shell.documentTitle.replace("{view}", label);
+  }, [session, view]);
+
+  // A view switch moves focus to the new page heading (and the page to its top), as a page load would.
+  useEffect(() => {
+    if (previousView.current === view) return;
+    previousView.current = view;
+    window.scrollTo({ top: 0 });
+    headingRef.current?.focus({ preventScroll: true });
+  }, [view]);
 
   const loadEmployees = useCallback(async () => {
     const response = await fetch("/api/employees", { cache: "no-store" });
@@ -151,9 +168,9 @@ export default function HomePage() {
       <h1>{fr.auth.activationTitle}</h1>
       <p className="subtitle">{fr.auth.activationDescription}</p>
       <form onSubmit={(event) => void activateAccount(event)} className="auth-form">
-        <label>{fr.auth.newPassword}<input type="password" autoComplete="new-password" minLength={PASSWORD_MIN_LENGTH} required value={newPassword} onChange={(event) => setNewPassword(event.target.value)} /></label>
+        <PasswordField label={fr.auth.newPassword} autoComplete="new-password" minLength={PASSWORD_MIN_LENGTH} value={newPassword} onChange={setNewPassword} />
         <PasswordRequirements password={newPassword} />
-        <button className="primary-button" disabled={busy || !isPasswordCompliant(newPassword)}>{busy ? fr.common.loading : fr.auth.activate}</button>
+        <button className="primary-button" disabled={busy || !isPasswordCompliant(newPassword)} aria-busy={busy}>{busy ? fr.common.loading : fr.auth.activate}</button>
       </form>
       {error && <p className="error-state" role="alert">{error}</p>}
     </div>
@@ -171,6 +188,7 @@ export default function HomePage() {
 
   return (
     <div className="app-shell">
+      <a className="skip-link" href="#main-content">{fr.shell.skipToContent}</a>
       <aside className="sidebar">
         <div className="sidebar-brand"><BrandMark /><span><strong>CETEM-QC</strong><small>{fr.shell.brandTagline}</small></span></div>
         <nav className="sidebar-nav" aria-label={fr.shell.navigation}>
@@ -193,11 +211,11 @@ export default function HomePage() {
           <span className="topbar-date">{todayFormatter.format(new Date())}</span>
         </header>
 
-        <main className="content">
+        <main className="content" id="main-content" tabIndex={-1}>
           <div className="page-heading">
             <div>
               <p className="eyebrow">{fr.shell.workspace}</p>
-              <h1>{current.title}</h1>
+              <h1 ref={headingRef} tabIndex={-1}>{current.title}</h1>
               <p className="subtitle">{current.description}</p>
             </div>
             {view === "tasks" && <button className="primary-button with-icon" type="button" onClick={() => setView("new-task")}><Icon name="plus" size={16} />{fr.shell.nav.newTask}</button>}
@@ -205,7 +223,7 @@ export default function HomePage() {
           {error && <p className="alert alert-error" role="alert">{error}</p>}
 
           {view === "tasks" && <TaskList refreshKey={dataVersion} />}
-          {view === "new-task" && <TaskCreation refreshKey={dataVersion} onTaskCreated={refreshData} />}
+          {view === "new-task" && <TaskCreation refreshKey={dataVersion} onTaskCreated={refreshData} onShowTasks={() => setView("tasks")} />}
           {view === "history" && <HistoryPanel />}
           {view === "team" && <EmployeeManagement employees={employees} onCreated={(employee) => setEmployees((list) => list.some((item) => item.email === employee.email) ? list : [...list, employee].sort((a, b) => a.surname.localeCompare(b.surname) || a.firstName.localeCompare(b.firstName)))} onRefresh={async () => { try { await loadEmployees(); } finally { refreshData(); } }} />}
         </main>

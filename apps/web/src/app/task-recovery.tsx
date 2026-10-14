@@ -94,7 +94,7 @@ export function DeactivatedTaskRecovery({ task, onChanged }: { task: Task; onCha
           ? <><span className="status-pill task-state-draft">{fr.tasks.recoveryCreated}</span>{task.recoverySuccessorTaskId && <p>{fr.tasks.recoverySuccessor.replace("{taskId}", task.recoverySuccessorTaskId)}</p>}</>
           : null}
     {task.recoverySource && <p>{fr.tasks.recoverySource.replace("{taskId}", task.recoverySource.taskId).replace("{revision}", String(task.recoverySource.revision))}</p>}
-    {mode && <section className="task-recovery-form" aria-label={mode === "reassign" ? fr.tasks.reassignAction : fr.tasks.recoveryAction}>
+    {mode && <section className="task-recovery-form" aria-label={mode === "reassign" ? fr.tasks.reassignAction : fr.tasks.recoveryAction} onKeyDown={(event) => { if (event.key === "Escape" && !busy) setMode(undefined); }}>
       <p>{mode === "reassign" ? fr.tasks.reassignConfirmation : fr.tasks.recoveryConfirmation}</p>
       {mode === "recover" && task.recoveryState === "correction-draft" && <p>{fr.tasks.rejectedRecoveryUnavailable}</p>}
       {loadError ? <div role="alert">{fr.tasks.loadError} <button className="text-button" type="button" onClick={() => void start(mode)}>{fr.tasks.retry}</button></div>

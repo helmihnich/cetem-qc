@@ -2,7 +2,7 @@ import type express from "express";
 import { apiErrorSchema, createEmployeeRequestSchema, employeeCredentialResponseSchema, employeeListResponseSchema, updateEmployeeStatusRequestSchema, updateEmployeeStatusResponseSchema } from "@cetem-qc/schemas/api/v1";
 import { findActiveSession } from "../modules/identity-auth/sessions.js";
 import { listOwnTeamEmployees } from "../modules/team-access/queries/list-own-team-employees.js";
-import { createOwnTeamEmployee, DuplicateEmployeeEmailError, regenerateOwnTeamEmployeeCredential, resetOwnTeamEmployeePassword, updateOwnTeamEmployeeStatus } from "../modules/team-access/employee-credentials.js";
+import { createOwnTeamEmployee, deleteOwnTeamEmployee, DuplicateEmployeeEmailError, regenerateOwnTeamEmployeeCredential, resetOwnTeamEmployeePassword, updateOwnTeamEmployeeStatus } from "../modules/team-access/employee-credentials.js";
 import type { RouteDeps } from "./route-deps.js";
 
 export function registerEmployeeRoutes(v1: express.Router, deps: RouteDeps): void {
@@ -97,6 +97,28 @@ export function registerEmployeeRoutes(v1: express.Router, deps: RouteDeps): voi
       response.status(200).set("Cache-Control", "no-store").json(employeeCredentialResponseSchema.parse({ employee: result.employee, temporaryCredential: result.temporaryCredential, emailSent }));
     } catch {
       // Never log here: the generated credential may still be in scope.
+      response.status(500).json(apiErrorSchema.parse({ error: { code: "INTERNAL_ERROR", message: "Une erreur est survenue." } }));
+    }
+  });
+
+  v1.delete("/employees/:employeeId", async (request, response) => {
+    const session = response.locals.session as NonNullable<Awaited<ReturnType<typeof findActiveSession>>>;
+    if (session.role !== "responsable") {
+      response.status(403).json(apiErrorSchema.parse({ error: { code: "FORBIDDEN", message: "Action réservée au responsable de l’équipe." } }));
+      return;
+    }
+    const employeeNotFound = () => response.status(404).json(apiErrorSchema.parse({ error: { code: "EMPLOYEE_NOT_FOUND", message: "Technicien introuvable dans votre équipe." } }));
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(request.params.employeeId ?? "")) {
+      employeeNotFound();
+      return;
+    }
+    try {
+      if (!await deleteOwnTeamEmployee(getPool(), session.id, request.params.employeeId!)) {
+        employeeNotFound();
+        return;
+      }
+      response.status(204).set("Cache-Control", "no-store").end();
+    } catch {
       response.status(500).json(apiErrorSchema.parse({ error: { code: "INTERNAL_ERROR", message: "Une erreur est survenue." } }));
     }
   });

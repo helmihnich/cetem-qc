@@ -6,8 +6,10 @@ import type { ConformityOutcome, HistoryLineageRelation, HistoryListItem, Histor
 import type { GraphieCalculationResults } from "@cetem-qc/domain";
 import { fr } from "@cetem-qc/i18n";
 import { EvidenceInputSections, InsightProposalsSection } from "./accepted-evidence";
+import { EvidenceSteps, HISTORY_RECORD_TARGETS } from "./evidence-steps";
 import { GraphieCalculationReview } from "./graphie-calculation-review";
 import { Icon, ShortId } from "./icons";
+import { LoadingSkeleton, SearchField, matchesQuery } from "./ui";
 
 const dateTimeFormatter = new Intl.DateTimeFormat("fr-FR", { dateStyle: "medium", timeStyle: "short" });
 const when = (iso: string) => dateTimeFormatter.format(new Date(iso));
@@ -110,25 +112,36 @@ export type HistoryListViewProps = {
 
 /** The completed controls, newest designation first as the server returns them. The only controls are « Consulter » and « Réessayer ». */
 export function HistoryListView({ load, onRetry, onOpen, openTaskId }: HistoryListViewProps) {
+  // Client-side search over the records already loaded; nothing is requested again.
+  const [query, setQuery] = useState("");
+  const records = load?.kind === "ready" ? load.records : [];
+  const visible = records.filter((record) => matchesQuery([record.taskId, record.establishment, record.service, record.assignee, outcomeLabel(record.conformityOutcome), originLabel(record.reportOrigin)], query));
   let content: React.ReactNode;
-  if (!load) content = <div className="state-message" role="status">{fr.common.loading}</div>;
+  if (!load) content = <LoadingSkeleton rows={4} />;
   else if (load.kind !== "ready") content = <div className="state-message error-state" role="alert">{load.kind === "unavailable" ? fr.api.unavailable : fr.history.loadFailed}<button className="text-button" type="button" onClick={onRetry}>{fr.common.retry}</button></div>;
   else if (load.records.length === 0) content = <div className="state-message empty-state" role="status"><span className="empty-icon" aria-hidden="true"><Icon name="inbox" size={22} /></span><p>{fr.history.empty}</p></div>;
-  else content = <div className="table-wrap"><table>
+  else if (visible.length === 0) content = <div className="state-message empty-state" role="status"><span className="empty-icon" aria-hidden="true"><Icon name="search" size={22} /></span><p>{fr.shell.filters.noMatch}</p><button className="text-button" type="button" onClick={() => setQuery("")}>{fr.shell.filters.reset}</button></div>;
+  else content = <div className="table-wrap"><table className="responsive-table">
     <thead><tr>
       <th scope="col">{fr.history.taskColumn}</th><th scope="col">{fr.history.establishmentColumn}</th><th scope="col">{fr.history.assigneeColumn}</th>
       <th scope="col">{fr.history.designatedColumn}</th><th scope="col">{fr.history.outcomeColumn}</th><th scope="col">{fr.history.originColumn}</th>
       <th scope="col"><span className="visually-hidden">{fr.history.actionsColumn}</span></th>
     </tr></thead>
-    <tbody>{load.records.map((record) => <tr key={record.taskId}>
-      <td className="task-id-cell"><ShortId id={record.taskId} /><HistoryLineageLines lineage={record.lineage} /></td>
-      <td>{record.establishment}</td><td className="name-cell">{record.assignee}</td>
-      <td>{when(record.designatedAt)}</td><td>{outcomeLabel(record.conformityOutcome)}</td><td>{originLabel(record.reportOrigin)}</td>
+    <tbody>{visible.map((record) => <tr key={record.taskId}>
+      <td className="task-id-cell" data-label={fr.history.taskColumn}><ShortId id={record.taskId} /><HistoryLineageLines lineage={record.lineage} /></td>
+      <td className="wrap-cell" data-label={fr.history.establishmentColumn}>{record.establishment}</td><td className="name-cell wrap-cell" data-label={fr.history.assigneeColumn}>{record.assignee}</td>
+      <td data-label={fr.history.designatedColumn}><time dateTime={record.designatedAt}>{when(record.designatedAt)}</time></td>
+      <td data-label={fr.history.outcomeColumn}><span className={`status-pill ${record.conformityOutcome === "machine-conforme" ? "outcome-conforme" : "outcome-non-conforme"}`}><span className="status-dot" />{outcomeLabel(record.conformityOutcome)}</span></td>
+      <td data-label={fr.history.originColumn}>{originLabel(record.reportOrigin)}</td>
       <td className="task-actions-cell"><button id={`history-open-${record.taskId}`} className="secondary-button" type="button" aria-expanded={openTaskId === record.taskId} onClick={() => onOpen(record.taskId)}>{fr.history.open}</button></td>
     </tr>)}</tbody>
   </table></div>;
   return <section className="roster-card history-card" aria-labelledby="history-title">
-    <div className="card-heading"><div><h2 id="history-title">{fr.history.heading}</h2><p>{fr.history.description}</p></div></div>
+    <div className="card-heading"><div><h2 id="history-title">{fr.history.heading}</h2><p>{fr.history.description}</p></div>{records.length > 0 && <span className="count-badge">{records.length}</span>}</div>
+    {records.length > 0 && <div className="table-toolbar" role="search">
+      <SearchField value={query} placeholder={fr.shell.filters.historyPlaceholder} onChange={setQuery} />
+      <span className="table-toolbar-count" aria-live="polite">{query.trim() ? fr.shell.filters.resultCount.replace("{shown}", String(visible.length)).replace("{total}", String(records.length)) : ""}</span>
+    </div>}
     {content}
   </section>;
 }
@@ -219,7 +232,7 @@ export type HistoryRecordViewProps = {
 export function HistoryRecordView({ taskId, load, download = { pending: false, message: null }, onBack, onRetry, onDownload, onOpenRelated, headingRef }: HistoryRecordViewProps) {
   const heading = <h2 id="history-record-heading" tabIndex={-1} ref={headingRef}>{fr.history.recordHeading} — {fr.tasks.taskId} : {taskId}</h2>;
   let content: React.ReactNode;
-  if (!load) content = <div className="state-message" role="status">{fr.common.loading}</div>;
+  if (!load) content = <LoadingSkeleton variant="panel" rows={3} />;
   else if (load.kind === "ready") {
     const { record } = load;
     const context = [
@@ -230,6 +243,7 @@ export function HistoryRecordView({ taskId, load, download = { pending: false, m
     ];
     content = <>
       <p className="evidence-context">{context.filter((part) => part.trim() !== "").join(" · ")}</p>
+      <EvidenceSteps targets={HISTORY_RECORD_TARGETS} />
       <EvidenceInputSections values={record.values} />
       <GraphieCalculationReview evidence={{ identity: record.identity, values: record.values, results: record.results as unknown as GraphieCalculationResults }} />
       <InsightProposalsSection insights={record.insights} decisions={record.insightDecisions} manualInsightCount={record.manualInsights.length} locked />

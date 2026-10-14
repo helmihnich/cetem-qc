@@ -77,7 +77,7 @@ export function ConformityDecisionSection({
       : decision
         ? <p className="insight-decided">{fill(fr.conformity.decided, { label: conformityLabel(decision.outcome), name: decision.decidedBy.displayName, date: dateTimeFormatter.format(new Date(decision.decidedAt)) })}</p>
         : prompt
-          ? <div className="summary-confirm-prompt" role="alertdialog" aria-labelledby="conformity-prompt-text">
+          ? <div className="summary-confirm-prompt" role="alertdialog" aria-labelledby="conformity-prompt-text" onKeyDown={(event) => { if (event.key === "Escape" && !pending) onCancel?.(); }}>
             <p id="conformity-prompt-text">{fill(fr.conformity.prompt, { label: conformityLabel(prompt), n: String(confirmedVersion) })}</p>
             <button className="secondary-button" type="button" disabled={pending} aria-busy={pending} onClick={onConfirm}>{pending ? fr.conformity.saving : fr.conformity.confirmYes}</button>
             <button className="secondary-button" type="button" disabled={pending} onClick={onCancel}>{fr.conformity.confirmCancel}</button>

@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { ActivityIndicator, AppState, Pressable, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View, type StyleProp, type ViewStyle } from "react-native";
+import { useEffect, useMemo, useRef, useState, type ComponentRef, type ReactNode } from "react";
+import { ActivityIndicator, AppState, BackHandler, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View, type StyleProp, type ViewStyle } from "react-native";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 import { StatusBar } from "expo-status-bar";
 import { LinearGradient } from "expo-linear-gradient";
@@ -116,6 +116,9 @@ export default function App() {
   const [submissionIssues, setSubmissionIssues] = useState<{ employeeId: string; taskId: string; issues: RejectionIssue[] }>();
   // Bumped when a submission request fails, so that the autosave it cancelled is scheduled again.
   const [autosaveRearm, setAutosaveRearm] = useState(0);
+  // Presentation only: when the server task list was last received, and whether a pull-to-refresh is running.
+  const [tasksLoadedAt, setTasksLoadedAt] = useState<Date>();
+  const [pullRefreshing, setPullRefreshing] = useState(false);
   const authorizationStateRef = useRef(authorization);
   authorizationStateRef.current = authorization;
   // Durable outbox rows and conflict resolutions of the signed-in employee, and the active run (Stories 7.2, 8.1).
@@ -134,13 +137,16 @@ export default function App() {
     () => (draftHydration === "ready" && formIdentity ? calculateGraphieResults(formIdentity, formValues) : undefined),
     [draftHydration, formIdentity, formValues],
   );
-  const listState = getEmployeeTaskListState({ loading, error: Boolean(error), taskCount: tasks.length });
+  // A pull-to-refresh keeps the current rows on screen (the RefreshControl shows the progress) instead of swapping them for a spinner.
+  const listState = getEmployeeTaskListState({ loading: loading && !(pullRefreshing && tasks.length > 0), error: Boolean(error), taskCount: tasks.length });
   const activeIdentityRef = useRef<string | null>(null);
   const activeScreenRef = useRef<Screen>(screen);
   const scrollRef = useRef<ScrollView | null>(null);
   const scrollOffsetRef = useRef(0);
   const pageOffsetRef = useRef(0);
   const formOffsetRef = useRef(0);
+  const sectionOffsetRef = useRef(0);
+  const passwordInputRef = useRef<TextInputHandle | null>(null);
   const pendingCachedOpenRef = useRef<{ employeeId: string; taskId: string; generation: number } | undefined>(undefined);
   activeScreenRef.current = screen;
   if (user) activeIdentityRef.current = user.id;
@@ -398,6 +404,12 @@ export default function App() {
   function revealForm() {
     const formTop = pageOffsetRef.current + formOffsetRef.current;
     if (scrollOffsetRef.current > formTop) scrollRef.current?.scrollTo?.({ y: Math.max(0, formTop - 12), animated: true });
+  }
+
+  /** After « Section suivante / précédente » at the bottom of a section, brings the new section's heading into view. */
+  function revealSection() {
+    const sectionTop = pageOffsetRef.current + formOffsetRef.current + sectionOffsetRef.current;
+    if (scrollOffsetRef.current > sectionTop) scrollRef.current?.scrollTo?.({ y: Math.max(0, sectionTop - 12), animated: true });
   }
 
   function scrollToTop() {
@@ -703,6 +715,32 @@ export default function App() {
     await refreshLocalDrafts(user?.id);
   }
 
+  // Android back button: an open confirmation is cancelled first, then a task returns to « Mes tâches » like « Retour ».
+  const hardwareBackRef = useRef<() => boolean>(() => false);
+  hardwareBackRef.current = () => {
+    if (!user || user.mustChangePassword || screen.kind !== "detail") return false;
+    if (submitConfirmation) setSubmitConfirmation(undefined);
+    else if (deleteDraftConfirmation) cancelDraftDelete();
+    else if (unreadableDeleteConfirmation) setUnreadableDeleteConfirmation(undefined);
+    else void leaveTaskDetail();
+    return true;
+  };
+  useEffect(() => {
+    const subscription = BackHandler.addEventListener("hardwareBackPress", () => hardwareBackRef.current());
+    return () => subscription.remove();
+  }, []);
+
+  /** Pull-to-refresh on « Mes tâches »: the same reload as signing in, while the current rows stay on screen. */
+  async function refreshTaskList() {
+    if (!user || screen.kind !== "list" || !isOnlineRef.current || loading) return;
+    const identityId = user.id;
+    setPullRefreshing(true);
+    try {
+      await loadTasks(user);
+      if (activeIdentityRef.current === identityId) await refreshLocalDrafts(identityId);
+    } finally { setPullRefreshing(false); }
+  }
+
   useEffect(() => {
     if (screen.kind !== "detail" || draftHydration !== "ready" || draftSaveState === "idle" || !user || draftDeletingRef.current || locked || submittingRef.current) return;
     const generation = draftGenerationRef.current;
@@ -927,6 +965,7 @@ export default function App() {
       setCachedTaskContext({ employeeId, tasks: cacheRefreshed ? response.tasks : [] });
       setTaskCacheWarning(cacheRefreshed ? undefined : fr.employeeTasks.taskCacheFailed);
       setTasks(response.tasks);
+      setTasksLoadedAt(new Date());
       selectScreen({ kind: "list" });
       setTask(undefined);
     } catch (cause) {
@@ -1288,6 +1327,7 @@ export default function App() {
     setLoading(true);
     try { await api.logout(); } catch { /* Expired sessions can still return to sign-in. */ }
     setTasks([]);
+    setTasksLoadedAt(undefined);
     setTask(undefined);
     setCachedTaskContext(undefined);
     setActiveDraft(undefined);
@@ -1321,18 +1361,15 @@ export default function App() {
     && error === fr.employeeTasks.submissionInvalid ? rejectionIssueLines(submissionIssues.issues) : undefined;
 
   const signedIn = Boolean(user && !user.mustChangePassword);
-  const sectionNavigation = <View style={styles.sectionNavigation}>{GRAPHIE_MOBILE_POV_CATALOGUE.sections.map((section) => {
-    const selected = section.id === activeSectionId;
-    return <Pressable key={section.id} accessibilityRole="button" accessibilityState={{ selected }} onPress={() => { setActiveSectionId(section.id); if (draftSaveState === "saving") void saveDraft(); revealForm(); }} style={[styles.sectionChip, selected && styles.sectionChipSelected]}>
-      <Text style={[styles.sectionChipText, selected && styles.sectionChipTextSelected]}>{section.labelFr}</Text>
-    </Pressable>;
-  })}</View>;
   const plausibilityTexts: Record<string, string> = {};
+  // Fields showing a hint, so that the section chips can point at the sections to check (presentation only).
+  const fieldsNeedingAttention = new Set<string>(Object.keys(fieldIssues));
   if (formEditable && !legacyContentMode) {
     for (const issue of checkGraphiePlausibility(formValues, plausibilityContext())) {
       const fieldId = issue.path.replace(/^values\./, "");
       const field = GRAPHIE_FIELD_BY_ID.get(fieldId);
       const range = field ? graphieFieldRange(field) : undefined;
+      fieldsNeedingAttention.add(fieldId);
       // An unreadable number already has its own hint on the field.
       if (issue.code === "invalid-number") continue;
       plausibilityTexts[fieldId] = issue.code === "out-of-range" && range && field
@@ -1342,6 +1379,50 @@ export default function App() {
   }
   const shownFieldIssues: Record<string, string> = { ...plausibilityTexts };
   for (const [fieldId, text] of Object.entries(fieldIssues)) shownFieldIssues[fieldId] = shownFieldIssues[fieldId] ? `${text} ; ${shownFieldIssues[fieldId]}` : text;
+  // Form progress: how many catalogue fields hold a value, per section and overall (presentation only).
+  const progressShown = draftHydration === "ready";
+  const sections = GRAPHIE_MOBILE_POV_CATALOGUE.sections;
+  const sectionProgress = new Map(sections.map((section) => [section.id, {
+    filled: section.fields.filter((field) => (formValues[field.id] ?? "").trim() !== "").length,
+    total: section.fields.length,
+    attention: section.fields.some((field) => fieldsNeedingAttention.has(field.id)),
+  }]));
+  const filledFieldCount = [...sectionProgress.values()].reduce((sum, item) => sum + item.filled, 0);
+  const totalFieldCount = [...sectionProgress.values()].reduce((sum, item) => sum + item.total, 0);
+  const selectSection = (sectionId: string) => { setActiveSectionId(sectionId); if (draftSaveState === "saving") void saveDraft(); };
+  const sectionNavigation = <View style={styles.sectionNavigation}>{sections.map((section) => {
+    const selected = section.id === activeSectionId;
+    const progress = sectionProgress.get(section.id)!;
+    const complete = progress.total > 0 && progress.filled === progress.total;
+    const accessibilityLabel = progressShown ? [
+      fr.employeeTasks.sectionProgressA11y.replace("{section}", section.labelFr).replace("{filled}", String(progress.filled)).replace("{total}", String(progress.total)),
+      progress.attention ? fr.employeeTasks.sectionNeedsAttention : undefined,
+    ].filter(Boolean).join(", ") : undefined;
+    return <Pressable key={section.id} accessibilityRole="button" accessibilityState={{ selected }} accessibilityLabel={accessibilityLabel} onPress={() => { selectSection(section.id); revealForm(); }} style={({ pressed }) => [styles.sectionChip, selected && styles.sectionChipSelected, progressShown && progress.attention && styles.sectionChipAttention, pressed && styles.sectionChipPressed]}>
+      {/* The counter keeps a fixed width and a section to check only changes colors, so typing never re-wraps the chips. */}
+      <View style={styles.sectionChipContent}>
+        <Text style={[styles.sectionChipText, selected && styles.sectionChipTextSelected]}>{section.labelFr}</Text>
+        <Text style={[styles.sectionChipCount, { width: progress.total >= 10 ? 46 : 36 }, !progressShown && styles.sectionChipCountHidden, progressShown && complete && styles.sectionChipCountComplete, progressShown && progress.attention && styles.sectionChipCountAttention]}>{progressShown ? (complete ? "✓" : `${progress.filled}/${progress.total}`) : " "}</Text>
+      </View>
+    </Pressable>;
+  })}</View>;
+  // Fixed height: the bar is drawn while the draft loads too, so nothing moves when the count appears.
+  const formProgress = <View style={styles.formProgress}>
+    <View style={styles.formProgressHeader}>
+      <Text style={styles.overline}>{fr.employeeTasks.sectionNavigation}</Text>
+      <Text style={styles.formProgressCount}>{progressShown ? fr.employeeTasks.formProgress.replace("{filled}", String(filledFieldCount)).replace("{total}", String(totalFieldCount)) : " "}</Text>
+    </View>
+    <View style={styles.progressTrack}>
+      <View style={[styles.progressFill, { width: `${progressShown && totalFieldCount > 0 ? Math.round((filledFieldCount / totalFieldCount) * 100) : 0}%` }]} />
+    </View>
+  </View>;
+  const activeSectionIndex = sections.findIndex((section) => section.id === activeSectionId);
+  const previousSection = activeSectionIndex > 0 ? sections[activeSectionIndex - 1] : undefined;
+  const nextSection = activeSectionIndex >= 0 ? sections[activeSectionIndex + 1] : undefined;
+  const sectionStepper = <View style={styles.sectionStepper}>
+    {previousSection ? <SectionStepButton direction="previous" caption={fr.employeeTasks.previousSection} label={previousSection.labelFr} onPress={() => { selectSection(previousSection.id); revealSection(); }} /> : <View style={styles.sectionStepSpacer} />}
+    {nextSection ? <SectionStepButton direction="next" caption={fr.employeeTasks.nextSection} label={nextSection.labelFr} onPress={() => { selectSection(nextSection.id); revealSection(); }} /> : <View style={styles.sectionStepSpacer} />}
+  </View>;
   const activeSectionForm = GRAPHIE_MOBILE_POV_CATALOGUE.sections.filter((section) => section.id === activeSectionId).map((section) => <GraphieSectionForm key={section.id} section={section} layout={layout} values={formValues} results={calculationResults} onChange={changeFormField} editable={formEditable} issues={shownFieldIssues} copiedFields={new Set(activeDraft?.recoveryProvenance?.fields.map((field) => field.destinationField.replace(/^values\./, "")) ?? [])} />);
   const saveStateTone: Tone = presentedSaveState === "failed" ? "danger" : presentedSaveState === "saving" ? "info" : presentedSaveState === "saved" ? "success" : "neutral";
 
@@ -1370,7 +1451,9 @@ export default function App() {
           </LinearGradient>
         )}
         <SafeAreaView edges={signedIn ? ["left", "right", "bottom"] : ["top", "left", "right", "bottom"]} style={styles.safe}>
-          <ScrollView ref={scrollRef} contentContainerStyle={[styles.container, signedIn ? styles.containerSignedIn : styles.containerSignedOut]} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" automaticallyAdjustKeyboardInsets scrollEventThrottle={64} onScroll={(event) => { scrollOffsetRef.current = event.nativeEvent.contentOffset.y; }}>
+          <ScrollView ref={scrollRef} contentContainerStyle={[styles.container, signedIn ? styles.containerSignedIn : styles.containerSignedOut]} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" automaticallyAdjustKeyboardInsets scrollEventThrottle={64} onScroll={(event) => { scrollOffsetRef.current = event.nativeEvent.contentOffset.y; }}
+            // Always mounted so that going offline never rebuilds the scroll view (and loses its position); enabled on « Mes tâches » online only.
+            refreshControl={<RefreshControl refreshing={pullRefreshing} onRefresh={() => void refreshTaskList()} enabled={signedIn && screen.kind === "list" && isOnline} colors={[colors.primary]} tintColor={colors.primary} />}>
             <View style={{ width: contentWidth, maxWidth: "100%", gap: 18 }}>
             {!user ? (
               <>
@@ -1380,8 +1463,8 @@ export default function App() {
                     <Text style={styles.title}>{fr.auth.employeeTitle}</Text>
                     <Text style={styles.body}>{fr.auth.employeeDescription}</Text>
                   </View>
-                  <Field label={fr.auth.email} value={email} onChangeText={setEmail} autoCapitalize="none" keyboardType="email-address" />
-                  <Field label={fr.auth.password} value={password} onChangeText={setPassword} secureTextEntry />
+                  <Field label={fr.auth.email} value={email} onChangeText={setEmail} autoCapitalize="none" keyboardType="email-address" autoComplete="email" returnKeyType="next" submitBehavior="submit" onSubmitEditing={() => passwordInputRef.current?.focus?.()} />
+                  <Field label={fr.auth.password} value={password} onChangeText={setPassword} secureTextEntry autoComplete="current-password" inputRef={(node) => { passwordInputRef.current = node; }} returnKeyType="go" onSubmitEditing={() => { if (!loading && email && password) void signIn(); }} />
                   {error ? <Notice tone="danger" role="alert">{error}</Notice> : null}
                   <Button title={fr.auth.signIn} onPress={() => void signIn()} disabled={loading || !email || !password} />
                   <View style={styles.authFootnote}>
@@ -1397,7 +1480,7 @@ export default function App() {
                     <Text style={styles.title}>{fr.auth.activationTitle}</Text>
                     <Text style={styles.body}>{fr.auth.activationDescription}</Text>
                   </View>
-                  <Field label={fr.auth.newPassword} value={newPassword} onChangeText={setNewPassword} secureTextEntry />
+                  <Field label={fr.auth.newPassword} value={newPassword} onChangeText={setNewPassword} secureTextEntry autoComplete="new-password" returnKeyType="done" />
                   <View accessibilityLiveRegion="polite" style={styles.rulesBox}>
                     <Text style={styles.label}>{fr.auth.passwordRequirements}</Text>
                     {PASSWORD_RULES.map((rule) => {
@@ -1428,6 +1511,7 @@ export default function App() {
                     <View style={styles.pageHeader}>
                       <Text style={styles.title}>{fr.employeeTasks.title}</Text>
                       <Text style={styles.body}>{fr.employeeTasks.description}</Text>
+                      {tasksLoadedAt && isOnline ? <Text style={styles.updatedAt}>{fr.employeeTasks.lastUpdated.replace("{time}", formatClockTime(tasksLoadedAt))}</Text> : null}
                     </View>
                     {listState === "loading" ? <View style={styles.loadingBox}><ActivityIndicator accessibilityLabel={fr.common.loading} color={colors.primary} size="large" /></View> : null}
                     {listState === "empty" ? <View style={styles.emptyState}>
@@ -1439,7 +1523,7 @@ export default function App() {
                         <View style={styles.taskIconTile}><DocumentGlyph tone="primary" /></View>
                         <View style={styles.taskCopy}>
                           <Text style={styles.taskTitle} numberOfLines={2}>{item.establishment}</Text>
-                          <Text style={styles.taskMeta}>{item.service} · {taskListStateLabel(taskSyncStateOf(item.id))}</Text>
+                          <TaskStateMeta state={taskSyncStateOf(item.id)}>{item.service} · {taskListStateLabel(taskSyncStateOf(item.id))}</TaskStateMeta>
                         </View>
                         <View style={styles.chevronCircle}><Text style={styles.chevron}>›</Text></View>
                       </Pressable>
@@ -1456,14 +1540,14 @@ export default function App() {
                       <Text style={styles.sectionTitle}>{fr.employeeTasks.resumeDraft}</Text>
                       {resumableDrafts.map((draft) => <Pressable key={draft.id} accessibilityRole="button" onPress={() => void openLocalDraft(draft.taskId)} style={({ pressed }) => [styles.taskCard, pressed && styles.taskCardPressed]}>
                         <View style={styles.taskIconTileWarning}><DocumentGlyph tone="warning" /></View>
-                        <View style={styles.taskCopy}><Text style={styles.taskTitle} numberOfLines={1}>{draft.taskId}</Text><Text style={styles.taskMeta}>{fr.employeeTasks.savedLocally}</Text><Text style={styles.taskMeta}>{taskListStateLabel(taskSyncStateOf(draft.taskId))}</Text></View>
+                        <View style={styles.taskCopy}><Text style={styles.taskTitle} numberOfLines={1}>{draft.taskId}</Text><Text style={styles.taskMeta}>{fr.employeeTasks.savedLocally}</Text><TaskStateMeta state={taskSyncStateOf(draft.taskId)}>{taskListStateLabel(taskSyncStateOf(draft.taskId))}</TaskStateMeta></View>
                         <View style={styles.chevronCircle}><Text style={styles.chevron}>›</Text></View>
                       </Pressable>)}
                     </View> : null}
                     {unavailableOfflineDrafts ? <Notice tone="info" role="summary">{fr.employeeTasks.offlineDraftPreserved}</Notice> : null}
                     {cachedTasks.filter((item) => !localDrafts.some((draft) => draft.taskId === item.id)).map((item) => <Pressable key={item.id} accessibilityRole="button" onPress={() => void openCachedTask(item)} style={({ pressed }) => [styles.taskCard, pressed && styles.taskCardPressed]}>
                       <View style={styles.taskIconTileNeutral}><DocumentGlyph tone="neutral" /></View>
-                      <View style={styles.taskCopy}><Text style={styles.taskTitle} numberOfLines={2}>{item.establishment}</Text><Text style={styles.taskMeta}>{taskListStateLabel(taskSyncStateOf(item.id))}</Text></View>
+                      <View style={styles.taskCopy}><Text style={styles.taskTitle} numberOfLines={2}>{item.establishment}</Text><TaskStateMeta state={taskSyncStateOf(item.id)}>{taskListStateLabel(taskSyncStateOf(item.id))}</TaskStateMeta></View>
                       <View style={styles.chevronCircle}><Text style={styles.chevron}>›</Text></View>
                     </Pressable>)}
                   </>
@@ -1497,13 +1581,16 @@ export default function App() {
                         {locked ? <Notice tone="warning" role="summary">{fr.employeeTasks.readOnlyPending}</Notice> : null}
                       </View>
                       <View style={styles.panelCard} onLayout={(event) => { formOffsetRef.current = event.nativeEvent.layout.y; }}>
-                        <Text style={styles.overline}>{fr.employeeTasks.sectionNavigation}</Text>
+                        {formProgress}
                         {sectionNavigation}
                         {draftHydration === "loading" ? <Notice tone="info" role="summary">{fr.common.loading}</Notice> : null}
                         {legacyContentMode ? <Field label={fr.employeeTasks.legacyDraftContent} value={draftContent} onChangeText={changeDraftContent} editable={formEditable} multiline /> : null}
                         {activeDraft?.recoveryProvenance && <RecoveryAttribution provenance={activeDraft.recoveryProvenance} />}
                         <View style={styles.formDivider} />
-                        {activeSectionForm}
+                        <View style={styles.sectionForm} onLayout={(event) => { sectionOffsetRef.current = event.nativeEvent.layout.y; }}>
+                          {activeSectionForm}
+                          {sectionStepper}
+                        </View>
                       </View>
                       <View style={styles.actionCard}>
                         <StatusLine tone={saveStateTone} role={presentedSaveState === "failed" ? "alert" : "summary"}>
@@ -1542,13 +1629,16 @@ export default function App() {
                         {!displayedTask ? correctionInfo : null}
                         {locked ? <Notice tone="warning" role="summary">{fr.employeeTasks.readOnlyPending}</Notice> : null}
                       </View>
-                      <View style={styles.panelCard}>
+                      <View style={styles.panelCard} onLayout={(event) => { formOffsetRef.current = event.nativeEvent.layout.y; }}>
                         {legacyContentMode ? <Field label={fr.employeeTasks.legacyDraftContent} value={draftContent} onChangeText={changeDraftContent} editable={formEditable} multiline /> : null}
-                        <Text style={styles.overline}>{fr.employeeTasks.sectionNavigation}</Text>
+                        {formProgress}
                         {sectionNavigation}
                         {activeDraft?.recoveryProvenance && <RecoveryAttribution provenance={activeDraft.recoveryProvenance} />}
                         <View style={styles.formDivider} />
-                        {activeSectionForm}
+                        <View style={styles.sectionForm} onLayout={(event) => { sectionOffsetRef.current = event.nativeEvent.layout.y; }}>
+                          {activeSectionForm}
+                          {sectionStepper}
+                        </View>
                       </View>
                       <View style={styles.actionCard}>
                         <StatusLine tone={saveStateTone === "neutral" ? "success" : saveStateTone} role={presentedSaveState === "failed" ? "alert" : "summary"}>
@@ -1643,34 +1733,86 @@ function Confirmation(props: { message: string; children: ReactNode }) {
   </View>;
 }
 
-function Field(props: { label: string; value: string; onChangeText: (value: string) => void; secureTextEntry?: boolean; autoCapitalize?: "none" | "sentences"; keyboardType?: "email-address" | "decimal-pad" | "number-pad"; editable?: boolean; multiline?: boolean; accessibilityLabel?: string; helpFr?: string; errorFr?: string; style?: StyleProp<ViewStyle>; maxLength?: number; placeholder?: string; accessory?: ReactNode }) {
+type TextInputHandle = ComponentRef<typeof TextInput>;
+/** Keyboard « Suivant » chaining between the text inputs of one form (presentation only). */
+type FocusLink = { inputRef: (node: TextInputHandle | null) => void; onNext?: () => void };
+
+function Field(props: { label: string; value: string; onChangeText: (value: string) => void; secureTextEntry?: boolean; autoCapitalize?: "none" | "sentences"; keyboardType?: "email-address" | "decimal-pad" | "number-pad"; editable?: boolean; multiline?: boolean; accessibilityLabel?: string; helpFr?: string; errorFr?: string; style?: StyleProp<ViewStyle>; maxLength?: number; placeholder?: string; inputRef?: (node: TextInputHandle | null) => void; returnKeyType?: "next" | "done" | "go"; submitBehavior?: "submit" | "blurAndSubmit"; onSubmitEditing?: () => void; autoComplete?: "email" | "current-password" | "new-password" }) {
   const [focused, setFocused] = useState(false);
+  const [revealed, setRevealed] = useState(false);
   const hint = [props.helpFr, props.errorFr].filter(Boolean).join(" ");
   const readOnly = props.editable === false;
+  const input = <TextInput
+    ref={props.inputRef}
+    accessibilityLabel={props.accessibilityLabel ?? props.label}
+    accessibilityHint={hint || undefined}
+    style={[styles.input, props.multiline && styles.inputMultiline, readOnly && styles.inputReadOnly, props.errorFr ? styles.inputError : null, focused && styles.inputFocused, props.secureTextEntry && styles.inputWithToggle]}
+    value={props.value}
+    onChangeText={props.onChangeText}
+    onFocus={() => setFocused(true)}
+    onBlur={() => setFocused(false)}
+    editable={props.editable}
+    secureTextEntry={props.secureTextEntry && !revealed}
+    autoCapitalize={props.autoCapitalize}
+    keyboardType={props.keyboardType}
+    multiline={props.multiline}
+    maxLength={props.maxLength}
+    placeholder={props.placeholder}
+    autoCorrect={false}
+    autoComplete={props.autoComplete}
+    returnKeyType={props.multiline ? undefined : props.returnKeyType}
+    submitBehavior={props.multiline ? undefined : props.submitBehavior}
+    onSubmitEditing={props.multiline ? undefined : props.onSubmitEditing}
+    placeholderTextColor={colors.textTertiary}
+    selectionColor={colors.primary}
+  />;
   return <View style={[styles.field, props.style]}>
     <Text style={styles.label}>{props.label}</Text>
     {props.helpFr ? <Text style={styles.help}>{props.helpFr}</Text> : null}
-    <TextInput
-      accessibilityLabel={props.accessibilityLabel ?? props.label}
-      accessibilityHint={hint || undefined}
-      style={[styles.input, props.multiline && styles.inputMultiline, readOnly && styles.inputReadOnly, props.errorFr ? styles.inputError : null, focused && styles.inputFocused]}
-      value={props.value}
-      onChangeText={props.onChangeText}
-      onFocus={() => setFocused(true)}
-      onBlur={() => setFocused(false)}
-      editable={props.editable}
-      secureTextEntry={props.secureTextEntry}
-      autoCapitalize={props.autoCapitalize}
-      keyboardType={props.keyboardType}
-      multiline={props.multiline}
-      maxLength={props.maxLength}
-      placeholder={props.placeholder}
-      autoCorrect={false}
-      placeholderTextColor={colors.textTertiary}
-      selectionColor={colors.primary}
-    />
+    {props.secureTextEntry ? <View style={styles.secureInputRow}>
+      {input}
+      <Pressable accessibilityRole="button" accessibilityLabel={revealed ? fr.employeeTasks.hidePassword : fr.employeeTasks.showPassword} onPress={() => setRevealed((value) => !value)} hitSlop={6} style={({ pressed }) => [styles.passwordToggle, pressed && styles.passwordTogglePressed]}>
+        <Text style={styles.passwordToggleText}>{revealed ? fr.employeeTasks.hidePassword : fr.employeeTasks.showPassword}</Text>
+      </Pressable>
+    </View> : input}
     {props.errorFr ? <Text style={styles.fieldError}>{props.errorFr}</Text> : null}
   </View>;
+}
+
+/** HH:MM in the device's local time. */
+function formatClockTime(date: Date): string {
+  return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+}
+
+/** Badge tone of a task's derived state on « Mes tâches » (presentation only). */
+function taskStateTone(state: TaskSyncState): Tone {
+  if (state.lifecycle === "submitted") return "success";
+  if (state.lifecycle === "acceptance-blocked" || state.lifecycle === "conflict" || FAILED_TRANSFERS.has(state.transfer)) return "danger";
+  if (state.lifecycle === "submission-pending") return "info";
+  if (state.correction) return "warning";
+  return "neutral";
+}
+
+/** A task row's state line, led by a dot in the state's color. */
+function TaskStateMeta(props: { state: TaskSyncState; children: ReactNode }) {
+  return <View style={styles.taskStateRow}>
+    <View style={{ ...styles.taskStateDot, backgroundColor: toneColors[taskStateTone(props.state)].fg }} />
+    <Text style={styles.taskMetaFlexible}>{props.children}</Text>
+  </View>;
+}
+
+/** « Section précédente / suivante » at the bottom of a section, naming the section it opens. */
+function SectionStepButton(props: { direction: "previous" | "next"; caption: string; label: string; onPress: () => void }) {
+  const next = props.direction === "next";
+  return <Pressable accessibilityRole="button" accessibilityLabel={`${props.caption}, ${props.label}`} onPress={props.onPress}
+    style={({ pressed }) => [styles.sectionStep, next && styles.sectionStepNext, pressed && styles.sectionStepPressed]}>
+    {!next ? <Text style={styles.sectionStepArrow}>‹</Text> : null}
+    <View style={[styles.sectionStepCopy, next && styles.sectionStepCopyNext]}>
+      <Text style={next ? styles.sectionStepCaptionNext : styles.sectionStepCaption}>{props.caption}</Text>
+      <Text style={next ? styles.sectionStepLabelNext : styles.sectionStepLabel} numberOfLines={2}>{props.label}</Text>
+    </View>
+    {next ? <Text style={styles.sectionStepArrowNext}>›</Text> : null}
+  </Pressable>;
 }
 
 const calculationIdentityOf = (source: CalculationContext): CalculationContext => ({
@@ -1760,7 +1902,7 @@ function RecoveryAttribution({ provenance }: { provenance: NonNullable<LocalDraf
   </View>;
 }
 
-function CatalogueInput(props: { field: CatalogueField; value: string; onChange: (fieldId: string, value: string) => void; editable: boolean; rowLabelFr?: string; style?: StyleProp<ViewStyle>; issueFr?: string; copied?: boolean }) {
+function CatalogueInput(props: { field: CatalogueField; value: string; onChange: (fieldId: string, value: string) => void; editable: boolean; rowLabelFr?: string; style?: StyleProp<ViewStyle>; issueFr?: string; copied?: boolean; focus?: FocusLink }) {
   const { field } = props;
   if (field.type === "choice") return <ChoiceField field={field} value={props.value} onSelect={(value) => props.onChange(field.id, value)} editable={props.editable} errorFr={props.issueFr} copied={props.copied} />;
   const label = fieldLabel(field);
@@ -1777,6 +1919,7 @@ function CatalogueInput(props: { field: CatalogueField; value: string; onChange:
       keyboardType="number-pad"
       maxLength={10}
       placeholder="JJ/MM/AAAA"
+      {...focusProps(props.focus)}
     />
     {props.editable ? <Button title={fr.employeeTasks.dateToday} secondary onPress={() => props.onChange(field.id, todayAsFrenchDate())} style={styles.dateTodayButton} /> : null}
   </View>;
@@ -1793,12 +1936,50 @@ function CatalogueInput(props: { field: CatalogueField; value: string; onChange:
     keyboardType={field.type === "number" ? "decimal-pad" : undefined}
     multiline={field.type === "textarea"}
     style={props.style}
+    {...focusProps(props.focus)}
   />;
+}
+
+/** « Suivant » moves to the next input of the section and keeps the keyboard open; the last one closes it. */
+function focusProps(focus: FocusLink | undefined) {
+  if (!focus) return {};
+  return {
+    inputRef: focus.inputRef,
+    returnKeyType: focus.onNext ? "next" as const : "done" as const,
+    submitBehavior: focus.onNext ? "submit" as const : "blurAndSubmit" as const,
+    onSubmitEditing: focus.onNext,
+  };
+}
+
+/** Text inputs of a section in screen order (tables row by row), for the keyboard « Suivant » key. */
+function textEntryOrder(section: CatalogueSection): string[] {
+  const tableByFieldId = new Map<string, CatalogueTable>();
+  for (const table of section.tables ?? []) for (const id of table.fieldIds.flat()) tableByFieldId.set(id, table);
+  const fieldById = new Map(section.fields.map((field) => [field.id, field]));
+  const seenTables = new Set<string>();
+  const order: string[] = [];
+  for (const field of section.fields) {
+    const table = tableByFieldId.get(field.id);
+    if (!table) order.push(field.id);
+    else if (!seenTables.has(table.id)) { seenTables.add(table.id); order.push(...table.fieldIds.flat()); }
+  }
+  return order.filter((id) => fieldById.get(id)?.type !== "choice");
 }
 
 /** Renders one catalogue section in field order; table cells render as one labelled group per paper row. */
 function GraphieSectionForm(props: { section: CatalogueSection; layout: EmployeeTaskLayout; values: GraphieFormValues; results?: GraphieCalculationResults; onChange: (fieldId: string, value: string) => void; editable: boolean; issues: Readonly<Record<string, string>>; copiedFields?: ReadonlySet<string> }) {
   const { section } = props;
+  const inputRefs = useRef(new Map<string, TextInputHandle>());
+  const entryOrder = useMemo(() => textEntryOrder(section), [section]);
+  const focusLink = (fieldId: string): FocusLink | undefined => {
+    const index = entryOrder.indexOf(fieldId);
+    if (index < 0) return undefined;
+    const nextId = entryOrder[index + 1];
+    return {
+      inputRef: (node) => { if (node) inputRefs.current.set(fieldId, node); else inputRefs.current.delete(fieldId); },
+      onNext: nextId ? () => inputRefs.current.get(nextId)?.focus?.() : undefined,
+    };
+  };
   const tableByFieldId = new Map<string, CatalogueTable>();
   for (const table of section.tables ?? []) for (const id of table.fieldIds.flat()) tableByFieldId.set(id, table);
   const renderedTables = new Set<string>();
@@ -1811,10 +1992,10 @@ function GraphieSectionForm(props: { section: CatalogueSection; layout: Employee
     if (!resultsPlaced && field.type === "textarea") { items.push(...resultBlocks); resultsPlaced = true; }
     const table = tableByFieldId.get(field.id);
     if (!table) {
-      items.push(<CatalogueInput key={field.id} field={field} value={props.values[field.id] ?? ""} onChange={props.onChange} editable={props.editable} issueFr={props.issues[field.id]} copied={props.copiedFields?.has(field.id)} />);
+      items.push(<CatalogueInput key={field.id} field={field} value={props.values[field.id] ?? ""} onChange={props.onChange} editable={props.editable} issueFr={props.issues[field.id]} copied={props.copiedFields?.has(field.id)} focus={focusLink(field.id)} />);
     } else if (!renderedTables.has(table.id)) {
       renderedTables.add(table.id);
-      items.push(<GraphieTable key={`table:${table.id}`} table={table} fields={section.fields} layout={props.layout} values={props.values} onChange={props.onChange} editable={props.editable} issues={props.issues} copiedFields={props.copiedFields} />);
+      items.push(<GraphieTable key={`table:${table.id}`} table={table} fields={section.fields} layout={props.layout} values={props.values} onChange={props.onChange} editable={props.editable} issues={props.issues} copiedFields={props.copiedFields} focusLink={focusLink} />);
     }
   }
   if (!resultsPlaced) items.push(...resultBlocks);
@@ -1827,7 +2008,7 @@ function GraphieSectionForm(props: { section: CatalogueSection; layout: Employee
   </View>;
 }
 
-function GraphieTable(props: { table: CatalogueTable; fields: readonly CatalogueField[]; layout: EmployeeTaskLayout; values: GraphieFormValues; onChange: (fieldId: string, value: string) => void; editable: boolean; issues: Readonly<Record<string, string>>; copiedFields?: ReadonlySet<string> }) {
+function GraphieTable(props: { table: CatalogueTable; fields: readonly CatalogueField[]; layout: EmployeeTaskLayout; values: GraphieFormValues; onChange: (fieldId: string, value: string) => void; editable: boolean; issues: Readonly<Record<string, string>>; copiedFields?: ReadonlySet<string>; focusLink?: (fieldId: string) => FocusLink | undefined }) {
   const { table } = props;
   const fieldById = new Map(props.fields.map((field) => [field.id, field]));
   const tablet = props.layout === "tablet";
@@ -1838,7 +2019,7 @@ function GraphieTable(props: { table: CatalogueTable; fields: readonly Catalogue
       return <View key={`${table.id}:${rowIndex}`} accessibilityLabel={rowLabel} style={[styles.tableRow, tablet && styles.tableRowTablet]}>
         <Text accessibilityRole="header" style={[styles.tableRowLabel, tablet && styles.tableRowLabelTablet]}>{rowLabel}</Text>
         <View style={tablet ? styles.tableCellsTablet : styles.tableCellsPhone}>
-          {row.map((id) => <CatalogueInput key={id} field={fieldById.get(id)!} rowLabelFr={rowLabel} value={props.values[id] ?? ""} onChange={props.onChange} editable={props.editable} style={tablet ? styles.tableCellTablet : undefined} issueFr={props.issues[id]} copied={props.copiedFields?.has(id)} />)}
+          {row.map((id) => <CatalogueInput key={id} field={fieldById.get(id)!} rowLabelFr={rowLabel} value={props.values[id] ?? ""} onChange={props.onChange} editable={props.editable} style={tablet ? styles.tableCellTablet : undefined} issueFr={props.issues[id]} copied={props.copiedFields?.has(id)} focus={props.focusLink?.(id)} />)}
         </View>
       </View>;
     })}
@@ -1947,6 +2128,7 @@ const styles = StyleSheet.create({
   page: { gap: space.lg },
   tabletPage: { gap: space.xl },
   pageHeader: { gap: 6, paddingTop: space.xs, paddingBottom: space.xs },
+  updatedAt: { color: colors.textTertiary, fontSize: 12, lineHeight: 17 },
   title: typography.title,
   sectionTitle: { ...typography.sectionTitle, paddingTop: space.sm },
   body: typography.body,
@@ -1977,6 +2159,10 @@ const styles = StyleSheet.create({
   taskCopy: { flex: 1, gap: 4 },
   taskTitle: { color: colors.text, fontSize: 16, lineHeight: 22, fontWeight: "700", letterSpacing: -0.1 },
   taskMeta: { color: colors.textSecondary, fontSize: 13, lineHeight: 19 },
+  // The dot is positioned, not laid out in a row, so that the phone list stays a plain vertical stack.
+  taskMetaFlexible: { color: colors.textSecondary, fontSize: 13, lineHeight: 19, paddingLeft: 14 },
+  taskStateRow: { position: "relative" },
+  taskStateDot: { position: "absolute", left: 0, top: 6, width: 8, height: 8, borderRadius: 4 },
   chevronCircle: { width: 32, height: 32, borderRadius: 16, alignItems: "center", justifyContent: "center", backgroundColor: colors.primarySoft },
   chevron: { color: colors.primary, fontSize: 22, lineHeight: 24, fontWeight: "600", marginTop: -2, marginLeft: 1 },
   glyphPage: { width: 16, height: 20, borderRadius: 4, borderWidth: 2, paddingHorizontal: 2, paddingTop: 3, gap: 2 },
@@ -1984,7 +2170,7 @@ const styles = StyleSheet.create({
   glyphLineShort: { height: 2, borderRadius: 1, width: "60%" },
 
   // Detail
-  backButton: { alignSelf: "flex-start", minHeight: 44, flexDirection: "row", alignItems: "center", gap: 8, paddingRight: space.md, borderRadius: radii.sm },
+  backButton: { alignSelf: "flex-start", minHeight: 48, flexDirection: "row", alignItems: "center", gap: 8, paddingRight: space.md, borderRadius: radii.sm },
   backButtonPressed: { opacity: 0.6 },
   backChevron: { width: 32, height: 32, borderRadius: 16, alignItems: "center", justifyContent: "center", backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border },
   backChevronText: { color: colors.primary, fontSize: 22, lineHeight: 24, fontWeight: "600", marginTop: -2, marginRight: 1 },
@@ -2027,8 +2213,33 @@ const styles = StyleSheet.create({
 
   // Section navigation and form
   sectionNavigation: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
-  sectionChip: { minHeight: 44, justifyContent: "center", paddingHorizontal: 14, borderRadius: radii.pill, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surfaceMuted },
+  sectionChip: { minHeight: 48, justifyContent: "center", paddingHorizontal: 14, borderRadius: radii.pill, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.surfaceMuted },
   sectionChipSelected: { borderColor: colors.primary, backgroundColor: colors.primarySoft },
+  sectionChipAttention: { borderColor: colors.danger },
+  sectionChipPressed: { opacity: 0.75 },
+  sectionChipContent: { flexDirection: "row", alignItems: "center", gap: 6 },
+  sectionChipCountAttention: { backgroundColor: colors.dangerSoft, color: colors.danger },
+  sectionChipCountHidden: { backgroundColor: "transparent" },
+  sectionChipCount: { textAlign: "center", overflow: "hidden", paddingHorizontal: 2, paddingVertical: 1, borderRadius: radii.pill, backgroundColor: colors.neutralSoft, color: colors.textSecondary, fontSize: 12, lineHeight: 17, fontWeight: "700" },
+  sectionChipCountComplete: { backgroundColor: colors.successSoft, color: colors.success },
+  formProgress: { gap: 8 },
+  formProgressHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", columnGap: 8, rowGap: 2, minHeight: 18 },
+  formProgressCount: { color: colors.textSecondary, fontSize: 12, lineHeight: 17, fontWeight: "600" },
+  progressTrack: { height: 6, borderRadius: 3, overflow: "hidden", backgroundColor: colors.neutralSoft },
+  progressFill: { height: 6, borderRadius: 3, backgroundColor: colors.success },
+  sectionStepper: { flexDirection: "row", gap: 10, paddingTop: space.sm, marginTop: space.xs, borderTopWidth: 1, borderTopColor: colors.border },
+  sectionStep: { flex: 1, minHeight: 56, flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 8, paddingHorizontal: 12, borderRadius: 12, borderWidth: 1, borderColor: colors.borderStrong, backgroundColor: colors.surface },
+  sectionStepNext: { borderColor: colors.primary, backgroundColor: colors.primarySoft },
+  sectionStepPressed: { opacity: 0.8 },
+  sectionStepSpacer: { flex: 1 },
+  sectionStepCopy: { flex: 1, gap: 2 },
+  sectionStepCopyNext: { alignItems: "flex-end" },
+  sectionStepCaption: { color: colors.textTertiary, fontSize: 11, lineHeight: 14, fontWeight: "700", letterSpacing: 0.6, textTransform: "uppercase" },
+  sectionStepCaptionNext: { color: colors.primaryOnSoft, fontSize: 11, lineHeight: 14, fontWeight: "700", letterSpacing: 0.6, textTransform: "uppercase", textAlign: "right" },
+  sectionStepLabel: { color: colors.text, fontSize: 14, lineHeight: 19, fontWeight: "700" },
+  sectionStepLabelNext: { color: colors.primaryOnSoft, fontSize: 14, lineHeight: 19, fontWeight: "700", textAlign: "right" },
+  sectionStepArrow: { color: colors.primary, fontSize: 24, lineHeight: 26, fontWeight: "600" },
+  sectionStepArrowNext: { color: colors.primary, fontSize: 24, lineHeight: 26, fontWeight: "600" },
   sectionChipText: { color: colors.textSecondary, fontSize: 14, fontWeight: "600" },
   sectionChipTextSelected: { color: colors.primaryOnSoft, fontWeight: "700" },
   sectionForm: { gap: 14 },
@@ -2047,9 +2258,14 @@ const styles = StyleSheet.create({
   // Fields
   field: { gap: 6 },
   dateField: { gap: 8 },
-  dateTodayButton: { alignSelf: "flex-start", minHeight: 44, paddingHorizontal: 16 },
+  dateTodayButton: { alignSelf: "flex-start", minHeight: 48, paddingHorizontal: 16 },
   input: { minHeight: 52, borderColor: colors.borderStrong, borderWidth: 1, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, color: colors.text, fontSize: 16, backgroundColor: colors.surface },
   inputMultiline: { minHeight: 96, textAlignVertical: "top" },
+  inputWithToggle: { paddingRight: 96 },
+  secureInputRow: { justifyContent: "center" },
+  passwordToggle: { position: "absolute", right: 4, minHeight: 44, minWidth: 80, alignItems: "center", justifyContent: "center", paddingHorizontal: 12, borderRadius: 10 },
+  passwordTogglePressed: { backgroundColor: colors.neutralSoft },
+  passwordToggleText: { color: colors.primaryOnSoft, fontSize: 14, fontWeight: "700" },
   inputReadOnly: { backgroundColor: colors.surfaceMuted, color: colors.textSecondary, borderColor: colors.border },
   inputError: { borderColor: colors.danger },
   inputFocused: { borderColor: colors.primary, borderWidth: 2, paddingHorizontal: 13, paddingVertical: 11, shadowColor: colors.primary, shadowOpacity: 0.18, shadowRadius: 6, shadowOffset: { width: 0, height: 0 } },
@@ -2057,7 +2273,7 @@ const styles = StyleSheet.create({
 
   // Choice pills
   choiceOptions: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
-  choiceOption: { flexGrow: 1, minHeight: 44, alignItems: "center", justifyContent: "center", paddingHorizontal: 14, borderRadius: radii.pill, borderWidth: 1, borderColor: colors.borderStrong, backgroundColor: colors.surface },
+  choiceOption: { flexGrow: 1, minHeight: 48, alignItems: "center", justifyContent: "center", paddingHorizontal: 14, borderRadius: radii.pill, borderWidth: 1, borderColor: colors.borderStrong, backgroundColor: colors.surface },
   choiceOptionSelected: { borderColor: colors.primary, backgroundColor: colors.primarySoft },
   choiceOptionText: { color: colors.textSecondary, fontSize: 14, fontWeight: "600" },
   choiceOptionSelectedText: { color: colors.primaryOnSoft, fontWeight: "700" },
@@ -2090,7 +2306,7 @@ const BUTTON_VARIANTS = {
     text: { color: colors.textOnNavy },
   }),
   quiet: StyleSheet.create({
-    container: { backgroundColor: "transparent", minHeight: 44, paddingHorizontal: 20 },
+    container: { backgroundColor: "transparent", minHeight: 48, paddingHorizontal: 20 },
     pressed: { backgroundColor: colors.neutralSoft },
     text: { color: colors.textSecondary, fontSize: 15, fontWeight: "600" },
   }),

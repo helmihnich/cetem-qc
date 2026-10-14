@@ -80,3 +80,18 @@ test("W6 other failures show the generic reset message and never a credential", 
   const offline = await requestPasswordReset(employeeId, (async () => { throw new TypeError("network"); }) as typeof fetch);
   assert.deepEqual(offline, { ok: false, message: "Le service est momentanément indisponible.", stale: false });
 });
+
+test("W4 the reset confirmation is an in-page dialog naming the Technicien, with Annuler focused first and no browser popup", async () => {
+  const { ConfirmDialog } = await import("./confirm-dialog");
+  const { fr } = await import("@cetem-qc/i18n");
+  const html = renderToStaticMarkup(<ConfirmDialog title={fr.employees.resetPasswordTitle} confirmLabel={fr.employees.resetPassword} onConfirm={() => undefined} onCancel={() => undefined}>
+    <p>Actif Exemple</p><p>{fr.employees.resetPasswordConfirm}</p>
+  </ConfirmDialog>);
+  assert.match(html, /role="alertdialog"/);
+  assert.match(html, /aria-modal="true"/);
+  assert.match(html, /Réinitialiser le mot de passe \?/);
+  assert.match(html, /Actif Exemple/);
+  assert.ok(html.indexOf(">Annuler<") < html.indexOf(">Réinitialiser le mot de passe<"), "Annuler comes before the confirm action");
+  const source = await import("node:fs").then((fs) => fs.readFileSync(new URL("./employee-management.tsx", import.meta.url), "utf8"));
+  assert.doesNotMatch(source, /window\.confirm/, "no browser confirm, which blocked browsers answer « non » silently");
+});

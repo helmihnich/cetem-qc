@@ -69,7 +69,7 @@ export async function regenerateOwnTeamEmployeeCredential(pool: Pool, responsabl
       `UPDATE identity_accounts employee SET password_hash = $1
        FROM identity_teams team
        WHERE employee.id = $2 AND employee.team_id = team.id
-         AND team.responsable_account_id = $3 AND employee.role = 'employe'
+         AND team.responsable_account_id = $3 AND employee.role = 'employe' AND employee.deleted_at IS NULL
          AND employee.must_change_password = true AND employee.is_active = true
        RETURNING employee.id, employee.first_name, employee.surname, employee.email, employee.is_active`,
       [passwordHash, employeeId, responsableAccountId],
@@ -93,7 +93,7 @@ export async function resetOwnTeamEmployeePassword(pool: Pool, responsableAccoun
       `SELECT employee.id, employee.first_name, employee.surname, employee.email, employee.is_active
        FROM identity_accounts employee
        JOIN identity_teams team ON employee.team_id = team.id
-       WHERE employee.id = $1 AND team.responsable_account_id = $2 AND employee.role = 'employe'
+       WHERE employee.id = $1 AND team.responsable_account_id = $2 AND employee.role = 'employe' AND employee.deleted_at IS NULL
        FOR UPDATE OF employee`,
       [employeeId, responsableAccountId],
     );
@@ -121,7 +121,7 @@ export async function updateOwnTeamEmployeeStatus(
       `UPDATE identity_accounts employee SET is_active = $1
        FROM identity_teams team
        WHERE employee.id = $2 AND employee.team_id = team.id
-         AND team.responsable_account_id = $3 AND employee.role = 'employe'
+         AND team.responsable_account_id = $3 AND employee.role = 'employe' AND employee.deleted_at IS NULL
        RETURNING employee.id, employee.first_name, employee.surname, employee.email, employee.is_active, employee.must_change_password`,
       [active, employeeId, responsableAccountId],
     );
@@ -132,7 +132,7 @@ export async function updateOwnTeamEmployeeStatus(
     const target = await transaction.query<CreatedEmployeeRow>(
       `SELECT employee.id, employee.first_name, employee.surname, employee.email, employee.is_active, employee.must_change_password
        FROM identity_accounts employee JOIN identity_teams team ON employee.team_id = team.id
-       WHERE employee.id = $1 AND team.responsable_account_id = $2 AND employee.role = 'employe'
+       WHERE employee.id = $1 AND team.responsable_account_id = $2 AND employee.role = 'employe' AND employee.deleted_at IS NULL
        FOR UPDATE OF employee`,
       [employeeId, responsableAccountId],
     );
@@ -144,6 +144,31 @@ export async function updateOwnTeamEmployeeStatus(
     );
     row.is_active = updated.rows[0]!.is_active;
     return toTeamEmployee(row);
+  });
+}
+
+/**
+ * Removes a Technicien from the Responsable's team. History tables reference the account, so the row stays:
+ * it is deactivated, its sessions are revoked and its email is replaced by a unique placeholder, which frees
+ * the address for a new account. Returns false when the Technicien is not (or no longer) in the team.
+ */
+export async function deleteOwnTeamEmployee(pool: Pool, responsableAccountId: string, employeeId: string): Promise<boolean> {
+  return withTransaction(pool, async (transaction) => {
+    const target = await transaction.query<{ id: string } & QueryResultRow>(
+      `SELECT employee.id
+       FROM identity_accounts employee JOIN identity_teams team ON employee.team_id = team.id
+       WHERE employee.id = $1 AND team.responsable_account_id = $2 AND employee.role = 'employe' AND employee.deleted_at IS NULL
+       FOR UPDATE OF employee`,
+      [employeeId, responsableAccountId],
+    );
+    if (!target.rows[0]) return false;
+    await transaction.query(
+      `UPDATE identity_accounts SET is_active = false, deleted_at = now(), email = 'deleted+' || id::text || '@cetem-qc.invalid'
+       WHERE id = $1`,
+      [employeeId],
+    );
+    await transaction.query("UPDATE identity_sessions SET revoked_at = now() WHERE account_id = $1 AND revoked_at IS NULL", [employeeId]);
+    return true;
   });
 }
 

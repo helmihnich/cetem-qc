@@ -162,7 +162,7 @@ function CandidateItem({ taskId, candidate, official, confirming, designating, a
       {" · "}
       <button className="secondary-button" type="button" disabled={anyDesignating} onClick={() => onAskDesignate?.(candidate.id)}>{fr.report.designate.button}</button>
     </>}
-    {candidate.status === "ready" && !official && (confirming || designating) && <div className="field-hint" role="group" aria-label={fr.report.designate.button}>
+    {candidate.status === "ready" && !official && (confirming || designating) && <div className="field-hint" role="group" aria-label={fr.report.designate.button} onKeyDown={(event) => { if (event.key === "Escape" && !designating) onCancelDesignate?.(); }}>
       <p>{fr.report.designate.prompt}</p>
       <button className="primary-button" type="button" disabled={designating} aria-busy={designating} onClick={() => onConfirmDesignate?.(candidate.id)}>
         {designating ? fr.report.designate.pending : fr.report.designate.confirm}
@@ -194,9 +194,11 @@ export function ReportCandidatesSection({ taskId, eligible, candidates, pending 
 }
 
 /** Holds the request state; a candidate is shown only from a valid server response, and the list is read back from the server. */
-export function ReportCandidatesPanel({ taskId, eligible, refreshKey = 0, onReloadState }: {
+export function ReportCandidatesPanel({ taskId, eligible, refreshKey = 0, onReloadState, onOfficialChange }: {
   taskId: string;
   eligible: boolean;
+  /** Display-only: tells the step navigation whether an official report is designated. */
+  onOfficialChange?: (designated: boolean) => void;
   /** Changes whenever the evidence was reloaded or the summary reopened, so the derived statuses are read again. */
   refreshKey?: number;
   /** Reloads the summary and decision state after a refused request (409). */
@@ -217,6 +219,7 @@ export function ReportCandidatesPanel({ taskId, eligible, refreshKey = 0, onRelo
     if (loadedOfficial) setOfficial(loadedOfficial);
   };
   useEffect(() => { void refresh(); }, [taskId, refreshKey]);
+  useEffect(() => { onOfficialChange?.(official !== null); }, [official, onOfficialChange]);
   const onGenerate = () => {
     if (inFlight.current) return;
     inFlight.current = true;

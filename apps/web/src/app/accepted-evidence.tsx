@@ -8,6 +8,8 @@ import type { CatalogueField, CatalogueSection, GraphieCalculationResults } from
 import { fr } from "@cetem-qc/i18n";
 import { GraphieCalculationReview } from "./graphie-calculation-review";
 import { ConformityDecisionPanel } from "./conformity-decision";
+import { ACCEPTED_EVIDENCE_TARGETS, EvidenceSteps, type EvidenceProgress } from "./evidence-steps";
+import { LoadingSkeleton } from "./ui";
 import { PdfFilesPanel } from "./pdf-files";
 import { ReportCandidatesPanel } from "./report-candidates";
 import { SummaryDraftPanel } from "./summary-draft";
@@ -237,8 +239,20 @@ export function ManualInsightsSection({ insights, pending = false, failed = fals
   </section>;
 }
 
+/** Display-only: the insight step reads as done once every available proposal has a decision (or there is nothing to decide, or the summary is confirmed). */
+const insightsSettled = (insights: AcceptedEvidenceResponse["insights"], decisions: InsightDecisions, summaryConfirmed: boolean) =>
+  summaryConfirmed || insights.status === "unavailable" || insights.proposals.every((proposal) => decisions.some((decision) => decision.proposalId === proposal.proposalId));
+
+/** The step progress shown by the in-panel navigation before any action, from the loaded evidence alone. */
+export const initialEvidenceProgress = (evidence: AcceptedEvidenceResponse): EvidenceProgress => ({
+  insights: insightsSettled(evidence.insights, evidence.insightDecisions, evidence.summary !== null),
+  summary: evidence.summary !== null,
+  decision: evidence.summary !== null && evidence.conformityDecision !== null,
+  report: false,
+});
+
 /** Holds the local decision state: it changes only from a server response, never from a client calculation. */
-export function InsightProposalsPanel({ taskId, insights, initialDecisions, initialManualInsights = [], initialSummary = null, initialSummaryHistory = [], initialSummaryVersion = null, initialConformityDecision = null, initialConformityHistory = [] }: { taskId: string; insights: AcceptedEvidenceResponse["insights"]; initialDecisions: InsightDecisions; initialManualInsights?: ManualInsightItem[]; initialSummary?: ConfirmedSummary | null; initialSummaryHistory?: SummaryHistoryItem[]; initialSummaryVersion?: AcceptedEvidenceResponse["summaryVersion"] | null; initialConformityDecision?: ConformityDecision | null; initialConformityHistory?: ConformityHistoryItem[] }) {
+export function InsightProposalsPanel({ taskId, insights, initialDecisions, initialManualInsights = [], initialSummary = null, initialSummaryHistory = [], initialSummaryVersion = null, initialConformityDecision = null, initialConformityHistory = [], onProgress }: { taskId: string; insights: AcceptedEvidenceResponse["insights"]; initialDecisions: InsightDecisions; initialManualInsights?: ManualInsightItem[]; initialSummary?: ConfirmedSummary | null; initialSummaryHistory?: SummaryHistoryItem[]; initialSummaryVersion?: AcceptedEvidenceResponse["summaryVersion"] | null; initialConformityDecision?: ConformityDecision | null; initialConformityHistory?: ConformityHistoryItem[]; onProgress?: (progress: EvidenceProgress) => void }) {
   const [conformityDecision, setConformityDecision] = useState<ConformityDecision | null>(initialConformityDecision);
   const [conformityHistory, setConformityHistory] = useState<ConformityHistoryItem[]>(initialConformityHistory);
   // Bumped whenever the summary or decision state is reloaded or reopened, so the derived candidate statuses are read again.
@@ -312,12 +326,19 @@ export function InsightProposalsPanel({ taskId, insights, initialDecisions, init
     setConformityHistory(reloaded.evidence.conformityHistory);
     bumpReportRefresh();
   };
+  // Reported to the step navigation only; nothing here feeds back into the workflow.
+  const [officialDesignated, setOfficialDesignated] = useState(false);
+  const insightsDone = insightsSettled(insights, decisions, summary !== null);
+  const decided = summary !== null && conformityDecision !== null;
+  useEffect(() => {
+    onProgress?.({ insights: insightsDone, summary: summary !== null, decision: decided, report: officialDesignated });
+  }, [onProgress, insightsDone, summary, decided, officialDesignated]);
   return <>
     <InsightProposalsSection insights={insights} decisions={decisions} pendingProposalId={pendingProposalId} failed={failed} onDecide={onDecide} manualInsightCount={manualInsights.length} locked={summary !== null} />
     <ManualInsightsSection insights={manualInsights} pending={manualPending} failed={manualFailed} onAdd={onAddManual} locked={summary !== null} />
     <SummaryDraftPanel taskId={taskId} summary={summary} onConfirmed={setSummary} onReloadEvidence={reloadSummary} version={summaryVersion} history={summaryHistory} onReopened={onReopened} onReloadState={reloadState} />
     <ConformityDecisionPanel taskId={taskId} confirmedVersion={summary ? summary.version : null} decision={summary ? conformityDecision : null} history={conformityHistory} onRecorded={setConformityDecision} onReloadState={reloadState} />
-    <ReportCandidatesPanel taskId={taskId} eligible={summary !== null && conformityDecision !== null} refreshKey={reportRefreshKey} onReloadState={reloadState} />
+    <ReportCandidatesPanel taskId={taskId} eligible={summary !== null && conformityDecision !== null} refreshKey={reportRefreshKey} onReloadState={reloadState} onOfficialChange={setOfficialDesignated} />
     <PdfFilesPanel taskId={taskId} eligible={summary !== null && conformityDecision !== null} refreshKey={reportRefreshKey} onReloadState={reloadState} onCandidatesChanged={bumpReportRefresh} />
   </>;
 }
@@ -339,16 +360,19 @@ export type AcceptedEvidenceViewProps = {
   onBack: () => void;
   onRetry: () => void;
   headingRef?: React.Ref<HTMLHeadingElement>;
+  /** Live step progress reported by the workflow below; before the first report it is derived from the loaded evidence. */
+  progress?: EvidenceProgress;
+  onProgress?: (progress: EvidenceProgress) => void;
 };
 
 /** Read-only W4 panel: stored values, calculation evidence and lineage. The only control is « Retour à la liste » (and « Réessayer » on a failure). */
-export function AcceptedEvidenceView({ taskId, load, onBack, onRetry, headingRef }: AcceptedEvidenceViewProps) {
+export function AcceptedEvidenceView({ taskId, load, onBack, onRetry, headingRef, progress, onProgress }: AcceptedEvidenceViewProps) {
   const heading = <h2 id="evidence-heading" tabIndex={-1} ref={headingRef}>{fr.evidence.heading} — {fr.tasks.taskId} : {taskId}</h2>;
   const back = <button className="secondary-button" type="button" onClick={onBack}>{fr.evidence.back}</button>;
   const retry = <button className="text-button" type="button" onClick={onRetry}>{fr.common.retry}</button>;
   let content: React.ReactNode;
   if (!load) {
-    content = <div className="state-message" role="status">{fr.common.loading}</div>;
+    content = <LoadingSkeleton variant="panel" rows={3} />;
   } else if (load.kind === "ready") {
     const { evidence } = load;
     const context = [
@@ -360,9 +384,10 @@ export function AcceptedEvidenceView({ taskId, load, onBack, onRetry, headingRef
     content = <>
       <p className="evidence-context">{context.filter((part) => part.trim() !== "").join(" · ")}</p>
       <EvidenceLineage lineage={evidence.lineage} />
+      <EvidenceSteps targets={ACCEPTED_EVIDENCE_TARGETS} progress={progress ?? initialEvidenceProgress(evidence)} />
       <EvidenceInputSections values={evidence.values} />
       <GraphieCalculationReview evidence={{ identity: evidence.identity, values: evidence.values, results: evidence.results as unknown as GraphieCalculationResults }} />
-      <InsightProposalsPanel taskId={evidence.task.id} insights={evidence.insights} initialDecisions={evidence.insightDecisions} initialManualInsights={evidence.manualInsights} initialSummary={evidence.summary} initialSummaryHistory={evidence.summaryHistory} initialSummaryVersion={evidence.summaryVersion} initialConformityDecision={evidence.conformityDecision} initialConformityHistory={evidence.conformityHistory} />
+      <InsightProposalsPanel taskId={evidence.task.id} insights={evidence.insights} initialDecisions={evidence.insightDecisions} initialManualInsights={evidence.manualInsights} initialSummary={evidence.summary} initialSummaryHistory={evidence.summaryHistory} initialSummaryVersion={evidence.summaryVersion} initialConformityDecision={evidence.conformityDecision} initialConformityHistory={evidence.conformityHistory} {...(onProgress ? { onProgress } : {})} />
     </>;
   } else if (load.kind === "not-found") {
     content = <div className="state-message error-state" role="alert">{fr.evidence.unavailable}</div>;
@@ -382,6 +407,7 @@ export function AcceptedEvidenceView({ taskId, load, onBack, onRetry, headingRef
 export function AcceptedEvidencePanel({ taskId, onBack, onStale }: { taskId: string; onBack: () => void; onStale: () => void }) {
   const [load, setLoad] = useState<EvidenceLoad>();
   const [attempt, setAttempt] = useState(0);
+  const [progress, setProgress] = useState<EvidenceProgress>();
   const headingRef = useRef<HTMLHeadingElement>(null);
 
   useEffect(() => { headingRef.current?.focus(); }, [taskId]);
@@ -398,5 +424,5 @@ export function AcceptedEvidencePanel({ taskId, onBack, onStale }: { taskId: str
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [taskId, attempt]);
 
-  return <AcceptedEvidenceView taskId={taskId} load={load} headingRef={headingRef} onBack={onBack} onRetry={() => setAttempt((count) => count + 1)} />;
+  return <AcceptedEvidenceView taskId={taskId} load={load} headingRef={headingRef} onBack={onBack} onRetry={() => setAttempt((count) => count + 1)} {...(progress ? { progress } : {})} onProgress={setProgress} />;
 }

@@ -44,6 +44,7 @@ const runtime = globalThis as typeof globalThis & {
   __failDraftDelete?: boolean;
   __syncTransport?: SyncTransport | null;
   __appStateListeners?: Set<(state: string) => void>;
+  __backListeners?: Set<() => boolean>;
   __failOutboxList?: boolean;
   __failOutboxInsert?: boolean;
   __syncStateRows?: Map<string, number>;
@@ -197,7 +198,15 @@ mock.module("react-native", {
         return { remove: () => { runtime.__appStateListeners?.delete(listener); } };
       },
     },
+    BackHandler: {
+      addEventListener: (_type: string, listener: () => boolean) => {
+        runtime.__backListeners ??= new Set();
+        runtime.__backListeners.add(listener);
+        return { remove: () => { runtime.__backListeners?.delete(listener); } };
+      },
+    },
     Pressable: "Pressable",
+    RefreshControl: "RefreshControl",
     SafeAreaView: "SafeAreaView",
     ScrollView: "ScrollView",
     StyleSheet: { create: (styles: unknown) => styles },
@@ -429,6 +438,7 @@ function installMocks() {
   runtime.__failDraftList = false;
   runtime.__failDraftDelete = false;
   runtime.__syncTransport = undefined;
+  runtime.__backListeners = new Set();
   runtime.__failOutboxList = false;
   runtime.__failOutboxInsert = false;
   runtime.__networkOnline = true;
@@ -3699,5 +3709,106 @@ test("an unrealistic reading is flagged on its field with its range and blocks S
   assert.equal(findText(tree, fr.common.confirm), undefined, "no confirmation opens");
   assert.equal(findText(tree, fr.employeeTasks.submissionInvalid)?.props.accessibilityRole, "alert");
   assert.equal(submitRows(firstTask.id).length, 0, "nothing is queued");
+  await act(async () => { tree.unmount(); });
+});
+
+// Mobile UX (presentation only): navigation, progress and refresh affordances around the unchanged flows.
+const pressHardwareBack = () => [...(runtime.__backListeners ?? [])].map((listener) => listener()).some(Boolean);
+
+test("UX the Android back button cancels an open confirmation first, then returns from a task to « Mes tâches »", async () => {
+  await loadApp();
+  installMocks();
+  let tree!: ReactTestRenderer;
+  await act(async () => { tree = create(<App />); });
+  await signIn(tree);
+  let handled = true;
+  await act(async () => { handled = pressHardwareBack(); });
+  assert.equal(handled, false, "on « Mes tâches » the system handles the back button");
+  await openFirstTask(tree);
+  await act(async () => { findButton(tree, fr.employeeTasks.submit).props.onPress(); });
+  assert.ok(findText(tree, fr.employeeTasks.confirmSubmit));
+  await act(async () => { handled = pressHardwareBack(); await settle(); });
+  assert.equal(handled, true);
+  assert.equal(findText(tree, fr.employeeTasks.confirmSubmit), undefined, "back closes the confirmation");
+  assert.ok(findButton(tree, fr.employeeTasks.back), "and stays on the task");
+  assert.equal(submitRows(firstTask.id).length, 0, "nothing is queued");
+  await act(async () => { handled = pressHardwareBack(); await settle(); });
+  assert.equal(handled, true);
+  assert.ok(findText(tree, fr.employeeTasks.title));
+  assert.ok(findTaskRow(tree, firstTask.establishment));
+  await act(async () => { tree.unmount(); });
+  assert.equal(runtime.__backListeners?.size ?? 0, 0, "the listener is removed on unmount");
+});
+
+test("UX the form shows its progress and moves to the previous / next section from the bottom of a section", async () => {
+  await loadApp();
+  installMocks();
+  let tree!: ReactTestRenderer;
+  await act(async () => { tree = create(<App />); });
+  await signIn(tree);
+  await openFirstTask(tree);
+  const sections = GRAPHIE_MOBILE_POV_CATALOGUE.sections;
+  const defaults = createNewGraphieDraftValues();
+  const total = sections.reduce((sum, section) => sum + section.fields.length, 0);
+  const filled = sections.reduce((sum, section) => sum + section.fields.filter((field) => (defaults[field.id] ?? "").trim() !== "").length, 0);
+  assert.ok(findText(tree, `${filled} / ${total} champs renseignés`));
+  const first = sections[0]!;
+  const firstFilled = first.fields.filter((field) => (defaults[field.id] ?? "").trim() !== "").length;
+  assert.ok(tree.root.findAll((node) => node.type === "Pressable" && node.props.accessibilityLabel === `${first.labelFr}, ${firstFilled} champs renseignés sur ${first.fields.length}`).length === 1, "chips announce their progress");
+  const step = (caption: string) => tree.root.findAll((node) => node.type === "Pressable" && String(node.props.accessibilityLabel ?? "").startsWith(`${caption}, `))[0];
+  assert.equal(step(fr.employeeTasks.previousSection), undefined, "the first section has no previous one");
+  await act(async () => { step(fr.employeeTasks.nextSection)!.props.onPress(); });
+  assert.ok(findSectionHeading(tree, sections[1]!.labelFr));
+  await act(async () => { step(fr.employeeTasks.previousSection)!.props.onPress(); });
+  assert.ok(findSectionHeading(tree, first.labelFr));
+  await goToSection(tree, sections.at(-1)!.id);
+  assert.equal(step(fr.employeeTasks.nextSection), undefined, "the last section has no next one");
+  await act(async () => { tree.unmount(); });
+});
+
+test("UX the keyboard « Suivant » key chains the text inputs of a section; the last one closes the keyboard", async () => {
+  await loadApp();
+  installMocks();
+  let tree!: ReactTestRenderer;
+  await act(async () => { tree = create(<App />); });
+  await signIn(tree);
+  await openFirstTask(tree);
+  await goToSection(tree, "repeatability");
+  const inputs = tree.root.findAll((node) => node.type === "TextInput" && !node.props.multiline);
+  assert.ok(inputs.length > 2);
+  for (const input of inputs.slice(0, -1)) {
+    assert.equal(input.props.returnKeyType, "next", String(input.props.accessibilityLabel));
+    assert.equal(typeof input.props.onSubmitEditing, "function");
+  }
+  const multiline = tree.root.findAll((node) => node.type === "TextInput" && node.props.multiline);
+  if (multiline.length === 0) assert.equal(inputs.at(-1)!.props.returnKeyType, "done");
+  for (const input of multiline) assert.equal(input.props.returnKeyType, undefined, "a comment keeps its line break key");
+  await act(async () => { tree.unmount(); });
+});
+
+test("UX pull-to-refresh reloads « Mes tâches » online while the rows stay visible, and is off on a task", async () => {
+  await loadApp();
+  const api = installMocks();
+  let tree!: ReactTestRenderer;
+  await act(async () => { tree = create(<App />); });
+  await signIn(tree);
+  const refreshControl = () => tree.root.findAll((node) => node.type === "ScrollView")[0]!.props.refreshControl;
+  assert.equal(refreshControl().props.enabled, true);
+  assert.ok(allTexts(tree).some((text) => text.startsWith("Liste mise à jour à ")));
+  const gate = deferred();
+  runtime.__holdTaskListByEmployee!.set("employee-1", gate.promise);
+  const callsBefore = api.listCalls;
+  await act(async () => { refreshControl().props.onRefresh(); await settle(4); });
+  assert.equal(api.listCalls, callsBefore + 1);
+  assert.equal(refreshControl().props.refreshing, true);
+  assert.ok(findTaskRow(tree, firstTask.establishment), "rows stay on screen while refreshing");
+  assert.equal(tree.root.findAll((node) => node.type === "ActivityIndicator").length, 0, "no full-screen spinner");
+  runtime.__holdTaskListByEmployee!.delete("employee-1");
+  await act(async () => { gate.resolve(); await settle(); });
+  assert.equal(refreshControl().props.refreshing, false);
+  assert.ok(findTaskRow(tree, firstTask.establishment));
+  await openFirstTask(tree);
+  assert.equal(refreshControl().props.enabled, false, "a task is not refreshed by pulling");
+  await act(async () => { runtime.__networkListener?.({ isConnected: false, isInternetReachable: false }); await settle(); });
   await act(async () => { tree.unmount(); });
 });

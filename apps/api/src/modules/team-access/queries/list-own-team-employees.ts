@@ -25,7 +25,7 @@ export async function listOwnTeamEmployees(pool: Pool, responsableAccountId: str
      FROM identity_teams team
      JOIN identity_accounts employee ON employee.team_id = team.id
      WHERE team.responsable_account_id = $1
-       AND employee.team_id = team.id AND employee.role = 'employe'
+       AND employee.team_id = team.id AND employee.role = 'employe' AND employee.deleted_at IS NULL
      ORDER BY employee.surname, employee.first_name, employee.id`,
     [responsableAccountId],
   );
