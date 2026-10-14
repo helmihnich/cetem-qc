@@ -234,6 +234,17 @@ td:has(.status-pill), td:has(.deactivated-recovery) { white-space: normal; min-w
 .row-disclosure > summary::after { content: ""; width: 6px; height: 6px; border-right: 1.5px solid currentColor; border-bottom: 1.5px solid currentColor; transform: translateY(-2px) rotate(45deg); transition: transform .15s; }
 .row-disclosure[open] > summary::after { transform: translateY(1px) rotate(-135deg); }
 .disclosure-attention { color: var(--warning) !important; border-color: #F8DDB8 !important; background: var(--warning-soft) !important; }
+.task-actions { flex-wrap: nowrap; }
+.row-menu-toggle { border: 1px solid var(--border-strong); background: var(--surface); color: var(--ink-2); font-size: 18px; line-height: 1; height: 32px; width: 32px; }
+.row-menu-toggle:hover, .row-menu[open] > .row-menu-toggle { background: var(--surface-muted); color: var(--ink); }
+.row-menu > summary::after { content: none; }
+.row-menu { position: relative; display: block; }
+.row-menu-panel { position: absolute; top: calc(100% + 6px); right: 0; z-index: 30; display: grid; justify-items: stretch; gap: 4px; width: 300px; padding: 6px; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface); box-shadow: var(--shadow-lg); white-space: normal; text-align: left; }
+.row-menu-panel > .text-button { justify-content: flex-start; width: 100%; padding: 9px 10px; border-radius: var(--radius-sm); text-align: left; }
+.row-menu-panel > .text-button:hover { background: var(--surface-muted); }
+.row-menu-panel .assignment-history { padding: 6px 10px; }
+.table-wrap:has(.row-menu[open]), .roster-card:has(.row-menu[open]) { overflow: visible; }
+.row-menu .row-menu-panel .deactivated-recovery { width: auto; padding: 0; border: 0; background: none; }
 .row-disclosure .deactivated-recovery { width: min(360px, 70vw); padding: 14px; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface-muted); }
 
 /* ---------- Status ---------- */

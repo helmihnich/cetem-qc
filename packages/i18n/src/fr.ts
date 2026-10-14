@@ -94,7 +94,7 @@ export const fr = {
     taskColumn: "Tâche",
     lastUpdatedShort: "Mise à jour",
     resolve: "Résoudre",
-    details: "Détails",
+    moreActions: "Plus d’actions",
     actionRequired: "Action requise",
     resolutionRequired: "Résolution requise",
     reassignAction: "Réaffecter la tâche",

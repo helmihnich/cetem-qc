@@ -5,6 +5,7 @@ import { taskListResponseSchema } from "@cetem-qc/api-client/v1";
 import type { TaskListResponse } from "@cetem-qc/api-client/v1";
 import { fr } from "@cetem-qc/i18n";
 import { AcceptedEvidencePanel } from "./accepted-evidence";
+import { loadHistoryList } from "./history";
 import { Icon, ShortId } from "./icons";
 import { TaskCreation } from "./task-creation";
 import { DeactivatedTaskRecovery } from "./task-recovery";
@@ -111,12 +112,19 @@ export function TaskListView(props: TaskListViewProps) {
               </span></td>
               <td className="date-cell" data-label={fr.tasks.lastUpdatedShort}><time dateTime={task.lastUpdatedAt}>{dateFormatter.format(new Date(task.lastUpdatedAt))}</time></td>
               <td className="task-actions-cell"><div className="task-actions">
-                {task.state === "submitted" && props.onViewEvidence && <button id={`evidence-button-${task.id}`} className="secondary-button compact-button" type="button" aria-expanded={props.evidenceTaskId === task.id} onClick={() => props.onViewEvidence?.(task.id)}>{fr.tasks.evidenceAction}</button>}
-                {canReplace(task) && <button className="secondary-button compact-button" type="button" aria-expanded={replacingTaskId === task.id} onClick={() => props.onReplace(task.id)}>{fr.tasks.replacementAction}</button>}
-                {hasRecoveryDetails(task) && <details className="row-disclosure">
-                  <summary className={needsAttention(task) ? "secondary-button compact-button disclosure-attention" : "secondary-button compact-button"}>{needsAttention(task) ? fr.tasks.resolve : fr.tasks.details}</summary>
-                  <DeactivatedTaskRecovery task={task} onChanged={props.onStale} showStatus={false} />
-                </details>}
+                {task.state === "submitted" && props.onViewEvidence && <button id={`evidence-button-${task.id}`} className="primary-button compact-button" type="button" aria-expanded={props.evidenceTaskId === task.id} onClick={() => props.onViewEvidence?.(task.id)}>{fr.tasks.evidenceAction}</button>}
+                {needsAttention(task)
+                  ? <details className="row-disclosure">
+                    <summary className="secondary-button compact-button disclosure-attention">{fr.tasks.resolve}</summary>
+                    <DeactivatedTaskRecovery task={task} onChanged={props.onStale} showStatus={false} />
+                  </details>
+                  : (canReplace(task) || hasRecoveryDetails(task)) && <details className="row-disclosure row-menu">
+                    <summary className="icon-button row-menu-toggle" aria-label={fr.tasks.moreActions} title={fr.tasks.moreActions}><span aria-hidden="true">⋯</span></summary>
+                    <div className="row-menu-panel">
+                      {canReplace(task) && <button className="text-button" type="button" aria-expanded={replacingTaskId === task.id} onClick={() => props.onReplace(task.id)}>{fr.tasks.replacementAction}</button>}
+                      {hasRecoveryDetails(task) && <DeactivatedTaskRecovery task={task} onChanged={props.onStale} showStatus={false} />}
+                    </div>
+                  </details>}
               </div></td>
             </tr>)}</tbody>
           </table></div>}
@@ -144,10 +152,12 @@ export function TaskList({ refreshKey }: { refreshKey?: number } = {}) {
     setError(false);
     setTasks([]);
     try {
-      const response = await fetch("/api/tasks", { cache: "no-store" });
+      const [response, history] = await Promise.all([fetch("/api/tasks", { cache: "no-store" }), loadHistoryList()]);
       if (!response.ok) throw new Error("task-list-request-failed");
       const result = taskListResponseSchema.parse(await response.json());
-      setTasks(result.tasks);
+      // A task with an official report is finished: it is read in the history, not worked on here.
+      const completed = new Set(history.kind === "ready" ? history.records.map((record) => record.taskId) : []);
+      setTasks(result.tasks.filter((task) => !completed.has(task.id)));
     } catch {
       setError(true);
     } finally {
@@ -157,6 +167,18 @@ export function TaskList({ refreshKey }: { refreshKey?: number } = {}) {
 
   // A change of `refreshKey` means a task or the team changed elsewhere on the page.
   useEffect(() => { void loadTasks(); }, [loadTasks, refreshKey]);
+  // The row « ⋯ » menu closes on a click outside it, on Escape, or once one of its actions is chosen.
+  useEffect(() => {
+    const closeMenus = (keep?: Element | null) => document.querySelectorAll<HTMLDetailsElement>(".row-menu[open]").forEach((menu) => { if (menu !== keep) menu.open = false; });
+    const onClick = (event: MouseEvent) => {
+      const target = event.target as Element;
+      closeMenus(target.closest(".row-menu-panel button") ? null : target.closest(".row-menu"));
+    };
+    const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") closeMenus(); };
+    document.addEventListener("click", onClick);
+    document.addEventListener("keydown", onKey);
+    return () => { document.removeEventListener("click", onClick); document.removeEventListener("keydown", onKey); };
+  }, []);
 
   return <TaskListView
     tasks={tasks} loading={loading} error={error} replacingTaskId={replacingTaskId} createdReplacementId={createdReplacementId}
