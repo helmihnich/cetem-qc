@@ -35,7 +35,7 @@ const render = (overrides: Partial<TaskListViewProps> = {}) => renderToStaticMar
 
 /** The table row of one task in the rendered markup. */
 const rowOf = (html: string, id: string) => {
-  const start = html.lastIndexOf("<tr>", html.indexOf(`<span class="visually-hidden">${id}</span>`));
+  const start = html.lastIndexOf("<tr", html.indexOf(`<span class="visually-hidden">${id}</span>`));
   return html.slice(start, html.indexOf("</tr>", start));
 };
 

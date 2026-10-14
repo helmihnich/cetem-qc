@@ -54,7 +54,14 @@ const STATE_FILTERS: Record<TaskFilterState, (task: TaskListItem) => boolean> = 
   attention: needsAttention,
 };
 
-const stateLabelOf = (task: TaskListItem) => task.state === "submitted" ? fr.tasks.submittedAccepted : fr.tasks.draft;
+/** The API appends « — Inactif » to a deactivated assignee; the table shows that as a badge instead. */
+const assigneeNameOf = (task: TaskListItem) => task.assigneeActive ? task.assignee : task.assignee.replace(/\s+—\s+Inactif$/, "");
+
+/** Recovery, lineage and assignment history live behind a row toggle so they never stretch the row. */
+const hasRecoveryDetails = (task: TaskListItem) => needsAttention(task) || (!task.assigneeActive && task.recoveryState === "recovered")
+  || task.assignmentHistory.length > 0 || task.recoverySource !== null;
+
+const stateLabelOf =(task: TaskListItem) => task.state === "submitted" ? fr.tasks.submittedAccepted : fr.tasks.draft;
 
 export function TaskListView(props: TaskListViewProps) {
   const { tasks, loading, error, replacingTaskId, createdReplacementId, onFilterChange } = props;
@@ -87,24 +94,30 @@ export function TaskListView(props: TaskListViewProps) {
         : tasks.length === 0 ? <div className="state-message empty-state" role="status"><span className="empty-icon" aria-hidden="true"><Icon name="inbox" size={22} /></span><p>{fr.tasks.listEmpty}</p></div>
           : visible.length === 0 ? <div className="state-message empty-state" role="status"><span className="empty-icon" aria-hidden="true"><Icon name="search" size={22} /></span><p>{fr.shell.filters.noMatch}</p><button className="text-button" type="button" onClick={resetFilter}>{fr.shell.filters.reset}</button></div>
           : <div className="table-wrap"><table className="responsive-table">
-            <thead><tr><th scope="col">{fr.tasks.taskId}</th><th scope="col">{fr.tasks.type}</th><th scope="col">{fr.tasks.establishment}</th><th scope="col">{fr.tasks.assignee}</th><th scope="col">{fr.tasks.state}</th><th scope="col">{fr.tasks.lastUpdated}</th><th scope="col"><span className="visually-hidden">{fr.tasks.actions}</span></th></tr></thead>
-            <tbody>{visible.map((task) => <tr key={task.id}>
-              <td className="task-id-cell" data-label={fr.tasks.taskId}><ShortId id={task.id} />
+            <thead><tr><th scope="col">{fr.tasks.taskColumn}</th><th scope="col">{fr.tasks.establishment}</th><th scope="col">{fr.tasks.assignee}</th><th scope="col">{fr.tasks.state}</th><th scope="col">{fr.tasks.lastUpdatedShort}</th><th scope="col"><span className="visually-hidden">{fr.tasks.actions}</span></th></tr></thead>
+            <tbody>{visible.map((task) => <tr key={task.id} className={needsAttention(task) ? "task-row task-row-attention" : "task-row"}>
+              <td className="task-id-cell" data-label={fr.tasks.taskColumn}><ShortId id={task.id} />
+                <span className="task-type">{fr.tasks.graphieMobile}</span>
                 {task.replacementOf !== null && <span className="task-lineage">{fr.tasks.replacementOf.replace("{taskId}", task.replacementOf)}</span>}
                 {task.replacedBy !== null && <span className="task-lineage">{fr.tasks.replacedBy.replace("{taskId}", task.replacedBy)}</span>}
               </td>
-              <td data-label={fr.tasks.type}>{fr.tasks.graphieMobile}</td><td className="wrap-cell" data-label={fr.tasks.establishment}>{task.establishment}</td><td className="name-cell wrap-cell" data-label={fr.tasks.assignee}>{task.assignee}</td>
-              <td data-label={fr.tasks.state}>{task.state === "submitted"
+              <td className="wrap-cell" data-label={fr.tasks.establishment}>{task.establishment}</td>
+              <td className="name-cell wrap-cell" data-label={fr.tasks.assignee}><span className="assignee">{assigneeNameOf(task)}{!task.assigneeActive && <span className="status-pill status-inactive assignee-flag">{fr.employees.inactive}</span>}</span></td>
+              <td data-label={fr.tasks.state}><span className="task-states">{task.state === "submitted"
                 ? <span className="status-pill task-state-submitted"><span className="status-dot" />{fr.tasks.submittedAccepted}</span>
                 : <span className="status-pill task-state-draft"><span className="status-dot" />{fr.tasks.draft}</span>}
                 {!task.assigneeActive && task.recoveryState === "resolution-required" && <span className="status-pill task-state-draft task-state-attention">{fr.tasks.resolutionRequired}</span>}
                 {!task.assigneeActive && task.state !== "submitted" && task.recoveryState !== "resolution-required" && task.recoveryState !== "recovered" && <span className="status-pill task-state-draft task-state-attention">{fr.tasks.actionRequired}</span>}
-              </td>
-              <td data-label={fr.tasks.lastUpdated}><time dateTime={task.lastUpdatedAt}>{dateFormatter.format(new Date(task.lastUpdatedAt))}</time></td>
-              <td className="task-actions-cell">{task.state === "submitted" && props.onViewEvidence && <button id={`evidence-button-${task.id}`} className="secondary-button" type="button" aria-expanded={props.evidenceTaskId === task.id} onClick={() => props.onViewEvidence?.(task.id)}>{fr.tasks.evidenceAction}</button>}
-                {canReplace(task) && <button className="secondary-button" type="button" aria-expanded={replacingTaskId === task.id} onClick={() => props.onReplace(task.id)}>{fr.tasks.replacementAction}</button>}
-                <DeactivatedTaskRecovery task={task} onChanged={props.onStale} />
-              </td>
+              </span></td>
+              <td className="date-cell" data-label={fr.tasks.lastUpdatedShort}><time dateTime={task.lastUpdatedAt}>{dateFormatter.format(new Date(task.lastUpdatedAt))}</time></td>
+              <td className="task-actions-cell"><div className="task-actions">
+                {task.state === "submitted" && props.onViewEvidence && <button id={`evidence-button-${task.id}`} className="secondary-button compact-button" type="button" aria-expanded={props.evidenceTaskId === task.id} onClick={() => props.onViewEvidence?.(task.id)}>{fr.tasks.evidenceAction}</button>}
+                {canReplace(task) && <button className="secondary-button compact-button" type="button" aria-expanded={replacingTaskId === task.id} onClick={() => props.onReplace(task.id)}>{fr.tasks.replacementAction}</button>}
+                {hasRecoveryDetails(task) && <details className="row-disclosure">
+                  <summary className={needsAttention(task) ? "secondary-button compact-button disclosure-attention" : "secondary-button compact-button"}>{needsAttention(task) ? fr.tasks.resolve : fr.tasks.details}</summary>
+                  <DeactivatedTaskRecovery task={task} onChanged={props.onStale} showStatus={false} />
+                </details>}
+              </div></td>
             </tr>)}</tbody>
           </table></div>}
     {replacingTaskId && <TaskCreation key={replacingTaskId} replacement={{
