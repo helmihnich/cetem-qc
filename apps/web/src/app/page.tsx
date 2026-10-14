@@ -23,6 +23,7 @@ const VIEWS: { id: View; icon: IconName; label: string; title: string; descripti
   { id: "team", icon: "team", label: fr.shell.nav.team, title: fr.employees.title, description: fr.shell.teamDescription },
 ];
 
+const menuStorageKey = "cetem_qc_menu_collapsed";
 const todayFormatter = new Intl.DateTimeFormat("fr-FR", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
 
 async function responseError(response: Response, fallback: string) {
@@ -68,6 +69,13 @@ export default function HomePage() {
   // Bumped after any creation or team change so the task list and the assignee choices reload without a page refresh.
   const [dataVersion, setDataVersion] = useState(0);
   const refreshData = useCallback(() => setDataVersion((version) => version + 1), []);
+  // Collapsing the menu to an icon rail frees the width for analysis; the choice is remembered per browser.
+  const [menuCollapsed, setMenuCollapsed] = useState(false);
+  useEffect(() => { try { setMenuCollapsed(localStorage.getItem(menuStorageKey) === "1"); } catch { /* storage unavailable */ } }, []);
+  const toggleMenu = () => setMenuCollapsed((collapsed) => {
+    try { localStorage.setItem(menuStorageKey, collapsed ? "0" : "1"); } catch { /* storage unavailable */ }
+    return !collapsed;
+  });
   const headingRef = useRef<HTMLHeadingElement>(null);
   const previousView = useRef<View>(view);
 
@@ -187,14 +195,14 @@ export default function HomePage() {
   const displayName = session.user.displayName || session.user.email;
 
   return (
-    <div className="app-shell">
+    <div className={menuCollapsed ? "app-shell sidebar-collapsed" : "app-shell"}>
       <a className="skip-link" href="#main-content">{fr.shell.skipToContent}</a>
-      <aside className="sidebar">
+      <aside className="sidebar" id="app-sidebar">
         <div className="sidebar-brand"><BrandMark /><span><strong>CETEM-QC</strong><small>{fr.shell.brandTagline}</small></span></div>
         <nav className="sidebar-nav" aria-label={fr.shell.navigation}>
           <p className="sidebar-label">{fr.shell.workspace}</p>
-          {VIEWS.map((item) => <button key={item.id} type="button" className="nav-item" aria-current={item.id === view ? "page" : undefined} onClick={() => setView(item.id)}>
-            <Icon name={item.icon} /><span>{item.label}</span>
+          {VIEWS.map((item) => <button key={item.id} type="button" className="nav-item" aria-current={item.id === view ? "page" : undefined} onClick={() => setView(item.id)} title={menuCollapsed ? item.label : undefined}>
+            <Icon name={item.icon} /><span className="nav-label">{item.label}</span>
             {item.id === "team" && employees.length > 0 && <span className="nav-count">{employees.length}</span>}
           </button>)}
         </nav>
@@ -207,7 +215,10 @@ export default function HomePage() {
 
       <div className="main-area">
         <header className="topbar">
+          <span className="topbar-start">
+            <button className="icon-button menu-toggle" type="button" onClick={toggleMenu} aria-controls="app-sidebar" aria-expanded={!menuCollapsed} aria-label={menuCollapsed ? fr.shell.expandMenu : fr.shell.collapseMenu} title={menuCollapsed ? fr.shell.expandMenu : fr.shell.collapseMenu}><Icon name="sidebar" /></button>
           <nav className="breadcrumb" aria-label="Fil d’Ariane"><span>{fr.shell.workspace}</span><span aria-hidden="true">/</span><strong>{current.label}</strong></nav>
+          </span>
           <span className="topbar-date">{todayFormatter.format(new Date())}</span>
         </header>
 

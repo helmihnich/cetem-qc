@@ -735,6 +735,8 @@ export const fr = {
     brandTagline: "Contrôle qualité",
     workspace: "Espace responsable",
     navigation: "Navigation principale",
+    collapseMenu: "Réduire le menu",
+    expandMenu: "Afficher le menu",
     roleResponsable: "Responsable",
     nav: {
       tasks: "Tâches",
