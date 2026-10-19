@@ -2870,7 +2870,8 @@ test("Story 7.2 R8 every task list row shows its derived lifecycle instead of a 
   assert.equal(resumable.findAll((node) => node.type === "Text" && node.children.join("") === pending).length, 1, "the resumable draft row shows the derived state");
   const cachedSecond = tree.root.findAll((node) => node.type === "Pressable" && node.findAll((child) => child.type === "Text" && child.children.join("") === secondTask.establishment).length > 0)
     .filter((node) => node.findAll((child) => child.type === "Text" && child.children.join("") === fr.employeeTasks.submitted).length > 0);
-  assert.equal(cachedSecond.length, 1, "the cached task row shows the derived state");
+  assert.equal(cachedSecond.length, 0, "online, the cached row does not duplicate the server row (which shows the derived state)");
+  assert.equal(tree.root.findAll((node) => node.type === "Pressable" && node.findAll((child) => child.type === "Text" && child.children.join("") === secondTask.establishment).length > 0).length, 1, "each task is listed once");
   assert.ok(allTexts(tree).every((text) => !text.includes("Dernier état serveur")));
   await act(async () => { tree.unmount(); });
 });

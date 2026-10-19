@@ -1545,7 +1545,8 @@ export default function App() {
                       </Pressable>)}
                     </View> : null}
                     {unavailableOfflineDrafts ? <Notice tone="info" role="summary">{fr.employeeTasks.offlineDraftPreserved}</Notice> : null}
-                    {cachedTasks.filter((item) => !localDrafts.some((draft) => draft.taskId === item.id)).map((item) => <Pressable key={item.id} accessibilityRole="button" onPress={() => void openCachedTask(item)} style={({ pressed }) => [styles.taskCard, pressed && styles.taskCardPressed]}>
+                    {/* Cached rows are the offline fallback: hidden while the server list loads, and online they skip tasks the server list already shows. */}
+                    {listState === "loading" ? null : cachedTasks.filter((item) => !localDrafts.some((draft) => draft.taskId === item.id) && !(isOnline && tasks.some((listed) => listed.id === item.id))).map((item) => <Pressable key={item.id} accessibilityRole="button" onPress={() => void openCachedTask(item)} style={({ pressed }) => [styles.taskCard, pressed && styles.taskCardPressed]}>
                       <View style={styles.taskIconTileNeutral}><DocumentGlyph tone="neutral" /></View>
                       <View style={styles.taskCopy}><Text style={styles.taskTitle} numberOfLines={2}>{item.establishment}</Text><TaskStateMeta state={taskSyncStateOf(item.id)}>{taskListStateLabel(taskSyncStateOf(item.id))}</TaskStateMeta></View>
                       <View style={styles.chevronCircle}><Text style={styles.chevron}>›</Text></View>
