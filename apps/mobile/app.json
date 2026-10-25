@@ -3,8 +3,16 @@
     "name": "CETEM-QC",
     "slug": "cetem-qc",
     "version": "1.0.0",
+    "sdkVersion": "58.0.0",
     "orientation": "default",
     "userInterfaceStyle": "automatic",
+    "ios": {
+      "bundleIdentifier": "com.cetem.qc"
+    },
+    "android": {
+      "package": "com.cetem.qc"
+    },
+    "androidStatusBar": { "barStyle": "light-content" },
     "plugins": [
       "expo-secure-store",
       [
@@ -13,6 +21,12 @@
           "useSQLCipher": true
         }
       ]
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "67cdf177-8569-4587-b29d-5912cdf6d648"
+      }
+    },
+    "owner": "helmi_hn"
   }
 }

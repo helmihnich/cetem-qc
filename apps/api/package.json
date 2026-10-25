@@ -7,6 +7,7 @@
     "typecheck": "tsc --noEmit",
     "db:migrate": "tsx --env-file-if-exists=../../.env src/db/migrate.ts",
     "bootstrap:responsable": "tsx --env-file-if-exists=../../.env src/scripts/bootstrap-responsable.ts",
+    "add:responsable": "tsx --env-file-if-exists=../../.env src/scripts/add-responsable.ts",
     "reset:responsable-password": "tsx --env-file-if-exists=../../.env src/scripts/reset-responsable-password.ts",
     "test": "node --import tsx --test \"src/**/*.test.ts\"",
     "test:calculations": "node --import tsx --test src/modules/calculations/calculations.test.ts"

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ComponentRef, type ReactNode } from "react";
-import { ActivityIndicator, AppState, BackHandler, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View, type StyleProp, type ViewStyle } from "react-native";
+import { ActivityIndicator, AppState, BackHandler, Platform, Pressable, RefreshControl, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View, type StyleProp, type ViewStyle } from "react-native";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 import { StatusBar } from "expo-status-bar";
 import { LinearGradient } from "expo-linear-gradient";
@@ -1429,7 +1429,8 @@ export default function App() {
   return (
     <SafeAreaProvider>
       <View style={styles.root}>
-        <StatusBar style="light" />
+        {/* RN's StatusBar calls NativeStatusBarManagerAndroid.setColor, which is gone under Android edge-to-edge. */}
+        {Platform.OS === "ios" ? <StatusBar style="light" /> : null}
         {signedIn ? (
           <LinearGradient colors={gradients.navy} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.appBar}>
             <SafeAreaView edges={["top", "left", "right"]} style={styles.appBarSafe}>
